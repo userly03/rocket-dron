@@ -1,0 +1,17 @@
+{
+  "nombre": "Ataque circular denso",
+  "descripcion": "100 drones en formación circular para prueba de cobertura HPM",
+  "formacion": "circular",
+  "cantidad": 100,
+  "hpm": {
+    "potencia": 50,
+    "direccion": 90,
+    "apertura_cono": 45,
+    "origen_x": 0,
+    "origen_y": 500
+  },
+  "campo": {
+    "width": 1000,
+    "height": 1000
+  }
+}

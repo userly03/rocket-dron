@@ -1,0 +1,17 @@
+{
+  "nombre": "Dispersión aleatoria",
+  "descripcion": "30 drones distribuidos aleatoriamente en el campo de batalla",
+  "formacion": "aleatoria",
+  "cantidad": 30,
+  "hpm": {
+    "potencia": 15,
+    "direccion": 180,
+    "apertura_cono": 20,
+    "origen_x": 500,
+    "origen_y": 500
+  },
+  "campo": {
+    "width": 1000,
+    "height": 1000
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "nombre": "Enjambre cuadrado básico",
+  "descripcion": "50 drones en formación cuadrada centrada en el campo",
+  "formacion": "cuadrada",
+  "cantidad": 50,
+  "hpm": {
+    "potencia": 25,
+    "direccion": 45,
+    "apertura_cono": 30,
+    "origen_x": 0,
+    "origen_y": 0
+  },
+  "campo": {
+    "width": 1000,
+    "height": 1000
+  }
+}

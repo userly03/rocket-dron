@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🛡️ Sistema de Guerra Electromagnética - HPM Simulator</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./js/vendor/three/three.module.js",
+        "three/addons/controls/OrbitControls.js": "./js/vendor/three/OrbitControls.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="demo-banner" class="demo-banner hidden" role="status">¡DEMO EN EJECUCIÓN!</div>
+
+  <div class="app">
+    <header class="header">
+      <div class="header-brand">
+        <span class="header-icon" aria-hidden="true">🛡️</span>
+        <div>
+          <h1>Sistema de Guerra Electromagnética</h1>
+          <p class="subtitle">HPM Simulator — Panel Táctico</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <div class="view-toggle" role="group" aria-label="Modo de visualización">
+          <button type="button" class="view-btn active" data-view="tactical" title="Vista 3D del campo de batalla">Táctico</button>
+          <button type="button" class="view-btn" data-view="physical" title="Superpone el mapa de calor de intensidad HPM sobre el terreno">Físico</button>
+          <button type="button" class="view-btn" data-view="spectrum" title="Muestra el espectro de frecuencia del pulso HPM">Espectro</button>
+        </div>
+        <div class="connection-status" id="connection-status">
+          <span class="status-dot status-disconnected"></span>
+          <span id="connection-label">Desconectado</span>
+        </div>
+      </div>
+    </header>
+
+    <section class="metrics-panel panel" aria-label="Métricas de simulación">
+      <h2 class="panel-title">📊 Métricas</h2>
+      <div class="metrics-grid">
+        <div class="metric-card" title="Cantidad total de drones en el enjambre actual"><span class="metric-label">Drones totales</span><span class="metric-value" id="metric-total">0</span></div>
+        <div class="metric-card" title="Drones activos o dañados, todavía en vuelo"><span class="metric-label">Drones activos</span><span class="metric-value metric-active" id="metric-active">0</span></div>
+        <div class="metric-card" title="Drones neutralizados por el HPM"><span class="metric-label">Neutralizados</span><span class="metric-value metric-neutralized" id="metric-neutralized">0</span></div>
+        <div class="metric-card" title="Porcentaje de drones neutralizados sobre el total"><span class="metric-label">Tasa de éxito</span><span class="metric-value" id="metric-success">0%</span></div>
+        <div class="metric-card" title="Tiempo simulado transcurrido (se acelera con el control de velocidad)"><span class="metric-label">Tiempo simulación</span><span class="metric-value" id="metric-time">0 s</span></div>
+        <div class="metric-card" title="Tiempo real desde el último disparo de cañón"><span class="metric-label">Último disparo</span><span class="metric-value" id="metric-last-fire">—</span></div>
+        <div class="metric-card" title="Misiles HPM actualmente en vuelo"><span class="metric-label">Misiles activos</span><span class="metric-value metric-missile" id="metric-missiles-active">0</span></div>
+        <div class="metric-card" title="Misiles HPM disponibles / capacidad total"><span class="metric-label">Munición HPM</span><span class="metric-value" id="metric-munition">—</span></div>
+        <div class="metric-card" title="Energía electromagnética total disparada en la sesión"><span class="metric-label">Energía acumulada</span><span class="metric-value metric-energy" id="metric-energy">0 MJ</span></div>
+        <div class="metric-card" title="Pico de potencia instantánea alcanzado por un pulso HPM"><span class="metric-label">Pico de potencia</span><span class="metric-value metric-peak" id="metric-peak">0 GW</span></div>
+      </div>
+    </section>
+
+    <main class="main-content">
+      <div class="map-column">
+        <section class="map-panel panel" aria-label="Mapa táctico">
+          <div class="map-header">
+            <h2 class="panel-title" id="map-title">🗺️ Mapa Táctico 3D</h2>
+            <div class="map-legend" id="map-legend">
+              <span class="legend-item"><span class="dot dot-active"></span> Activo</span>
+              <span class="legend-item"><span class="dot dot-damaged"></span> Dañado</span>
+              <span class="legend-item"><span class="dot dot-neutralized"></span> Neutralizado</span>
+              <span class="legend-item"><span class="dot dot-missile"></span> Misil HPM</span>
+            </div>
+            <button type="button" id="btn-camera-top" class="btn-camera" title="Restablece la cámara a vista superior (podés arrastrar para rotar libremente)">🎥 Vista superior</button>
+          </div>
+          <div class="canvas-wrapper">
+            <canvas id="tactical-map-3d" width="800" height="600" aria-label="Mapa 3D de drones"></canvas>
+            <div class="canvas-overlay">
+              <span id="sim-state-badge" class="sim-badge sim-stopped">DETENIDA</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="analytics-dashboard panel" id="analytics-dashboard">
+          <details class="collapsible" id="physics-panel">
+            <summary class="panel-title">⚛️ Modelo Físico <span class="collapsible-hint">avanzado</span></summary>
+            <div class="physics-formula" id="physics-formula">P = 1 - exp(-k · P · exp(-r²/2σ²))</div>
+            <div class="physics-grid">
+              <div class="physics-item"><span>Potencia</span><strong id="phys-power">— kW</strong></div>
+              <div class="physics-item"><span>Frecuencia</span><strong id="phys-freq">— GHz</strong></div>
+              <div class="physics-item"><span>Radio efecto</span><strong id="phys-radius">— m</strong></div>
+              <div class="physics-item"><span>k acoplamiento</span><strong id="phys-k">0.42</strong></div>
+              <div class="physics-item"><span>E pulso</span><strong id="phys-energy">— mJ</strong></div>
+              <div class="physics-item"><span>E/Área</span><strong id="phys-intensity">— W/m²</strong></div>
+            </div>
+          </details>
+          <details class="collapsible" open>
+            <summary class="panel-title">📈 Analítica</summary>
+            <div class="charts-grid">
+              <div class="chart-box">
+                <h3>Efectividad vs distancia</h3>
+                <canvas id="chart-effectiveness" height="140"></canvas>
+              </div>
+              <div class="chart-box">
+                <h3>Mapa calor HPM</h3>
+                <canvas id="chart-heatmap" height="140"></canvas>
+              </div>
+              <div class="chart-box chart-box-spectrum hidden" id="spectrum-box">
+                <h3>Espectro de frecuencias</h3>
+                <canvas id="chart-spectrum" height="140"></canvas>
+              </div>
+              <div class="chart-box chart-box-shots">
+                <h3>Historial de disparos</h3>
+                <ul id="shot-history-list" class="shot-history-list"></ul>
+              </div>
+            </div>
+          </details>
+        </section>
+      </div>
+
+      <aside class="control-panel panel" aria-label="Panel de control">
+        <div class="control-section">
+          <h2 class="panel-title">⚙️ Cañón HPM <span class="panel-tag">Estático</span></h2>
+          <div class="control-group">
+            <label for="power-slider">Potencia HPM <span class="control-value"><span id="power-value">45</span> kW</span></label>
+            <input type="range" id="power-slider" min="10" max="100" value="45" step="1">
+          </div>
+          <div class="control-group">
+            <label for="direction-slider">Dirección HPM <span class="control-value"><span id="direction-value">45</span>°</span></label>
+            <input type="range" id="direction-slider" min="0" max="359" value="45" step="1">
+          </div>
+          <button type="button" id="btn-fire" class="btn btn-fire" title="Dispara el cañón HPM estático en la dirección y potencia configuradas">🔥 DISPARAR CAÑÓN</button>
+        </div>
+        <div class="control-section control-section-missile">
+          <h2 class="panel-title">🚀 Misil HPM <span class="panel-tag">CHAMP</span></h2>
+          <div class="munition-display"><span>Munición:</span><strong id="munition-display">10 / 10</strong></div>
+          <div class="control-group">
+            <label for="missile-power-slider">Potencia misil <span class="control-value"><span id="missile-power-value">50</span> kW</span></label>
+            <input type="range" id="missile-power-slider" min="10" max="100" value="50" step="1">
+          </div>
+          <div class="control-group">
+            <label for="missile-radius-slider">Radio de efecto <span class="control-value"><span id="missile-radius-value">100</span> m</span></label>
+            <input type="range" id="missile-radius-slider" min="50" max="200" value="100" step="5">
+          </div>
+          <div class="control-group">
+            <label for="missile-angle-slider">Dirección <span class="control-value"><span id="missile-angle-value">auto</span></span></label>
+            <input type="range" id="missile-angle-slider" min="0" max="359" value="45" step="1">
+            <label class="checkbox-label"><input type="checkbox" id="missile-auto-aim" checked> Auto-apuntar al enjambre</label>
+          </div>
+          <div class="button-group missile-buttons">
+            <button type="button" id="btn-launch-missile" class="btn btn-missile" title="Lanza un misil HPM de efecto de área hacia el enjambre">🚀 LANZAR MISIL</button>
+            <button type="button" id="btn-reload-missile" class="btn btn-reload" title="Recarga 5 misiles HPM">🔄 RECARGAR</button>
+          </div>
+        </div>
+        <div class="control-section">
+          <h2 class="panel-title">🎯 Simulación</h2>
+          <div class="control-group">
+            <label for="formation-select">Formación</label>
+            <select id="formation-select">
+              <option value="cuadrada">Cuadrada</option>
+              <option value="circular" selected>Circular</option>
+              <option value="aleatoria">Aleatoria</option>
+              <option value="linea">Línea</option>
+              <option value="v">V</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <label for="swarm-size">Cantidad de drones</label>
+            <input type="number" id="swarm-size" min="5" max="500" value="50">
+          </div>
+          <div class="control-group">
+            <label for="scenario-select">Escenario predefinido</label>
+            <select id="scenario-select">
+              <option value="">— Ninguno —</option>
+            </select>
+          </div>
+          <div class="button-group">
+            <button type="button" id="btn-load-scenario" class="btn btn-reset" title="Aplica la formación, cantidad y parámetros HPM del escenario elegido">📂 CARGAR ESCENARIO</button>
+          </div>
+          <div class="control-group">
+            <label>Velocidad de simulación</label>
+            <div class="speed-control" role="group" aria-label="Velocidad de simulación">
+              <button type="button" class="speed-btn active" data-speed="1" title="Velocidad normal">1x</button>
+              <button type="button" class="speed-btn" data-speed="2" title="El doble de velocidad">2x</button>
+              <button type="button" class="speed-btn" data-speed="5" title="Cinco veces más rápido">5x</button>
+              <button type="button" class="speed-btn" data-speed="10" title="Diez veces más rápido">10x</button>
+            </div>
+          </div>
+          <div class="button-group">
+            <button type="button" id="btn-start" class="btn btn-start" title="Arranca o reanuda el bucle de simulación">▶️ INICIAR SIMULACIÓN</button>
+            <button type="button" id="btn-stop" class="btn btn-stop" title="Pausa el bucle de simulación sin perder el estado">⏹️ PAUSAR SIMULACIÓN</button>
+            <button type="button" id="btn-reset" class="btn btn-reset" title="Vuelve al estado inicial: drones, misiles y métricas en cero">♻️ REINICIAR</button>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <section class="logs-panel panel" aria-label="Registro de eventos">
+      <h2 class="panel-title">📋 Registro de Eventos</h2>
+      <ul id="log-list" class="log-list" role="log" aria-live="polite"></ul>
+    </section>
+  </div>
+
+  <script type="module" src="js/render3d.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/websocket.js"></script>
+  <script src="js/script.js"></script>
+</body>
+</html>
