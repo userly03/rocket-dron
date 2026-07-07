@@ -32,13 +32,37 @@ simulador-ew/
 
 ## Modelo HPM
 
-Basado en el paper [arXiv:2602.08477](https://arxiv.org/abs/2602.08477), la probabilidad de neutralización sigue:
+Hay dos modelos de probabilidad de neutralización, seleccionables con `HPM_MODEL`:
 
-```
-P = 1 - exp(-k · potencia / distancia²)
-```
+- **`friis` (por defecto)** — física real: densidad de potencia en espacio libre
+  (ecuación de Friis, `S = P·G/4πr²`) → campo eléctrico (`E = √(S·377)`) →
+  sigmoide sobre un umbral de susceptibilidad. Calibrado numéricamente contra
+  los datos publicados en [arXiv:2602.08477](https://arxiv.org/abs/2602.08477)
+  ("A Multi-physics Simulation Framework for High-power Microwave
+  Counter-unmanned Aerial System Design and Performance Evaluation").
+- **`legacy`** — exponencial ad-hoc, `P = 1 - exp(-k · potencia / distancia²)`,
+  con atenuación angular en los bordes del cono. Se conserva por compatibilidad;
+  *no* está basada en el paper (una versión previa de este README lo atribuía
+  incorrectamente — ver auditoría en `docs/FISICA_Y_MATEMATICA.md`).
 
-Con atenuación angular en los bordes del cono de efecto (menor eficacia fuera del eje central). El misil HPM (estilo CHAMP) usa la misma fórmula pero como efecto de área circular sin atenuación angular.
+El cañón (cono direccional) y el misil (efecto de área circular) usan
+umbrales de calibración **distintos** dentro del modelo `friis`, porque son
+arquetipos de antena distintos (plato de alta ganancia vs. radiador de área).
+El desarrollo completo — de dónde sale cada constante, qué está verificado
+contra literatura real y qué es una aproximación de diseño — está en
+[`docs/FISICA_Y_MATEMATICA.md`](docs/FISICA_Y_MATEMATICA.md). Para el
+panorama real de la tecnología (programas militares activos, comparación
+con láser/jamming/cinético, mercado, investigación académica), ver
+[`docs/ESTADO_DEL_ARTE_HPM.md`](docs/ESTADO_DEL_ARTE_HPM.md). Para la
+arquitectura completa de este proyecto, todas las fórmulas en un solo
+lugar, qué puede y no puede derribar (con números), qué falta para ser una
+investigación completa, y una sección sobre aplicación en el contexto del
+Perú, ver [`docs/PROYECTO_Y_CAPACIDADES.md`](docs/PROYECTO_Y_CAPACIDADES.md).
+Si algún término técnico no queda claro, [`docs/GLOSARIO.md`](docs/GLOSARIO.md)
+explica cada concepto (electromagnetismo, probabilidad, guiado, drones) en
+lenguaje simple. Si necesitás explicar el proyecto de cero (para una
+exposición), [`docs/EXPLICACION_PARA_EXPOSICION.md`](docs/EXPLICACION_PARA_EXPOSICION.md)
+lo recorre en orden, paso a paso, sin asumir conocimiento previo.
 
 > **Calibración de `HPM_K_CONSTANT`**: el default es `250` (no el `0.015` de versiones anteriores). Con `0.015`, la probabilidad de neutralización a las distancias típicas del campo (500–900 m) era prácticamente nula — un misil detonando justo en su distancia de diseño (80 m) tenía ~0.01% de chance de derribo. Con `250`: un misil dentro de su radio de efecto (100 m default) neutraliza con 71–100% de probabilidad según la distancia al centro de la detonación, y el cañón estático (más débil, pensado para rango corto o potencia alta) neutraliza ocasionalmente a distancia y de forma consistente si se dispara de cerca o a máxima potencia. Es un valor de configuración, no un cambio a la fórmula del modelo.
 
@@ -85,14 +109,20 @@ Edita `.env`:
 | `FIELD_WIDTH` / `FIELD_HEIGHT` | Dimensiones del campo (m) | 1000 / 1000 |
 | `HPM_DEFAULT_POWER` | Potencia del cañón HPM (kW) | 25 |
 | `HPM_DEFAULT_ANGLE` | Dirección inicial del cañón (°) | 45 |
-| `HPM_CONE_APERTURE` | Apertura del cono de efecto (°) | 30 |
-| `HPM_K_CONSTANT` | Constante del modelo exponencial | 0.015 |
-| `HPM_ORIGIN_X` / `HPM_ORIGIN_Y` | Posición del cañón HPM | 0 / 0 |
-| `HPM_FREQUENCY_GHZ`, `HPM_COUPLING_K`, `HPM_PULSE_DURATION_NS`, `HPM_BEAM_SIGMA` | Parámetros del panel físico/analíticas | 2.45, 0.42, 100, 50 |
+| `HPM_CONE_APERTURE` | Apertura del cono de efecto (°) — 15° ≈ 20.6 dBi, del orden de un plato real | 15 |
+| `HPM_K_CONSTANT` | Constante del modelo exponencial `legacy` | 250 |
+| `HPM_MODEL` | `friis` (física real) o `legacy` (exponencial ad-hoc) | `friis` |
+| `HPM_E_THRESHOLD_V_M` / `HPM_SIGMOID_STEEPNESS` | Umbral de susceptibilidad (V/m) y pendiente de la sigmoide del **cañón**, ajustados contra arXiv:2602.08477 | 500 / 0.0075 |
+| `HPM_MISSILE_E_THRESHOLD_V_M` / `HPM_MISSILE_SIGMOID_STEEPNESS` | Ídem para el **misil** (arquetipo de área, no plato) | 30 / 0.15 |
+| `HPM_ORIGIN_X` / `HPM_ORIGIN_Y` / `HPM_ORIGIN_Z` | Posición del cañón HPM | 0 / 0 / 8 |
+| `HPM_FREQUENCY_GHZ`, `HPM_COUPLING_K`, `HPM_PULSE_DURATION_NS`, `HPM_BEAM_SIGMA` | Parámetros del panel físico/analíticas (modelo gaussiano de referencia, no el `friis`/`legacy` de arriba) | 2.45, 0.42, 100, 50 |
 | `MISSILE_SPEED` | Velocidad del misil HPM (m/s) | 400 |
 | `MISSILE_DEFAULT_POWER` / `MISSILE_DEFAULT_RADIUS` | Potencia/radio de efecto por defecto | 50 / 100 |
 | `MISSILE_MUNITION_TOTAL` | Munición máxima | 10 |
 | `MISSILE_DETONATION_DISTANCE` | Distancia de detonación óptima (m) | 80 |
+| `MISSILE_MAX_TURN_RATE_DEG_S` / `MISSILE_PN_GAIN` | Guiado por navegación proporcional: límite de giro (°/s) y ganancia N | 180 / 4.0 |
+| `DRONE_ALTITUD_MIN` / `DRONE_ALTITUD_MAX` | Rango de altitud de crucero de los drones (m) | 40 / 160 |
+| `MISSILE_LAUNCH_ALTITUDE_M` / `MISSILE_CRUISE_ALTITUDE_M` | Perfil de vuelo del misil (m) | 5 / 220 |
 | `AUTO_DEMO_ENABLED` | Autoarranque de demo al cargar el panel | `true` |
 | `DEMO_FORMATION`, `DEMO_SWARM_SIZE`, `DEMO_MISSILE_DELAY_S` | Parámetros de la demo automática | `circular`, 50, 3 |
 
@@ -116,7 +146,7 @@ Panel táctico (frontend): servilo como archivos estáticos, por ejemplo:
 
 ```bash
 cd frontend
-python3 -m http.server 5500
+python3 -m http.server 5501
 ```
 
 y abrí `http://localhost:5500/index.html` (el frontend asume el backend en `localhost:8000`).

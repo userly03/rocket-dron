@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from src.config import HPM_CONE_APERTURE, HPM_DEFAULT_ANGLE, HPM_DEFAULT_POWER
+from src.config import HPM_CONE_APERTURE, HPM_DEFAULT_ANGLE, HPM_DEFAULT_POWER, HPM_ORIGIN_Z
 from src.engine.hpm_engine import compute_target_parameters
 from src.models.drone import Drone, DroneEstado
+from src.utils.helpers import distance
 
 
 @dataclass
@@ -23,6 +24,7 @@ class HPMWeapon:
     apertura_cono: float = HPM_CONE_APERTURE
     origen_x: float = 0.0
     origen_y: float = 0.0
+    origen_z: float = HPM_ORIGIN_Z
     disparos: int = field(default=0, init=False)
 
     def disparar(self, drones: list[Drone]) -> list[dict]:
@@ -45,6 +47,8 @@ class HPMWeapon:
                 self.direccion,
                 drone.x,
                 drone.y,
+                origin_z=self.origen_z,
+                target_z=drone.z,
             )
 
             if abs(angulo_offset) > self.apertura_cono / 2.0:
@@ -61,7 +65,10 @@ class HPMWeapon:
                 {
                     "drone_id": drone.id,
                     "distancia": round(distancia, 2),
+                    "distancia_horizontal": round(distance(self.origen_x, self.origen_y, drone.x, drone.y), 2),
+                    "delta_altitud": round(drone.z - self.origen_z, 2),
                     "angulo_offset": round(angulo_offset, 2),
+                    "probabilidad": round(drone.ultima_probabilidad, 4),
                     "neutralizado": neutralizado,
                     "estado": drone.estado.value,
                     "salud": round(drone.salud, 2),
@@ -90,5 +97,6 @@ class HPMWeapon:
             "apertura_cono": self.apertura_cono,
             "origen_x": self.origen_x,
             "origen_y": self.origen_y,
+            "origen_z": self.origen_z,
             "disparos": self.disparos,
         }

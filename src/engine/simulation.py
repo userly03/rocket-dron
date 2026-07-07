@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 import time
 from collections import deque
@@ -15,15 +16,20 @@ from src.config import (
     FIELD_WIDTH,
     HPM_ORIGIN_X,
     HPM_ORIGIN_Y,
+    HPM_ORIGIN_Z,
     SIMULATION_FPS,
     SWARM_SIZE,
 )
 from src.engine.analytics import PhysicsAnalytics
+from src.engine.validation import log_shot
 from src.models.hpm_weapon import HPMWeapon
 from src.models.hpm_missile import MissileEstado
 from src.models.hpm_system import HPMissileSystem
+from src.models.jammer import Jammer
 from src.models.swarm import FormacionTipo, Swarm
 from src.utils.helpers import drone_to_dict
+
+validacion_logger = logging.getLogger("simulador.validacion")
 
 
 class SimulationState(str, Enum):
@@ -41,6 +47,7 @@ class SimulationEngine:
     swarm: Swarm = field(default_factory=Swarm)
     hpm: HPMWeapon = field(default_factory=HPMWeapon)
     missile_system: HPMissileSystem = field(default_factory=HPMissileSystem)
+    jammer: Jammer = field(default_factory=Jammer)
     analytics: PhysicsAnalytics = field(default_factory=PhysicsAnalytics)
     estado: SimulationState = SimulationState.DETENIDA
     tiempo: float = 0.0
@@ -60,6 +67,9 @@ class SimulationEngine:
     def __post_init__(self) -> None:
         self.hpm.origen_x = HPM_ORIGIN_X
         self.hpm.origen_y = HPM_ORIGIN_Y
+        self.jammer.origen_x = HPM_ORIGIN_X
+        self.jammer.origen_y = HPM_ORIGIN_Y
+        self.jammer.origen_z = HPM_ORIGIN_Z
         self.swarm.inicializar_formacion(FormacionTipo.CUADRADA.value, self.swarm_size)
         self._log("simulacion_inicializada", {"drones": self.swarm_size})
 
@@ -107,6 +117,7 @@ class SimulationEngine:
                 "conteo_estados": self.swarm.contar_por_estado(),
                 "hpm": self.hpm.to_dict(),
                 "missiles": self.missile_system.get_status(),
+                "jammer": self.jammer.to_dict(),
                 "analytics": self.analytics.to_snapshot(
                     self.hpm.to_dict(),
                     self.missile_system.misiles,
@@ -186,11 +197,39 @@ class SimulationEngine:
             )
             self.hpm.disparos = 0
             self.missile_system.reset()
+            self.jammer.detener()
             self.analytics.reset()
             self.estado = SimulationState.DETENIDA
 
         self._log("simulacion_reiniciada")
         return {"message": "Simulación reiniciada", "estado": self.estado.value}
+
+    def start_jamming(
+        self,
+        direccion: float,
+        potencia: float | None = None,
+        apertura_cono: float | None = None,
+    ) -> dict[str, Any]:
+        """Activa el jammer de comunicaciones (arma continua, no un pulso único)."""
+        with self._lock:
+            self.jammer.iniciar(direccion, potencia, apertura_cono)
+            self._ensure_thread_running()
+
+        self._log(
+            "jamming_iniciado",
+            {
+                "direccion": self.jammer.direccion,
+                "potencia": self.jammer.potencia,
+                "apertura_cono": self.jammer.apertura_cono,
+            },
+        )
+        return {"message": "Jamming activado", "jammer": self.jammer.to_dict()}
+
+    def stop_jamming(self) -> dict[str, Any]:
+        with self._lock:
+            self.jammer.detener()
+        self._log("jamming_detenido")
+        return {"message": "Jamming desactivado", "jammer": self.jammer.to_dict()}
 
     def fire(
         self,
@@ -219,7 +258,21 @@ class SimulationEngine:
                 "afectados": len(eventos),
                 "neutralizados": sum(1 for e in eventos if e["neutralizado"]),
                 "shot_id": shot["id"],
+                "impactos": [
+                    {"drone_id": e["drone_id"], "neutralizado": e["neutralizado"]}
+                    for e in eventos
+                ],
             },
+        )
+        log_shot(
+            "CAÑÓN HPM",
+            {
+                "tiempo": self.tiempo,
+                "potencia_kw": self.hpm.potencia,
+                "direccion": round(self.hpm.direccion, 1),
+                "apertura_cono": self.hpm.apertura_cono,
+            },
+            eventos,
         )
 
         snapshot = self._build_snapshot()
@@ -250,6 +303,7 @@ class SimulationEngine:
         angulo: float | None = None,
         potencia: float | None = None,
         radio: float | None = None,
+        guiado: bool = True,
     ) -> dict[str, Any]:
         """Lanza un misil HPM hacia el enjambre."""
         with self._lock:
@@ -260,6 +314,7 @@ class SimulationEngine:
                 potencia=potencia,
                 radio=radio,
                 drones=self.swarm.drones,
+                guiado=guiado,
             )
 
         if result.get("success"):
@@ -273,6 +328,7 @@ class SimulationEngine:
                     "angulo": result["misil"]["angulo"],
                     "potencia": result["misil"]["potencia_hpm"],
                     "radio": result["misil"]["radio_efecto"],
+                    "guiado": result["misil"]["guiado"],
                     "municion_restante": result["municion_restante"],
                 },
             )
@@ -302,6 +358,22 @@ class SimulationEngine:
         )
         return result
 
+    def _process_jamming_events(self, eventos: list[dict]) -> None:
+        interferidos = [e["drone_id"] for e in eventos if e["tipo"] == "dron_interferido"]
+        recuperados = [e["drone_id"] for e in eventos if e["tipo"] == "dron_recuperado"]
+        if interferidos:
+            self._log("dron_interferido", {"drones": interferidos})
+            validacion_logger.info(
+                "--- JAMMING — t=%.2fs --- drones interferidos (enlace perdido): %s",
+                self.tiempo, interferidos,
+            )
+        if recuperados:
+            self._log("dron_recuperado", {"drones": recuperados})
+            validacion_logger.info(
+                "--- JAMMING — t=%.2fs --- drones recuperaron enlace: %s",
+                self.tiempo, recuperados,
+            )
+
     def _process_missile_events(self, eventos: list[dict]) -> None:
         for evento in eventos:
             if evento["tipo"] == "misil_detonado":
@@ -322,7 +394,20 @@ class SimulationEngine:
                         "potencia_hpm": evento["potencia_hpm"],
                         "neutralizados": evento["neutralizados"],
                         "afectados": len(evento["impactos"]),
+                        "impactos": [
+                            {"drone_id": i["drone_id"], "neutralizado": i["neutralizado"]}
+                            for i in evento["impactos"]
+                        ],
                     },
+                )
+                log_shot(
+                    f"MISIL HPM {evento['misil_id']}",
+                    {
+                        "tiempo": self.tiempo,
+                        "potencia_kw": evento["potencia_hpm"],
+                        "radio_efecto": evento["radio_efecto"],
+                    },
+                    evento["impactos"],
                 )
             elif evento["tipo"] == "misil_destruido":
                 self._log(
@@ -331,6 +416,14 @@ class SimulationEngine:
                         "misil_id": evento["misil_id"],
                         "razon": evento["razon"],
                     },
+                )
+                validacion_logger.warning(
+                    "[VALIDACIÓN] ⚠ misil %s destruido sin detonar (%s) — salió del "
+                    "campo persiguiendo al objetivo sin alcanzar la distancia de "
+                    "detonación; revisar MISSILE_MAX_TURN_RATE_DEG_S/MISSILE_PN_GAIN "
+                    "si esto se repite con frecuencia",
+                    evento["misil_id"],
+                    evento["razon"],
                 )
 
     def run_demo(self) -> dict[str, Any]:
@@ -403,11 +496,15 @@ class SimulationEngine:
                 with self._lock:
                     sim_dt = dt * self.time_scale
                     self.swarm.actualizar(sim_dt)
+                    eventos_jamming = self.jammer.actualizar(self.swarm.drones)
                     eventos_misil = self.missile_system.actualizar_misiles(
                         self.swarm.drones, sim_dt
                     )
                     self.tiempo += sim_dt
                     self.tick += 1
+
+                if eventos_jamming:
+                    self._process_jamming_events(eventos_jamming)
 
                 if eventos_misil:
                     self._process_missile_events(eventos_misil)

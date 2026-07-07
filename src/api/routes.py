@@ -33,10 +33,17 @@ class MissileLaunchRequest(BaseModel):
     angulo: float | None = Field(default=None, ge=0, lt=360, description="Dirección de vuelo en grados")
     potencia: float | None = Field(default=None, ge=10, le=100, description="Potencia HPM en kW")
     radio: float | None = Field(default=None, ge=50, le=200, description="Radio de efecto en metros")
+    guiado: bool = Field(default=True, description="Guiado por navegación proporcional en vuelo (False = balístico)")
 
 
 class MissileReloadRequest(BaseModel):
     cantidad: int = Field(ge=1, le=100, description="Cantidad de misiles a recargar")
+
+
+class JamStartRequest(BaseModel):
+    direccion: float = Field(ge=0, lt=360, description="Dirección del cono de jamming en grados")
+    potencia: float | None = Field(default=None, ge=0, description="Potencia del jammer en kW")
+    apertura_cono: float | None = Field(default=None, ge=1, le=180, description="Apertura del cono")
 
 
 class SpeedRequest(BaseModel):
@@ -125,6 +132,7 @@ def launch_missile(sim: SimulationDep, body: MissileLaunchRequest) -> dict:
         angulo=body.angulo,
         potencia=body.potencia,
         radio=body.radio,
+        guiado=body.guiado,
     )
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("message", "Error al lanzar"))
@@ -147,6 +155,18 @@ def get_missile_munition(sim: SimulationDep) -> dict:
 def reload_missiles(sim: SimulationDep, body: MissileReloadRequest) -> dict:
     """Recarga munición de misiles HPM."""
     return sim.reload_missiles(body.cantidad)
+
+
+@router.post("/jam/start")
+def start_jamming(sim: SimulationDep, body: JamStartRequest) -> dict:
+    """Activa el jammer de comunicaciones (arma continua de negación de enlace)."""
+    return sim.start_jamming(body.direccion, body.potencia, body.apertura_cono)
+
+
+@router.post("/jam/stop")
+def stop_jamming(sim: SimulationDep) -> dict:
+    """Desactiva el jammer de comunicaciones."""
+    return sim.stop_jamming()
 
 
 @router.get("/analytics")

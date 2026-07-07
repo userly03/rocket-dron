@@ -483,8 +483,11 @@ body.view-spectrum .chart-box-spectrum { display: block !important; }
 }
 
 .dot-active { background: var(--accent-green); box-shadow: 0 0 6px var(--accent-green); }
+.dot-hardened { background: var(--accent-cyan); box-shadow: 0 0 6px var(--accent-cyan); }
 .dot-damaged { background: var(--accent-yellow); box-shadow: 0 0 6px var(--accent-yellow); }
+.dot-jammed { background: var(--accent-purple); box-shadow: 0 0 6px var(--accent-purple); }
 .dot-neutralized { background: var(--accent-red); box-shadow: 0 0 6px var(--accent-red); }
+.dot-undetected { background: #2a4a2a; box-shadow: none; }
 .dot-missile { background: var(--accent-cyan); box-shadow: 0 0 6px var(--accent-cyan); }
 
 .metric-missile { color: var(--accent-cyan); }

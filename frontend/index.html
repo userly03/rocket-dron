@@ -62,8 +62,11 @@
             <h2 class="panel-title" id="map-title">🗺️ Mapa Táctico 3D</h2>
             <div class="map-legend" id="map-legend">
               <span class="legend-item"><span class="dot dot-active"></span> Activo</span>
+              <span class="legend-item"><span class="dot dot-hardened"></span> Blindado</span>
               <span class="legend-item"><span class="dot dot-damaged"></span> Dañado</span>
+              <span class="legend-item"><span class="dot dot-jammed"></span> Interferido</span>
               <span class="legend-item"><span class="dot dot-neutralized"></span> Neutralizado</span>
+              <span class="legend-item"><span class="dot dot-undetected"></span> No detectado</span>
               <span class="legend-item"><span class="dot dot-missile"></span> Misil HPM</span>
             </div>
             <button type="button" id="btn-camera-top" class="btn-camera" title="Restablece la cámara a vista superior (podés arrastrar para rotar libremente)">🎥 Vista superior</button>
@@ -141,10 +144,30 @@
             <label for="missile-angle-slider">Dirección <span class="control-value"><span id="missile-angle-value">auto</span></span></label>
             <input type="range" id="missile-angle-slider" min="0" max="359" value="45" step="1">
             <label class="checkbox-label"><input type="checkbox" id="missile-auto-aim" checked> Auto-apuntar al enjambre</label>
+            <label class="checkbox-label" title="Corrige el rumbo en vuelo persiguiendo al blanco (navegación proporcional). Si se desactiva, vuela balístico en línea recta."><input type="checkbox" id="missile-guiado" checked> Guiado en vuelo (persecución)</label>
           </div>
           <div class="button-group missile-buttons">
             <button type="button" id="btn-launch-missile" class="btn btn-missile" title="Lanza un misil HPM de efecto de área hacia el enjambre">🚀 LANZAR MISIL</button>
             <button type="button" id="btn-reload-missile" class="btn btn-reload" title="Recarga 5 misiles HPM">🔄 RECARGAR</button>
+          </div>
+        </div>
+        <div class="control-section">
+          <h2 class="panel-title">📡 Jamming <span class="panel-tag">Continuo</span></h2>
+          <div class="control-group">
+            <label for="jam-power-slider">Potencia jammer <span class="control-value"><span id="jam-power-value">80</span> kW</span></label>
+            <input type="range" id="jam-power-slider" min="1" max="100" value="80" step="1">
+          </div>
+          <div class="control-group">
+            <label for="jam-direction-slider">Dirección <span class="control-value"><span id="jam-direction-value">45</span>°</span></label>
+            <input type="range" id="jam-direction-slider" min="0" max="359" value="45" step="1">
+          </div>
+          <div class="control-group">
+            <label for="jam-aperture-slider">Apertura del cono <span class="control-value"><span id="jam-aperture-value">45</span>°</span></label>
+            <input type="range" id="jam-aperture-slider" min="5" max="180" value="45" step="5">
+          </div>
+          <div class="button-group">
+            <button type="button" id="btn-jam-start" class="btn btn-fire" title="Activa el jammer: niega el enlace de control a los drones dentro del cono, sin dañarlos físicamente">📡 ACTIVAR JAMMING</button>
+            <button type="button" id="btn-jam-stop" class="btn btn-reset" title="Desactiva el jammer">⏹️ DETENER JAMMING</button>
           </div>
         </div>
         <div class="control-section">

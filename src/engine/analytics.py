@@ -14,11 +14,13 @@ from src.config import (
     FIELD_WIDTH,
     HPM_BEAM_SIGMA,
     HPM_COUPLING_K,
+    HPM_E_THRESHOLD_V_M,
     HPM_FREQUENCY_GHZ,
     HPM_K_CONSTANT,
+    HPM_MODEL,
     HPM_PULSE_DURATION_NS,
 )
-from src.engine.hpm_engine import compute_target_parameters
+from src.engine.hpm_engine import compute_target_parameters, friis_diagnostics
 
 
 @dataclass
@@ -164,7 +166,8 @@ class PhysicsAnalytics:
         field_intensity = (potencia_kw * 1000.0) / area_m2 if area_m2 > 0 else 0.0
         prob_referencia = self.gaussian_neutralization_prob(potencia_kw, radio / 2)
 
-        return {
+        panel = {
+            "modelo_hpm": HPM_MODEL,
             "potencia_kw": potencia_kw,
             "frecuencia_ghz": self.frequency_ghz,
             "radio_efecto_m": round(radio, 2),
@@ -181,6 +184,20 @@ class PhysicsAnalytics:
             "total_energy_mj_display_unit": "MJ",
             "peak_power_gw": round(self.peak_power_gw, 6),
         }
+
+        if HPM_MODEL == "friis":
+            diag = friis_diagnostics(potencia_kw, distancia=radio / 2, apertura_cono=360.0)
+            panel.update(
+                {
+                    "formula": "S = P·G/(4πr²)  →  E = √(S·377)  →  P = sigmoide(E, E_umbral)",
+                    "ganancia_antena_dbi": round(10 * math.log10(max(diag["ganancia_antena"], 1e-9)), 2),
+                    "densidad_potencia_w_m2": diag["densidad_potencia_w_m2"],
+                    "campo_e_v_m": diag["campo_e_v_m"],
+                    "campo_e_umbral_v_m": HPM_E_THRESHOLD_V_M,
+                }
+            )
+
+        return panel
 
     def get_effectiveness_curve(self) -> list[dict]:
         curve = []

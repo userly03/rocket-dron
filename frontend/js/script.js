@@ -45,6 +45,15 @@
     missileAngleSlider: document.getElementById("missile-angle-slider"),
     missileAngleValue: document.getElementById("missile-angle-value"),
     missileAutoAim: document.getElementById("missile-auto-aim"),
+    missileGuiado: document.getElementById("missile-guiado"),
+    jamPowerSlider: document.getElementById("jam-power-slider"),
+    jamPowerValue: document.getElementById("jam-power-value"),
+    jamDirectionSlider: document.getElementById("jam-direction-slider"),
+    jamDirectionValue: document.getElementById("jam-direction-value"),
+    jamApertureSlider: document.getElementById("jam-aperture-slider"),
+    jamApertureValue: document.getElementById("jam-aperture-value"),
+    btnJamStart: document.getElementById("btn-jam-start"),
+    btnJamStop: document.getElementById("btn-jam-stop"),
     formationSelect: document.getElementById("formation-select"),
     swarmSize: document.getElementById("swarm-size"),
     scenarioSelect: document.getElementById("scenario-select"),
@@ -170,10 +179,17 @@
       case "hpm_disparo":
         state.lastFireWallTime = Date.now();
         window.Render3D?.triggerCannonPulse(state.hpm.origen_x, state.hpm.origen_y);
+        window.Render3D?.flashHits(d.impactos);
         return { msg: `Cañón — ${d.potencia}kW @ ${Math.round(d.direccion)}° (${d.neutralizados} neutralizados)`, type: "fire" };
       case "misil_lanzado": return { msg: `Misil ${d.misil_id} lanzado (${d.municion_restante} restantes)`, type: "missile" };
-      case "misil_detonado": return { msg: `Detonación EMP — ${d.neutralizados}/${d.afectados} soft-kill`, type: "missile" };
+      case "misil_detonado":
+        window.Render3D?.flashHits(d.impactos);
+        return { msg: `Detonación EMP — ${d.neutralizados}/${d.afectados} soft-kill`, type: "missile" };
       case "misil_recarga": return { msg: `Recarga +${d.añadido} misiles`, type: "info" };
+      case "jamming_iniciado": return { msg: `Jamming activado — ${d.potencia}kW @ ${Math.round(d.direccion)}°`, type: "fire" };
+      case "jamming_detenido": return { msg: "Jamming desactivado", type: "stop" };
+      case "dron_interferido": return { msg: `Enlace perdido — drones: ${d.drones.join(", ")}`, type: "missile" };
+      case "dron_recuperado": return { msg: `Enlace recuperado — drones: ${d.drones.join(", ")}`, type: "info" };
       default: return null;
     }
   }
@@ -327,6 +343,9 @@
     });
     ui.missilePowerSlider.addEventListener("input", () => { ui.missilePowerValue.textContent = ui.missilePowerSlider.value; });
     ui.missileRadiusSlider.addEventListener("input", () => { ui.missileRadiusValue.textContent = ui.missileRadiusSlider.value; });
+    ui.jamPowerSlider.addEventListener("input", () => { ui.jamPowerValue.textContent = ui.jamPowerSlider.value; });
+    ui.jamDirectionSlider.addEventListener("input", () => { ui.jamDirectionValue.textContent = ui.jamDirectionSlider.value; });
+    ui.jamApertureSlider.addEventListener("input", () => { ui.jamApertureValue.textContent = ui.jamApertureSlider.value; });
     ui.missileAngleSlider.addEventListener("input", updateMissileAngleUI);
     ui.missileAutoAim.addEventListener("change", updateMissileAngleUI);
 
@@ -381,12 +400,18 @@
     ui.btnLaunchMissile.addEventListener("click", async () => {
       ui.btnLaunchMissile.disabled = true;
       try {
-        const body = { x: state.hpm.origen_x, y: state.hpm.origen_y, potencia: +ui.missilePowerSlider.value, radio: +ui.missileRadiusSlider.value };
+        const body = {
+          x: state.hpm.origen_x,
+          y: state.hpm.origen_y,
+          potencia: +ui.missilePowerSlider.value,
+          radio: +ui.missileRadiusSlider.value,
+          guiado: ui.missileGuiado.checked,
+        };
         if (!ui.missileAutoAim.checked) body.angulo = +ui.missileAngleSlider.value;
         const r = await api("/api/missile/launch", { method: "POST", body: JSON.stringify(body) });
         state.munition.restante = r.municion_restante;
         updateMunitionUI();
-        addLog("Misil HPM lanzado", "missile");
+        addLog(`Misil HPM lanzado${body.guiado ? " (guiado)" : " (balístico)"}`, "missile");
         wsClient?.requestStatus();
       } catch (e) { addLog(e.message, "error"); }
       finally { updateMunitionUI(); }
@@ -398,6 +423,27 @@
         state.munition.restante = r.municion_restante;
         updateMunitionUI();
         addLog(r.message, "info");
+      } catch (e) { addLog(e.message, "error"); }
+    });
+
+    ui.btnJamStart.addEventListener("click", async () => {
+      try {
+        const body = {
+          direccion: +ui.jamDirectionSlider.value,
+          potencia: +ui.jamPowerSlider.value,
+          apertura_cono: +ui.jamApertureSlider.value,
+        };
+        const r = await api("/api/jam/start", { method: "POST", body: JSON.stringify(body) });
+        addLog(r.message, "fire");
+        wsClient?.requestStatus();
+      } catch (e) { addLog(e.message, "error"); }
+    });
+
+    ui.btnJamStop.addEventListener("click", async () => {
+      try {
+        const r = await api("/api/jam/stop", { method: "POST" });
+        addLog(r.message, "stop");
+        wsClient?.requestStatus();
       } catch (e) { addLog(e.message, "error"); }
     });
 

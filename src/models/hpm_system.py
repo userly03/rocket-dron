@@ -46,28 +46,39 @@ class HPMissileSystem:
         potencia: float | None = None,
         radio: float | None = None,
         drones: list[Drone] | None = None,
+        guiado: bool = True,
     ) -> dict:
         """
         Crea y lanza un misil HPM hacia el enjambre.
 
-        Si no se indica ángulo, apunta automáticamente al centroide del enjambre.
+        Si no se indica ángulo, apunta automáticamente al centroide del
+        enjambre **detectado por radar** (drones fuera de alcance/probabilidad
+        de detección no entran en el cálculo — no se puede apuntar a lo que
+        no se ve). Si ``guiado`` es True (por defecto), el misil fija
+        ("lock-on") el dron detectado más cercano al centroide como objetivo
+        y corrige su rumbo en vuelo (ver ``HPMissile._aplicar_guiado``); si es
+        False, vuela balístico con el ángulo inicial fijo.
         """
         if self.municion_restante <= 0:
             return {"success": False, "message": "Sin munición disponible"}
 
         potencia_hpm = potencia if potencia is not None else MISSILE_DEFAULT_POWER
         radio_efecto = radio if radio is not None else MISSILE_DEFAULT_RADIUS
+        activos = [d for d in (drones or []) if d.estado != DroneEstado.NEUTRALIZADO]
+        detectados = [d for d in activos if d.detectado]
 
-        if angulo is None and drones:
-            activos = [d for d in drones if d.estado != DroneEstado.NEUTRALIZADO]
-            if activos:
-                cx = sum(d.x for d in activos) / len(activos)
-                cy = sum(d.y for d in activos) / len(activos)
+        if angulo is None:
+            if detectados:
+                cx = sum(d.x for d in detectados) / len(detectados)
+                cy = sum(d.y for d in detectados) / len(detectados)
                 angulo = target_angle_from_origin(x, y, cx, cy)
             else:
                 angulo = 0.0
-        elif angulo is None:
-            angulo = 0.0
+
+        target_id = None
+        if detectados:
+            objetivo = min(detectados, key=lambda d: distance(x, y, d.x, d.y))
+            target_id = objetivo.id
 
         dist_objetivo = self._estimar_distancia_objetivo(x, y, angulo, drones or [])
         tiempo_detonacion = dist_objetivo / MISSILE_SPEED + 5.0
@@ -82,6 +93,8 @@ class HPMissileSystem:
             velocidad=MISSILE_SPEED,
             tiempo_detonacion=tiempo_detonacion,
             detonacion_distancia=MISSILE_DETONATION_DISTANCE,
+            guiado=guiado,
+            target_id=target_id,
         )
 
         self.misiles.append(misil)
@@ -116,7 +129,7 @@ class HPMissileSystem:
             if misil.estado == MissileEstado.DESTRUIDO:
                 continue
 
-            misil.mover(dt)
+            misil.mover(dt, drones)
 
             if self._fuera_de_campo(misil):
                 misil.estado = MissileEstado.DESTRUIDO

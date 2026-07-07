@@ -33,6 +33,13 @@ class TestDrone:
         neutralizado = drone.recibir_daño(potencia=100, distancia=5, angulo_offset=0)
         assert neutralizado or drone.salud < 100
 
+    def test_dron_blindado_resiste_mas_que_estandar(self):
+        estandar = Drone(0, x=10, y=0, blindaje="estandar", e_threshold_mult=1.0)
+        blindado = Drone(1, x=10, y=0, blindaje="blindado", e_threshold_mult=2.5)
+        estandar.recibir_daño(potencia=30, distancia=50, angulo_offset=0)
+        blindado.recibir_daño(potencia=30, distancia=50, angulo_offset=0)
+        assert blindado.ultima_probabilidad < estandar.ultima_probabilidad
+
 
 class TestHPMEngine:
     def test_probabilidad_decrece_con_distancia(self):
@@ -108,6 +115,151 @@ class TestSwarm:
             swarm.drones[0].x != x_inicial or swarm.drones[0].y != y_inicial
         )
         assert moved
+
+
+class TestFlocking:
+    def test_dron_sin_vecinos_mantiene_rumbo(self):
+        from src.engine.flocking import compute_headings
+
+        drones = [Drone(0, x=0, y=0, angulo=90)]
+        angulos = compute_headings(drones, dt=0.1)
+        assert angulos[0] == pytest.approx(90.0)
+
+    def test_separacion_aumenta_distancia_entre_drones_cercanos(self):
+        from src.engine.flocking import compute_headings
+        from src.engine.physics import update_position
+        from src.utils.helpers import distance
+
+        # Dos drones muy cercanos: tras varios ticks, la separación debería
+        # aumentar la distancia entre ellos (el giro está limitado por
+        # tick, así que hace falta iterar, no un solo paso).
+        a = Drone(0, x=0, y=0, angulo=0)
+        b = Drone(1, x=5, y=0, angulo=180)
+        dist_inicial = distance(a.x, a.y, b.x, b.y)
+
+        dt = 0.1
+        for _ in range(30):
+            angulos = compute_headings([a, b], dt)
+            a.angulo, b.angulo = angulos[0], angulos[1]
+            a.x, a.y = update_position(a.x, a.y, a.velocidad, a.angulo, dt)
+            b.x, b.y = update_position(b.x, b.y, b.velocidad, b.angulo, dt)
+
+        dist_final = distance(a.x, a.y, b.x, b.y)
+        assert dist_final > dist_inicial
+
+    def test_dron_lejos_de_la_zona_de_patrulla_gira_hacia_ella(self):
+        """
+        Regresión: separación+alineación+cohesión puras no tienen ninguna
+        tendencia a quedarse en una zona — el enjambre podía migrar entero y
+        alejarse sin límite del alcance de radar/armas. La 4ta regla ("zona
+        de patrulla") debe hacer que un dron muy alejado del centro de
+        formación gire de vuelta hacia él.
+        """
+        from src.engine.flocking import compute_headings
+        from src.config import BOIDS_HOME_RADIUS
+
+        home_x, home_y = 500.0, 500.0
+        # Bien lejos del centro, apuntando en dirección opuesta (alejándose).
+        drone = Drone(0, x=home_x + BOIDS_HOME_RADIUS * 3, y=home_y, angulo=0)
+        angulos = compute_headings([drone], dt=0.5, home_x=home_x, home_y=home_y)
+        # Girando desde 0° (alejándose en +x) hacia el centro (que está en -x
+        # desde su posición) el nuevo rumbo debe acercarse a 180°.
+        assert angulos[0] != pytest.approx(0.0)
+
+    def test_dron_dentro_de_la_zona_de_patrulla_no_es_forzado(self):
+        from src.engine.flocking import compute_headings
+
+        home_x, home_y = 500.0, 500.0
+        drone = Drone(0, x=home_x + 10, y=home_y, angulo=45)
+        angulos = compute_headings([drone], dt=0.5, home_x=home_x, home_y=home_y)
+        assert angulos[0] == pytest.approx(45.0)
+
+    def test_alineacion_atrae_rumbo_hacia_vecinos(self):
+        from src.engine.flocking import compute_headings
+
+        # Un dron con rumbo distinto rodeado de vecinos alineados a 90°
+        # debería empezar a girar hacia 90° (no seguir en línea recta a 0°).
+        objetivo = Drone(0, x=500, y=500, angulo=0)
+        vecinos = [Drone(i, x=500 + i, y=500, angulo=90) for i in range(1, 6)]
+        angulos = compute_headings([objetivo] + vecinos, dt=0.5)
+        # No debería quedar exactamente en 0° (algo de giro hacia el rumbo vecino).
+        assert angulos[0] != pytest.approx(0.0)
+
+
+class TestRadar:
+    def test_probabilidad_deteccion_decrece_con_distancia(self):
+        from src.engine.radar_engine import detection_probability, radar_received_power_w, wavelength_m
+
+        wl = wavelength_m(2.45)
+        pr_cerca = radar_received_power_w(10, 10 ** (25 / 10), wl, 0.02, 200)
+        pr_lejos = radar_received_power_w(10, 10 ** (25 / 10), wl, 0.02, 1500)
+        p_cerca = detection_probability(pr_cerca, 1e-13)
+        p_lejos = detection_probability(pr_lejos, 1e-13)
+        assert p_cerca > p_lejos
+
+    def test_evaluar_deteccion_cerca_vs_lejos(self):
+        from src.engine.radar_engine import evaluar_deteccion
+
+        detectado_cerca, _ = evaluar_deteccion(100, 10, 25, 2.45, 0.02, 1e-13)
+        detectado_lejos, _ = evaluar_deteccion(3000, 10, 25, 2.45, 0.02, 1e-13)
+        assert detectado_cerca is True
+        assert detectado_lejos is False
+
+    def test_dron_recien_creado_esta_detectado_por_defecto(self):
+        # Evita que drones construidos directamente (fuera de Swarm) queden
+        # indetectables por omisión, rompiendo el auto-apuntado existente.
+        drone = Drone(0, x=100, y=100)
+        assert drone.detectado is True
+
+
+class TestJammer:
+    def test_jammer_inactivo_no_interfiere(self):
+        from src.models.jammer import Jammer
+
+        jammer = Jammer()  # activo=False por defecto
+        drone = Drone(0, x=50, y=0, z=0)
+        eventos = jammer.actualizar([drone])
+        assert eventos == []
+        assert drone.estado == DroneEstado.ACTIVO
+
+    def test_jammer_interfiere_dron_en_cono_y_lo_congela(self):
+        from src.models.jammer import Jammer
+
+        jammer = Jammer()
+        jammer.iniciar(direccion=0, potencia=50, apertura_cono=45)
+        drone = Drone(0, x=30, y=0, z=0, velocidad=10, angulo=90)
+
+        eventos = jammer.actualizar([drone])
+        assert any(e["tipo"] == "dron_interferido" for e in eventos)
+        assert drone.estado == DroneEstado.INTERFERIDO
+
+        x_antes = drone.x
+        drone.mover(dt=1.0)
+        assert drone.x == x_antes  # congelado: no responde a control
+
+    def test_jammer_fuera_del_cono_no_interfiere(self):
+        from src.models.jammer import Jammer
+
+        jammer = Jammer()
+        jammer.iniciar(direccion=0, potencia=50, apertura_cono=20)
+        drone = Drone(0, x=0, y=30, z=0)  # a 90° del eje del cono
+        eventos = jammer.actualizar([drone])
+        assert eventos == []
+        assert drone.estado == DroneEstado.ACTIVO
+
+    def test_dron_recupera_enlace_al_detener_jammer(self):
+        from src.models.jammer import Jammer
+
+        jammer = Jammer()
+        jammer.iniciar(direccion=0, potencia=50, apertura_cono=45)
+        drone = Drone(0, x=30, y=0, z=0)
+        jammer.actualizar([drone])
+        assert drone.estado == DroneEstado.INTERFERIDO
+
+        jammer.detener()
+        eventos = jammer.actualizar([drone])
+        assert any(e["tipo"] == "dron_recuperado" for e in eventos)
+        assert drone.estado == DroneEstado.ACTIVO
 
 
 class TestPhysics:

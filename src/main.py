@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -11,10 +12,26 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.routes import router as api_router
 from src.api.websocket import attach_simulation_listener, router as ws_router
-from src.config import CORS_ORIGINS, HOST, PORT, SWARM_SIZE
+from src.config import CORS_ORIGINS, HOST, PORT, SIM_LOG_LEVEL, SWARM_SIZE
 from src.engine.simulation import SimulationEngine
 
 simulation: SimulationEngine | None = None
+
+
+def _configure_validation_logging() -> None:
+    """Logger de validación física — imprime en la terminal los números de
+    cada disparo/detonación (distancia, campo E, probabilidad...) y cualquier
+    inconsistencia detectada, para validar y pulir el modelo con evidencia."""
+    logger = logging.getLogger("simulador.validacion")
+    logger.setLevel(SIM_LOG_LEVEL)
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", "%H:%M:%S"))
+        logger.addHandler(handler)
+    logger.propagate = False
+
+
+_configure_validation_logging()
 
 
 @asynccontextmanager
@@ -73,6 +90,8 @@ def root() -> dict:
             "missile_status": "GET /api/missile/status",
             "missile_munition": "GET /api/missile/munition",
             "missile_reload": "POST /api/missile/reload",
+            "jam_start": "POST /api/jam/start",
+            "jam_stop": "POST /api/jam/stop",
             "analytics": "GET /api/analytics",
             "scenarios": "GET /api/scenarios",
             "scenario_load": "POST /api/scenarios/{scenario_id}/load",
