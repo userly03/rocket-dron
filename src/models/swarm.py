@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from enum import Enum
 import math
-import random
 
 import numpy as np
+from numpy.random import Generator
 
 from src.config import (
     BOIDS_ENABLED,
@@ -16,11 +16,11 @@ from src.config import (
     DRONE_HARDENED_THRESHOLD_MULT,
     FIELD_HEIGHT,
     FIELD_WIDTH,
-    HPM_FREQUENCY_GHZ,
     HPM_ORIGIN_X,
     HPM_ORIGIN_Y,
     HPM_ORIGIN_Z,
     RADAR_ANTENNA_GAIN_DBI,
+    RADAR_FREQUENCY_GHZ,
     RADAR_NOISE_FLOOR_W,
     RADAR_RCS_M2,
     RADAR_TX_POWER_W,
@@ -30,6 +30,7 @@ from src.engine.physics import check_boundary_collision, reflect_angle
 from src.engine.radar_engine import evaluar_deteccion
 from src.models.drone import Drone, DroneEstado
 from src.utils.helpers import distance3d
+from src.utils.reproducibilidad import rng as global_rng
 
 
 class FormacionTipo(str, Enum):
@@ -52,6 +53,7 @@ class Swarm:
         formacion: FormacionTipo | str = FormacionTipo.CUADRADA,
         centro_x: float | None = None,
         centro_y: float | None = None,
+        rng: Generator | None = None,
     ) -> None:
         self.drones: list[Drone] = []
         self.formacion = (
@@ -61,6 +63,17 @@ class Swarm:
         )
         self.centro_x = centro_x if centro_x is not None else FIELD_WIDTH / 2
         self.centro_y = centro_y if centro_y is not None else FIELD_HEIGHT / 2
+
+        # RNG por instancia (P0-B): None conserva el comportamiento previo
+        # (generador global de src.utils.reproducibilidad) — necesario para
+        # que un experimento Monte Carlo pueda darle a cada réplica su propio
+        # generador aislado sin afectar a la simulación interactiva ni a
+        # otras réplicas corriendo en paralelo. Ver ``self._rng()``.
+        self.rng = rng
+
+    def _rng(self) -> Generator:
+        """Generador de esta instancia, o el global si no se inyectó ninguno."""
+        return self.rng if self.rng is not None else global_rng()
 
     def inicializar_formacion(self, tipo: str, cantidad: int) -> None:
         """Crea drones según el patrón de formación indicado."""
@@ -78,14 +91,12 @@ class Swarm:
         else:
             self._crear_formacion_aleatoria(cantidad)
 
-    @staticmethod
-    def _altitud_aleatoria() -> float:
-        return float(np.random.uniform(DRONE_ALTITUD_MIN, DRONE_ALTITUD_MAX))
+    def _altitud_aleatoria(self) -> float:
+        return float(self._rng().uniform(DRONE_ALTITUD_MIN, DRONE_ALTITUD_MAX))
 
-    @staticmethod
-    def _blindaje_aleatorio() -> tuple[str, float]:
+    def _blindaje_aleatorio(self) -> tuple[str, float]:
         """Sortea si el dron es 'blindado' (umbral de susceptibilidad más alto)."""
-        if np.random.random() < DRONE_HARDENED_FRACTION:
+        if self._rng().random() < DRONE_HARDENED_FRACTION:
             return "blindado", DRONE_HARDENED_THRESHOLD_MULT
         return "estandar", 1.0
 
@@ -103,11 +114,12 @@ class Swarm:
                 drone_id=i,
                 x=inicio_x + col * espaciado,
                 y=inicio_y + fila * espaciado,
-                velocidad=float(np.random.uniform(VELOCIDAD_MIN, VELOCIDAD_MAX)),
-                angulo=float(np.random.uniform(0, 360)),
+                velocidad=float(self._rng().uniform(VELOCIDAD_MIN, VELOCIDAD_MAX)),
+                angulo=float(self._rng().uniform(0, 360)),
                 z=self._altitud_aleatoria(),
                 blindaje=blindaje,
                 e_threshold_mult=mult,
+                rng=self.rng,
             )
             self.drones.append(drone)
 
@@ -133,11 +145,12 @@ class Swarm:
                 drone_id=i,
                 x=x,
                 y=y,
-                velocidad=float(np.random.uniform(VELOCIDAD_MIN, VELOCIDAD_MAX)),
+                velocidad=float(self._rng().uniform(VELOCIDAD_MIN, VELOCIDAD_MAX)),
                 angulo=float(np.degrees(angulo + math.pi / 2) % 360),
                 z=z,
                 blindaje=blindaje,
                 e_threshold_mult=mult,
+                rng=self.rng,
             )
             self.drones.append(drone)
 
@@ -147,13 +160,14 @@ class Swarm:
             blindaje, mult = self._blindaje_aleatorio()
             drone = Drone(
                 drone_id=i,
-                x=random.uniform(margen, FIELD_WIDTH - margen),
-                y=random.uniform(margen, FIELD_HEIGHT - margen),
-                velocidad=float(np.random.uniform(VELOCIDAD_MIN, VELOCIDAD_MAX)),
-                angulo=float(np.random.uniform(0, 360)),
+                x=self._rng().uniform(margen, FIELD_WIDTH - margen),
+                y=self._rng().uniform(margen, FIELD_HEIGHT - margen),
+                velocidad=float(self._rng().uniform(VELOCIDAD_MIN, VELOCIDAD_MAX)),
+                angulo=float(self._rng().uniform(0, 360)),
                 z=self._altitud_aleatoria(),
                 blindaje=blindaje,
                 e_threshold_mult=mult,
+                rng=self.rng,
             )
             self.drones.append(drone)
 
@@ -171,11 +185,12 @@ class Swarm:
                 drone_id=i,
                 x=inicio_x + i * espaciado,
                 y=self.centro_y,
-                velocidad=float(np.random.uniform(VELOCIDAD_MIN, VELOCIDAD_MAX)),
-                angulo=float(rumbo + np.random.uniform(-15, 15)),
+                velocidad=float(self._rng().uniform(VELOCIDAD_MIN, VELOCIDAD_MAX)),
+                angulo=float(rumbo + self._rng().uniform(-15, 15)),
                 z=DRONE_ALTITUD_MIN + rango_z * frac,
                 blindaje=blindaje,
                 e_threshold_mult=mult,
+                rng=self.rng,
             )
             self.drones.append(drone)
 
@@ -201,11 +216,12 @@ class Swarm:
                 drone_id=i,
                 x=x,
                 y=y,
-                velocidad=float(np.random.uniform(VELOCIDAD_MIN, VELOCIDAD_MAX)),
-                angulo=float(rumbo + np.random.uniform(-10, 10)),
+                velocidad=float(self._rng().uniform(VELOCIDAD_MIN, VELOCIDAD_MAX)),
+                angulo=float(rumbo + self._rng().uniform(-10, 10)),
                 z=DRONE_ALTITUD_MIN + rango_z * frac,
                 blindaje=blindaje,
                 e_threshold_mult=mult,
+                rng=self.rng,
             )
             self.drones.append(drone)
 
@@ -240,7 +256,7 @@ class Swarm:
                 dist_radar,
                 RADAR_TX_POWER_W,
                 RADAR_ANTENNA_GAIN_DBI,
-                HPM_FREQUENCY_GHZ,
+                RADAR_FREQUENCY_GHZ,
                 RADAR_RCS_M2,
                 RADAR_NOISE_FLOOR_W,
             )

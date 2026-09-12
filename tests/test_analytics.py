@@ -2,6 +2,7 @@
 
 import pytest
 
+from src.config import HPM_K_CONSTANT
 from src.engine.analytics import PhysicsAnalytics
 
 
@@ -11,6 +12,33 @@ class TestPhysicsAnalytics:
         p_cerca = a.gaussian_neutralization_prob(50, 10)
         p_lejos = a.gaussian_neutralization_prob(50, 200)
         assert p_cerca > p_lejos
+
+    def test_panel_no_publica_gaussiana_fantasma(self):
+        """
+        P0-C: gaussian_neutralization_prob es solo para el heatmap — el panel
+        físico no debe publicar ``coupling_k`` ni ``probabilidad_referencia``
+        (un tercer modelo que no gobierna ninguna baja). Ver
+        docs/AUDITORIA_CHECKLIST.md §4.1.
+        """
+        a = PhysicsAnalytics()
+        panel = a.get_physics_panel(50)
+        assert "coupling_k" not in panel
+        assert "probabilidad_referencia" not in panel
+
+    def test_panel_formula_refleja_modelo_legacy_activo(self, monkeypatch):
+        """Con HPM_MODEL='legacy', 'formula' debe ser la del modelo legacy
+        (con HPM_K_CONSTANT, la k que ese modelo sí usa), no la gaussiana."""
+        monkeypatch.setattr("src.engine.analytics.HPM_MODEL", "legacy")
+        a = PhysicsAnalytics()
+        panel = a.get_physics_panel(50)
+        assert "exp(-k · potencia / d²)" in panel["formula"]
+        assert str(HPM_K_CONSTANT) in panel["formula"]
+
+    def test_panel_formula_refleja_modelo_friis_activo(self, monkeypatch):
+        monkeypatch.setattr("src.engine.analytics.HPM_MODEL", "friis")
+        a = PhysicsAnalytics()
+        panel = a.get_physics_panel(50)
+        assert "sigmoide" in panel["formula"]
 
     def test_record_cannon_shot(self):
         a = PhysicsAnalytics()

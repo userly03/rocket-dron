@@ -6,8 +6,10 @@ import uuid
 from enum import Enum
 
 import numpy as np
+from numpy.random import Generator
 
 from src.config import (
+    HPM_DUTY_CYCLE,
     HPM_K_CONSTANT,
     HPM_MODEL,
     MISSILE_CRUISE_ALTITUDE_M,
@@ -26,6 +28,7 @@ from src.engine.hpm_engine import (
 from src.engine.physics import update_position
 from src.models.drone import Drone, DroneEstado
 from src.utils.helpers import angle_difference, distance, distance3d
+from src.utils.reproducibilidad import rng as global_rng
 
 
 class MissileEstado(str, Enum):
@@ -82,6 +85,8 @@ class HPMissile:
         missile_id: str | None = None,
         guiado: bool = True,
         target_id: int | None = None,
+        duty_cycle: float = HPM_DUTY_CYCLE,
+        rng: Generator | None = None,
     ) -> None:
         self.id = missile_id or f"missile-{uuid.uuid4().hex[:8]}"
         self.x = x
@@ -90,6 +95,7 @@ class HPMissile:
         self.angulo = angulo % 360
         self.estado = MissileEstado.LANZADO
         self.potencia_hpm = potencia_hpm
+        self.duty_cycle = float(np.clip(duty_cycle, 1e-3, 1.0))
         self.radio_efecto = float(np.clip(radio_efecto, 50.0, 200.0))
         self.tiempo_detonacion = tiempo_detonacion or 30.0
         self.tiempo_vuelo = 0.0
@@ -106,6 +112,15 @@ class HPMissile:
 
         # Detonación por punto de máxima cercanía (ver debe_detonar).
         self._prev_min_dist: float | None = None
+
+        # RNG por instancia (P0-B): None conserva el generador global. El
+        # sistema de lanzamiento (``HPMissileSystem``) le pasa su propio
+        # generador a cada misil que crea, igual que ``Swarm`` a sus drones.
+        self.rng = rng
+
+    def _rng(self) -> Generator:
+        """Generador de esta instancia, o el global si no se inyectó ninguno."""
+        return self.rng if self.rng is not None else global_rng()
 
     def mover(self, dt: float, drones: list[Drone] | None = None) -> None:
         """
@@ -253,6 +268,9 @@ class HPMissile:
             probabilidad = calculate_area_neutralization_probability_friis(
                 potencia_kw=self.potencia_hpm,
                 distancia=distancia,
+                duty_cycle=self.duty_cycle,
+                cable_length_m=dron.cable_length_m,
+                polarization=dron.polarization,
             )
             # Blindaje: reducción proporcional en espacio de momios (ver
             # apply_hardening_odds) — NO desplazar el umbral E, eso colapsaba
@@ -291,7 +309,7 @@ class HPMissile:
             probabilidad = self.calcular_daño(drone, dist)
             neutralizado = False
 
-            if float(np.random.random()) < probabilidad:
+            if float(self._rng().random()) < probabilidad:
                 drone.estado = DroneEstado.NEUTRALIZADO
                 drone.salud = 0.0
                 drone.velocidad = 0.0
@@ -309,6 +327,12 @@ class HPMissile:
                     "distancia_horizontal": round(distance(self.x, self.y, drone.x, drone.y), 2),
                     "delta_altitud": round(drone.z - self.z, 2),
                     "probabilidad": round(probabilidad, 4),
+                    # Factor de amplitud acoplada del blanco (P2-04), igual
+                    # que en HPMWeapon.disparar() — ver ese comentario. Sin
+                    # esto, check_shot_invariants no puede distinguir "misma
+                    # distancia, distinto cableado/polarización" de una
+                    # verdadera violación de monotonía.
+                    "factor_acoplamiento": round(drone.factor_acoplamiento(), 4),
                     "neutralizado": neutralizado,
                     "estado": drone.estado.value,
                     "salud": round(drone.salud, 2),
@@ -370,6 +394,7 @@ class HPMissile:
             "angulo": round(self.angulo, 2),
             "estado": self.estado.value,
             "potencia_hpm": self.potencia_hpm,
+            "duty_cycle": self.duty_cycle,
             "radio_efecto": self.radio_efecto,
             "tiempo_detonacion": round(self.tiempo_detonacion, 3),
             "tiempo_vuelo": round(self.tiempo_vuelo, 3),

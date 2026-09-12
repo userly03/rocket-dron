@@ -8,6 +8,7 @@ from src.engine.simulation import SimulationEngine
 from src.models.drone import Drone, DroneEstado
 from src.models.hpm_missile import HPMissile, MissileEstado
 from src.models.hpm_system import HPMissileSystem
+from src.utils.reproducibilidad import seed_simulacion
 
 
 class TestAreaDamage:
@@ -35,7 +36,7 @@ class TestHPMissile:
         assert misil.calcular_daño(drone, 200) == 0.0
 
     def test_detonar_soft_kill(self):
-        np.random.seed(42)
+        seed_simulacion(42)
         misil = HPMissile(
             x=500, y=500, angulo=0, potencia_hpm=100, radio_efecto=200
         )
@@ -289,7 +290,7 @@ class TestHPMissileSystem:
         assert result["municion_restante"] == 8
 
     def test_actualizar_misiles_detona(self):
-        np.random.seed(0)
+        seed_simulacion(0)
         sistema = HPMissileSystem(municion_total=10, municion_restante=10)
         drones = [Drone(0, x=500, y=500)]
         sistema.lanzar(x=420, y=500, angulo=0, potencia=100, radio=150, drones=drones)

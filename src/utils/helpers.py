@@ -59,4 +59,8 @@ def drone_to_dict(drone: Drone) -> dict:
         "salud": round(drone.salud, 2),
         "blindaje": drone.blindaje,
         "detectado": drone.detectado,
+        "cable_length_m": round(drone.cable_length_m, 4),
+        "f_res_ghz": round(drone.frecuencia_resonancia_ghz(), 4),
+        "polarization": round(drone.polarization, 4),
+        "acoplamiento": round(drone.factor_acoplamiento(), 4),
     }

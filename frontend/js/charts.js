@@ -145,7 +145,6 @@
       set("phys-power", `${physics.potencia_kw} kW`);
       set("phys-freq", `${physics.frecuencia_ghz} GHz`);
       set("phys-radius", `${physics.radio_efecto_m} m`);
-      set("phys-k", physics.coupling_k);
       set("phys-energy", `${physics.energia_pulso_mj} mJ`);
       set("phys-intensity", `${physics.intensidad_campo_w_m2} W/m²`);
     },

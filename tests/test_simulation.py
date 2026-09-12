@@ -11,6 +11,7 @@ from src.engine.simulation import SimulationEngine, SimulationState
 from src.models.drone import Drone, DroneEstado
 from src.models.hpm_weapon import HPMWeapon
 from src.models.swarm import FormacionTipo, Swarm
+from src.utils.reproducibilidad import seed_simulacion
 
 
 class TestDrone:
@@ -28,7 +29,7 @@ class TestDrone:
         assert drone.y == 5
 
     def test_recibir_daño_cerca_alta_probabilidad(self):
-        np.random.seed(42)
+        seed_simulacion(42)
         drone = Drone(0, x=10, y=0)
         neutralizado = drone.recibir_daño(potencia=100, distancia=5, angulo_offset=0)
         assert neutralizado or drone.salud < 100
@@ -64,7 +65,7 @@ class TestHPMWeapon:
             Drone(0, x=100, y=0),
             Drone(1, x=100, y=200),
         ]
-        np.random.seed(0)
+        seed_simulacion(0)
         eventos = weapon.disparar(drones)
         assert len(eventos) >= 1
         assert eventos[0]["drone_id"] == 0

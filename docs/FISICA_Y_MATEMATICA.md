@@ -32,6 +32,8 @@ Se revisó cada fórmula del proyecto contra literatura real (ver
 | 5 | El efecto visual de detonación era un disco plano (2D) aunque el cálculo de daño ya era 3D (esfera). Inconsistencia entre lo calculado y lo mostrado. | Media (visual, no física) | **Corregido**: la detonación ahora se renderiza como esfera + rayos de descarga, coherente con la física esférica ya calculada. |
 | 6 | La tabla de configuración del README tenía datos obsoletos (`HPM_K_CONSTANT` listado como `0.015` en la tabla, pero `250` en el texto). | Baja | **Corregido**. |
 | 7 | El blindaje heterogéneo (§8.1) multiplicaba el umbral de campo E por 2.5× para simular drones "blindados" — pero al vivir ese umbral dentro de una sigmoide no lineal, la reducción real de probabilidad resultaba de **14× a 821×** según la distancia (no 2.5×), dejando a los drones blindados prácticamente invencibles en todo el rango de combate real (probabilidad ~0.003%-0.03% a 80-200m). | **Alta** (blindaje inutilizable) | **Corregido**: `apply_hardening_odds()` aplica la reducción en espacio de momios (`odds = p/(1-p)`, dividido por el factor) en vez de desplazar el umbral — da una reducción consistente de 1×-2.5× en todo el rango, no un colapso exponencial. Ver [§8.1](#81-blindaje-heterogéneo-srcmodelsdronepy-srcmodelsswarmpy). |
+| 8 | `PhysicsAnalytics.get_physics_panel` publicaba `probabilidad_referencia`, `formula` y `coupling_k` derivados de `gaussian_neutralization_prob` (`P = 1 - exp(-k·P·exp(-r²/2σ²))`) — un TERCER modelo que ni `friis` ni `legacy` usan para decidir bajas (`Drone.recibir_daño`/`HPMissile.calcular_daño` nunca lo llaman), pintado en el frontend (`charts.js`, `index.html`) como si fuera la física gobernante. Exactamente el defecto que esta misma tabla dice haber corregido en otros hallazgos. | **Alta** (número físico en pantalla que no gobierna nada) | **Corregido** (P0-C): `get_physics_panel` ya no publica `probabilidad_referencia` ni `coupling_k`; `formula` refleja siempre el modelo activo (`legacy`: `P = 1 - exp(-k·potencia/d²)` con `HPM_K_CONSTANT`, la k que ese modelo sí usa; `friis`: la cadena Friis→E→sigmoide ya correcta). `gaussian_neutralization_prob` se conserva, documentada como modelo de visualización exclusivo de `get_heatmap`. Frontend actualizado para no mostrar `coupling_k`. Auditoría §4.1. |
+| 9 | **La sigmoide de daño es logística en `E`, que tiene soporte en todo ℝ, pero el campo eléctrico es positivo — de ahí que `P(E=0) = 2.30%` (modelo agregado) y `3.30%` (OR-gate de 5 subsistemas).** Más allá de ~97 m más de la mitad de la probabilidad reportada es ese piso, y a 700 m —el rango de combate por defecto, con el enjambre circular a 500-900 m— el **90.7%** del número es artefacto. Afecta retroactivamente la lectura de la métrica de P1-A. Encontrado por el análisis de sensibilidad ([§3.8](#38-análisis-de-sensibilidad-global-morris--sobol)), no buscado. | **Alta** (todo el rango de combate por defecto está en zona de artefacto) | **Diagnosticado y corrección verificada, NO aplicada todavía** (ítem P1-F): la log-logística `P = 1/(1+(E₅₀/E)^b)` da `P(0)=0` exacto y ajusta los dos puntos publicados con residuo **0.0000 pp** (contra −1.92 pp del modelo actual) con los mismos 2 parámetros. Se registra como ítem propio porque **mueve la calibración**. Ver [§3.7](#37--el-piso-de-la-sigmoide-pe0--0). |
 
 **Lo que SÍ ya estaba bien** (verificado, no solo asumido):
 - `S = P·G/(4πr²)` — el término `4πr²` es literalmente el área de una esfera; la propagación ya era 3D en el cálculo (no en el render, ver hallazgo 5).
@@ -177,7 +179,420 @@ Diferencia esperable: mi aproximación de ganancia (26000/apertura²) no
 reproduce exactamente un plato parabólico real de 60cm, pero el orden de
 magnitud y la forma de la curva coinciden.
 
+**Nota (P1-D):** estos números ya no viven solo en esta tabla. `tests/
+test_calibracion.py` los recalcula contra la configuración actual del
+simulador en cada corrida (`src.engine.validation.verificar_calibracion`) y
+falla si la probabilidad a 20m o 40m se mueve más de ±0.5 puntos
+porcentuales respecto a los valores documentados arriba (43.6%/11.9%) — la
+brecha contra el paper (51.4%/13.1%) se verifica con tolerancia amplia, como
+información de contexto, no como criterio de aprobado/reprobado.
+
 ---
+
+### 3.5 Duración de pulso: la ley Wunsch-Bell por tramos
+
+**Categoría: aproximación de ingeniería** (categoría 2 de las tres de este
+documento). Justificación de la clasificación: la ley tiene origen académico
+real y verificable, y sus exponentes se derivan de un argumento físico
+concreto (cuánto alcanza a difundir el calor en la juntura durante el pulso).
+Pero los dos puntos de quiebre son órdenes de magnitud típicos para junturas
+de silicio, no medidas del hardware de ningún dron — por eso no es categoría 1
+(física establecida). Y no es categoría 3 (decisión de diseño) porque no se
+eligió para que la simulación sea jugable: se eligió porque es lo que dice la
+literatura de hardening de semiconductores.
+
+**Procedencia — y qué NO es.** Esta ley **no viene de arXiv:2602.08477.** Ese
+paper escala el campo pico con el duty cycle y no incorpora ningún escalado por
+duración de pulso (ver `REFERENCIA_PAPER_2602.08477.md` §6). Viene de:
+
+> Wunsch, D.C. & Bell, R.R. (1968), *"Determination of Threshold Failure Levels
+> of Semiconductor Diodes and Transistors Due to Pulse Voltages"*, IEEE
+> Transactions on Nuclear Science 15(6):244-259.
+
+El duty cycle sí es del paper; `g(τ)` es una extensión propia con cita propia.
+Mezclar las dos procedencias fue un defecto real del código anterior, que
+presentaba `g(τ)` dentro del bloque "calibrado contra el paper".
+
+**Los tres regímenes.** Wunsch-Bell da un umbral de **potencia absorbida**
+`P_fail(τ)`:
+
+| Régimen | Rango | `P_fail(τ)` | Mecanismo |
+|---|---|---|---|
+| Adiabático | `τ ≲ τ₁` (100 ns) | `∝ τ⁻¹` | El calor no difunde; la falla depende de la **energía** total |
+| Difusión térmica | `τ₁ ≲ τ ≲ τ₂` (100 ns–10 µs) | `∝ τ^(−1/2)` | El Wunsch-Bell clásico |
+| Estado estacionario | `τ ≳ τ₂` (10 µs) | `∝ τ⁰` | El calor difunde tan rápido como entra |
+
+**La conversión que hay que no saltarse.** La sigmoide de daño de este motor
+opera sobre el **campo E**, no sobre potencia. La potencia acoplada al blanco
+va como el cuadrado de la tensión inducida, y ésta es proporcional al campo
+incidente (`V_ind ∝ E`, `P ∝ V²/R`), de modo que `P_absorbida ∝ E²` y por lo
+tanto:
+
+```
+E_fail(τ) ∝ √(P_fail(τ))
+```
+
+Aplicado a los tres regímenes, y tomando `g` como el **inverso** del umbral
+(se sube el campo efectivo en vez de bajar `E₀`, para no repetir el error del
+hallazgo 7 de §1 — desplazar el umbral dentro de una sigmoide no lineal):
+
+```
+adiabático            g(τ) ∝ τ^(1/2)
+difusión térmica      g(τ) ∝ τ^(1/4)
+estado estacionario   g(τ) = const = (τ₂/τ₁)^(1/4)
+```
+
+**Continuidad.** Los tres tramos están anclados al mismo `τ₁`, así que empalman
+en valor por construcción:
+
+- en `τ₁`: `(τ₁/τ₁)^(1/2) = 1 = (τ₁/τ₁)^(1/4)` ✓
+- en `τ₂`: la rama de difusión vale `(τ₂/τ₁)^(1/4)`, que es literalmente la
+  constante del tramo estacionario ✓
+
+`g` es continua, no derivable en los quiebres — lo físicamente esperado en un
+cambio de régimen. Verificado numéricamente en
+`tests/test_duty_cycle.py::TestPulseCoupling::test_continuidad_en_los_quiebres_de_regimen`
+(salto medido: `< 1e-9`).
+
+**Normalización.** El resultado se divide por el crudo en `τ_ref`, de modo que
+`g(τ_ref) = 1` **exactamente** para cualquier configuración. Es un requisito
+duro: la calibración de §3.4 se hizo con `τ = τ_ref`. Verificado — con la ley
+nueva la calibración da 43.5634 % @ 20 m y 11.8737 % @ 40 m, idénticos a antes.
+
+#### 3.5.1 El defecto que esto corrigió (y por qué se veía bien)
+
+La versión anterior era `g(τ) = min(√(τ/τ_ref), 3.0)`. Dos defectos que **se
+cancelaban parcialmente entre sí**, que es lo que los hacía difíciles de ver:
+
+| # | Defecto | Efecto |
+|---|---|---|
+| 1 | Exponente `1/2` en el régimen de difusión: **una raíz de más**. Saltaba la conversión potencia→campo y aplicaba al campo el exponente que corresponde a la potencia. | El crédito crecía al doble de velocidad de lo que corresponde |
+| 2 | Tope `3.0`, número mágico sin justificación | Resulta que el **valor** estaba casi bien por casualidad: `(τ₂/τ₁)^(1/4) = 100^(1/4) ≈ 3.1623`. Pero la **saturación** ocurría a `τ ≈ 900 ns` (donde `√(τ/τ_ref)` llega a 3) en vez de a los 10 µs físicos |
+
+O sea: el techo correcto con el exponente incorrecto. Entre 100 ns y 900 ns el
+modelo sobreestimaba el crédito, y por encima de 900 ns lo subestimaba.
+
+#### 3.5.2 Criterio de aceptación: alcance de 90 % de baja
+
+El criterio de "done" original de este ítem era *"a igual energía total, un
+pulso corto de alto pico neutraliza a más distancia que CW"*. **No podía
+fallar**: el modelo define `pico = promedio/duty`, así que `duty↓ ⇒ E↑ ⇒ P↑`
+por álgebra, no por física. Se reemplazó por el contraste externo del paper
+(§5 de la referencia):
+
+| Modo | Paper | Simulador (medido) | Brecha |
+|---|---|---|---|
+| CW (25 kW) | ≈ 18 m | **11.74 m** | −35 % |
+| Pulsado (500 kW pico, 1 % duty) | ≈ 88 m | **52.50 m** | −40 % |
+| Cociente pulsado/CW | 4.89 | **4.47** | −8.6 % |
+
+**La brecha absoluta está atribuida, no disculpada.** El umbral **agregado**
+del simulador exige `E = E₀ + ln(9)/k = 500 + ln(9)/0.0075 = 793 V/m` para
+llegar al 90 % de baja. A 18 m el simulador tiene 517 V/m y el paper 552 V/m —
+o sea que el paper declara 90 % de baja a ~552 V/m, **menos del 70 % del campo
+que el umbral agregado necesita**. La diferencia de ganancia (20.6 vs 21.2
+dBi, −6.4 % en campo) explica solo una parte pequeña: corregida sola, movería
+el alcance a ~12.5 m, no a 18 m.
+
+Lo que falta es el **modelo de 5 subsistemas en OR-gate** del paper
+(`P_system = 1 − Π(1−pᵢ)`, con `E₅₀` de 150 a 350 V/m): cinco oportunidades de
+fallar alcanzan el 90 % a un campo mucho menor que una única sigmoide centrada
+en 500 V/m. Ese es el ítem **P1-C** del checklist, y esta brecha es su
+evidencia cuantitativa.
+
+**Sobre el cociente 4.47 vs 4.89** — y esto es una inferencia, no un dato del
+paper: el 4.47 medido es exactamente `√(500/25) = √20`, o sea una identidad
+algebraica del escalado de pico, independiente de `g(τ)`. Que el paper reporte
+4.89 implica un factor de campo extra de 1.093 que el escalado de pico no
+explica. Bajo la ley Wunsch-Bell eso correspondería a `τ ≈ 143 ns`
+(`100 × 1.093⁴`) — una duración de pulso algo mayor que la referencia de
+100 ns, plausible para un sistema HPM real. **Pero el texto del paper que se
+pudo extraer no declara la duración de pulso de su modo pulsado**, así que
+esto queda como hipótesis a confirmar contra el PDF, no como explicación
+establecida. También puede ser simple redondeo de 18 y 88.
+
+### 3.6 Modelo de 5 subsistemas (OR-gate) — ⚠ BLOQUEADO
+
+**Estado: implementado, NO validado.** Disponible bajo
+`HPM_DAMAGE_MODEL = "subsistemas"`; el default sigue siendo `"agregado"` y nada
+del comportamiento por defecto depende de esto. Lo que sigue documenta por qué
+no cierra, con las tres mediciones que lo prueban.
+
+#### Por qué se intentó: el modelo agregado no es falsable
+
+| Modelo | Parámetros libres | Puntos de datos | Grados de libertad | ¿Falsable? |
+|---|---|---|---|---|
+| Agregado (actual) | 2 (`E₀`, pendiente) | 2 | **0** | **No** |
+| 5 subsistemas | 1 (acoplamiento) | 2 | **1** | **Sí** |
+
+El agregado ajusta dos parámetros a dos puntos: cualquier par de puntos se
+puede reproducir, así que reproducirlos no es evidencia de nada. El de
+subsistemas toma los cinco pares `(E₅₀, σ_E)` de la Tabla 1 **como
+publicados** y deja un único parámetro libre — la eficiencia de acoplamiento —
+así que con dos puntos de datos **puede fallar**. Ese es el argumento
+metodológico, y se sostiene independientemente del resultado.
+
+El resultado, sin embargo, es que falla.
+
+#### Un error de método que cometí y descarté
+
+El primer ajuste dio `k = 0.2568` con residuos de −0.11 pp (20 m) y +0.62 pp
+(40 m): **dentro** de los márgenes ±1.0 / ±0.7 del paper. Parecía cerrar.
+
+Estaba mal. Ese ajuste hacía que el cálculo **determinista** reprodujera los
+puntos **Monte Carlo** del paper — o sea, absorbía el sesgo del MC dentro del
+parámetro. Es exactamente el defecto del [hallazgo 2 / §1.3](#1-resumen-ejecutivo-de-la-auditoría)
+que esta misma fase venía a corregir, cometido de nuevo un nivel más arriba.
+
+La pista que lo delató está en el propio paper: dice que sus predicciones MC
+son *"systematically lower than deterministic"* (83 % → 51.4 % a 20 m). Con el
+ajuste determinista, el MC del simulador daba **más alto** que su determinista.
+Dirección opuesta ⇒ la estructura de varianza no era la del paper.
+
+Reajustado con el MC dentro del lazo: `k = 0.3693`.
+
+#### Las tres señales de que no cierra
+
+**Señal 1 — no reproduce los puntos publicados.** Con el ajuste correcto:
+
+| Distancia | Simulador (MC, 6000 tiradas) | Paper | Residuo | Margen |
+|---|---|---|---|---|
+| 20 m | 0.5025 | 0.514 | **−1.15 pp** | ±1.0 |
+| 40 m | 0.1742 | 0.131 | **+4.32 pp** | ±0.7 |
+
+Los residuos tienen **signo opuesto**, así que ningún valor único de `k` los
+cierra a la vez. El de 40 m es ~6× el margen declarado.
+
+**Señal 2 — el sesgo va en dirección contraria al paper.** El MC del simulador
+queda por **encima** de su propio determinista, mientras el paper reporta lo
+inverso. Diagnóstico: la varianza está inyectada en la zona **convexa** de la
+curva (la cola baja), donde promediar **sube** la media por desigualdad de
+Jensen. El paper opera en la zona cóncava, donde promediar la baja.
+
+**Señal 3 — el CV es 1.6× demasiado alto.** A 30 m el simulador da
+**CV = 0.6285** contra el **≈0.39** que reporta el paper.
+
+#### Atribución de varianza: el culpable está localizado
+
+Apagando una distribución a la vez y midiendo el CV a 30 m:
+
+| Distribución apagada | CV resultante | Contribución |
+|---|---|---|
+| **polarización** | 0.2842 | **−0.3439** |
+| umbrales de subsistemas | 0.5858 | −0.0422 |
+| longitud de cable | 0.6193 | −0.0088 |
+| eficiencia de apertura | 0.6222 | −0.0058 |
+| error de apuntado | 0.6231 | −0.0049 |
+| potencia | 0.6287 | ≈0 |
+| diámetro del plato | 0.6301 | ≈0 |
+
+**La polarización explica el 55 % del CV total.** Esto *coincide* con la
+conclusión del paper sobre cuál parámetro domina (*"polarization mismatch and
+wire orientation dominate uncertainty"*) — el problema no es la identidad del
+culpable sino la **magnitud** de la dispersión. Y el dato que acota la
+respuesta: **sin polarización el CV cae a 0.284, por debajo del 0.39 del
+paper**. La verdad está en medio: la dispersión de polarización del paper es
+real pero menor que `cos²(U[0,π])` con piso 0.1.
+
+#### Qué hay que confirmar contra el PDF para desbloquearlo
+
+Tres cosas, en orden de probable impacto:
+
+1. **`F(θ_wire)`, el factor de orientación del cable, no está implementado.**
+   El paper lo lleva en `V_ind = E·L_eff·F(θ_wire)·√η_pol` y atribuye la
+   incertidumbre dominante a la polarización **y la orientación del cable**
+   conjuntamente. Si `F(θ_wire)` y `η_pol` describen parcialmente la misma
+   alineación geométrica, aplicar `cos²φ` sobre todo el rango `[0, π]` está
+   sobredispersando.
+2. **Dónde se aplica el piso de 0.1**: ¿sobre `η_pol` (potencia) o sobre
+   `√η_pol` (amplitud)? Cambia el mínimo de acoplamiento de 0.316 a 0.1 en
+   amplitud, y con ello toda la cola baja — justo la zona convexa que infla la
+   media.
+3. **La inconsistencia dimensional.** Los umbrales de la Tabla 1 están en
+   **V/m**, pero la cadena de acoplamiento produce **voltios**
+   (`E [V/m] × L_eff [m]`). Mientras eso no se resuelva, la eficiencia de
+   acoplamiento es un parámetro adimensional ajustado, no una cantidad física
+   derivada — y su valor absoluto no es publicable (el cociente entre
+   configuraciones sí es insensible a él).
+
+**También falta el realce por resonancia** (`1+(Q−1)exp(−(L−λ₀/2)²/(2σ_L²))`,
+`Q≈10`, `σ_L=0.02 m`) en esta cadena. Se omitió a propósito en esta iteración:
+con `L ~ U[5,25] cm` y `λ₀/2 = 6.12 cm` es un multiplicador fuertemente
+asimétrico y bimodal que **añadiría** varianza, y la señal 3 dice que ya hay de
+más. Añadirlo sin resolver (1) y (2) empeoraría el ajuste.
+
+Las tres señales están fijadas en
+`tests/test_parametros.py::TestModeloSubsistemasBloqueado`, con la lógica
+invertida a propósito: los tests verifican que el modelo **no** cierra. Si
+alguien lo arregla, fallan — y eso es el único modo de saber que se arregló.
+
+### 3.7 🔴 El piso de la sigmoide: `P(E=0) ≠ 0`
+
+**Hallado por el análisis de sensibilidad (§3.8), no buscado.** Es el defecto
+más consecuente encontrado hasta ahora, y estaba a la vista desde el principio.
+
+#### El defecto
+
+La sigmoide de daño es una **logística en `E`**:
+
+```
+P(E) = 1 / (1 + exp(−k·(E − E₀)))
+```
+
+Una logística tiene soporte en **todo ℝ**. Pero el campo eléctrico es una
+magnitud **positiva**. Evaluada en cero:
+
+```
+P(0) = 1/(1 + exp(k·E₀)) = 1/(1 + exp(0.0075·500)) = 0.0230
+```
+
+**Un dron sin ningún campo aplicado tiene 2.30 % de probabilidad de caer.** Con
+el OR-gate de cinco subsistemas (§3.6), donde cada subsistema aporta su propia
+cola, el piso sube a **3.30 %**.
+
+Dicho en términos del modelo de umbrales que la sigmoide representa: una
+logística en `E` afirma que una fracción de la población de componentes falla a
+**campo negativo**, que no significa nada.
+
+#### Cuánto del resultado es artefacto
+
+| Distancia | `P` reportada | Fracción que es piso |
+|---|---|---|
+| 100 m | 0.0451 | 51 % |
+| 400 m | 0.0272 | **84 %** |
+| 700 m | 0.0253 | **91 %** |
+| 900 m | 0.0248 | **93 %** |
+| 2 km | 0.0238 | **97 %** |
+
+**Más allá de ~97 m, más de la mitad de la probabilidad reportada es piso.** Y
+el enjambre circular por defecto está a **500–900 m** del arma: *todo el rango
+de combate por defecto del simulador cae en la zona dominada por el artefacto.*
+
+Consecuencia sobre un resultado ya publicado en este proyecto: la métrica de
+P1-A (`fraccion_media = 0.0056` con la configuración por defecto, presentada
+como "el estimador ya tiene señal") es correcta como salida del modelo, pero su
+**contenido físico a ese rango es ~9 %**. La maquinaria estadística funciona; lo
+que mide está dominado por el piso.
+
+#### La corrección, ya verificada
+
+Reemplazar la logística en `E` por una **log-logística** — equivalentemente, una
+logística en `ln E`:
+
+```
+P(E) = 1 / (1 + (E₅₀/E)^b)        con  P(0) = 0  y  P(∞) = 1
+```
+
+Es el modelo estándar de dosis-respuesta para dosis positivas, justamente
+porque el soporte de la distribución de umbrales es `(0, ∞)`.
+
+Ajuste a los dos puntos publicados:
+
+| | `E₅₀` | `b` | Residuo @ 20 m | Residuo @ 40 m | `P(0)` |
+|---|---|---|---|---|---|
+| Logística en `E` (actual) | 500 V/m | `k`=0.0075 | −1.92 pp | +0.08 pp | **0.0230** |
+| **Log-logística** | **487.39 V/m** | **2.8106** | **0.0000 pp** | **0.0000 pp** | **0** |
+
+**Mismos dos parámetros libres, ajuste exacto en ambos puntos, y sin
+artefacto.** A 700 m da `0.000040` en vez de `0.025326`: un factor 633.
+
+Está registrado como ítem **P1-F** del checklist, no aplicado como arreglo
+silencioso, porque **mueve la calibración** y eso es una decisión que merece su
+propio ítem y su propia actualización de `tests/test_calibracion.py`. El defecto
+queda fijado por
+`tests/test_sensibilidad.py::TestFuncionDeModelo::test_desapunte_extremo_deja_el_PISO_de_la_sigmoide`,
+que falla el día que se corrija.
+
+---
+
+### 3.8 Análisis de sensibilidad global (Morris + Sobol)
+
+**Categoría: método, no física.** No añade ninguna ecuación al modelo; mide de
+qué depende lo que el modelo ya dice.
+
+#### Por qué existe
+
+El simulador tiene ~20 parámetros libres y **dos** calibrados contra datos
+publicados. Sin descomposición de varianza no se puede responder la pregunta que
+decide si un resultado es defendible:
+
+> ¿esta conclusión depende de un parámetro calibrado, o de uno inventado?
+
+#### Validación del estimador (lo primero, no lo último)
+
+Los índices de Sobol se calculan con los estimadores de **Saltelli et al.
+(2010)**, coste `N(k+2)`. Antes de aplicarlos al modelo de daño se validaron
+contra la **función de Ishigami**, que tiene índices **analíticos** e incluye el
+caso difícil de `x₃` (efecto principal exactamente 0, efecto total 0.244: actúa
+solo por interacción):
+
+| Parámetro | `S₁` analítico | `S₁` medido | `S_T` analítico | `S_T` medido |
+|---|---|---|---|---|
+| x₁ | 0.3139 | 0.3093 | 0.5576 | 0.5550 |
+| x₂ | 0.4424 | 0.4543 | 0.4424 | 0.4477 |
+| x₃ | **0.0000** | **0.0034** | **0.2437** | **0.2416** |
+
+(`n_base = 32768`, error ≤ 0.012 en todos los índices.) Sin esta validación los
+índices sobre el modelo de daño serían números sin respaldo — que es exactamente
+lo que P2-A existe para dejar de producir.
+
+Nota declarada: se usa muestreo pseudoaleatorio, no secuencias de Sobol
+(`scipy.stats.qmc` no está disponible — `scipy` no figura en
+`requirements.txt`). El estimador converge como `1/√N` en vez de casi `1/N`: es
+un coste de cómputo, no un sesgo.
+
+#### Resultado sobre el modelo de daño
+
+13 parámetros. Índices a 30 m (`n_base = 2048`, 30 720 evaluaciones):
+
+| Parámetro | `S₁` | `S_T` | Interacción | ¿Calibrado? |
+|---|---|---|---|---|
+| **ángulo de polarización** | **0.571** | **0.647** | 0.076 | sí |
+| **eficiencia de acoplamiento** | **0.190** | **0.272** | 0.082 | **NO** |
+| **duración de pulso** | **0.084** | **0.159** | 0.076 | **NO** |
+| error de apuntado | 0.010 | 0.016 | 0.006 | sí |
+| `E₅₀` GPS/GNSS LNA | 0.007 | 0.012 | 0.004 | sí |
+| potencia | 0.002 | 0.006 | 0.005 | sí |
+| (los otros 7) | ≈0 | < 0.003 | ≈0 | sí |
+
+Lecturas, en orden de importancia:
+
+1. **La polarización domina** (`S_T` = 0.58–0.66 según la distancia). Confirma
+   por descomposición de varianza lo que el paper concluye cualitativamente y lo
+   que la atribución manual de §3.6 había estimado (55 % del CV). La diferencia
+   metodológica importa: una fracción de varianza **suma**; una diferencia de
+   varianzas al apagar un factor, no.
+
+2. **⚠ Los dos parámetros que siguen NO están calibrados.**
+   `coupling_field_efficiency` es el parámetro **provisional** de §3.6 (P1-C
+   bloqueado) y `pulse_duration_ns` gobierna la extensión Wunsch-Bell de §3.5,
+   que no viene del paper. **Juntos aportan entre el 43 % y el 59 % de la
+   varianza** según la distancia. En términos operativos: cualquier conclusión
+   del modelo de subsistemas lleva dentro una contribución de varianza mayoritaria
+   de dos parámetros sin validar. Eso hay que decirlo **antes** de publicar, no
+   después.
+
+3. **Los cinco umbrales publicados aportan muy poco** (`S_T` ≤ 0.024). Su rango
+   (±15 %) es estrecho frente a la dispersión del acoplamiento. Consecuencia
+   práctica: afinar los umbrales importa mucho menos que clavar el acoplamiento
+   — orienta dónde poner el esfuerzo de calibración.
+
+4. **Hay interacciones relevantes**: `ΣS₁` = 0.69–0.87, o sea que entre el 13 % y
+   el 31 % de la varianza se pierde si uno se queda en los efectos principales.
+   Justifica haber calculado `S_T`.
+
+5. **Chequeo de sanidad interno**: Morris y Sobol coinciden **3/3** en los tres
+   dominantes, a las tres distancias evaluadas. Si discreparan, uno de los dos
+   estaría mal muestreado y el informe no sería de fiar.
+
+6. **`longitud_cable_m` sale con `S₁ = S_T = 0` EXACTO.** No es un resultado
+   físico: es la **detección automática** de que el realce por resonancia está
+   omitido (§3.6), así que ese parámetro no tiene camino hacia la salida. Se deja
+   en el espacio a propósito para que el cero lo delate, con un test que falla el
+   día que alguien conecte la resonancia.
+
+Disponible en `GET /api/sensibilidad`. El campo `amenazas_a_la_validez` es el
+que hay que leer primero.
 
 ## 4. Limitaciones conocidas (honestidad ante todo)
 
@@ -258,6 +673,23 @@ No es "otro simulador de drones" — la combinación específica es poco común:
   el día de esta auditoría; existe, es del dominio correcto (HPM
   counter-UAS), y su metodología (Friis + campo E + sigmoide calibrado
   contra latchup CMOS + Monte Carlo) es la que inspira el modelo `friis`.
+- **Saltelli, A. et al. (2010)** — *"Variance based sensitivity analysis of model
+  output. Design and estimator for the total sensitivity index"*, Computer Physics
+  Communications 181(2):259-270. Estimadores de `S₁` y `S_T` usados en
+  `src/engine/sensitivity.py` (ver [§3.8](#38-análisis-de-sensibilidad-global-morris--sobol)).
+- **Morris, M.D. (1991)** — *"Factorial sampling plans for preliminary
+  computational experiments"*, Technometrics 33(2):161-174, con la mejora de
+  **Campolongo et al. (2007)** (usar `μ*`, la media de los efectos en valor
+  absoluto, en vez de la media con signo). Screening de efectos elementales.
+- **Ishigami, T. & Homma, T. (1990)** — función de test con índices de Sobol
+  analíticos, usada para validar el estimador antes de aplicarlo
+  (`tests/test_sensibilidad.py::TestEstimadorSobolContraAnalitico`).
+- **Wunsch, D.C. & Bell, R.R. (1968)** — *"Determination of Threshold Failure
+  Levels of Semiconductor Diodes and Transistors Due to Pulse Voltages"*, IEEE
+  Transactions on Nuclear Science 15(6):244-259. Origen de la ley por tramos de
+  `pulse_coupling_factor` (ver [§3.5](#35-duración-de-pulso-la-ley-wunsch-bell-por-tramos)).
+  **No** es el paper de referencia del proyecto: el escalado por duración de
+  pulso es una extensión propia, y arXiv:2602.08477 no lo incorpora.
 - **Skolnik, M. — *Introduction to Radar Systems*** (y notas de curso de
   ingeniería de radar derivadas) — origen de la aproximación
   `G ≈ 26000/(θ_az·θ_el)` para ganancia de antena por apertura de haz.

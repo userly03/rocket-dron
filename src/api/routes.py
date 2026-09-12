@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
+from src.engine.experiments import ExperimentConfig, WeaponPolicy, experiment_manager
 from src.engine.simulation import SimulationEngine
+from src.engine.sensitivity import informe_sensibilidad
+from src.engine.validation import verificar_calibracion
+from src.utils.reproducibilidad import build_manifest
 
 router = APIRouter(prefix="/api", tags=["simulacion"])
 
@@ -20,6 +27,10 @@ class FireRequest(BaseModel):
     potencia: float | None = Field(default=None, ge=0, description="Potencia HPM en kW")
     direccion: float | None = Field(default=None, ge=0, lt=360, description="Dirección en grados")
     apertura_cono: float | None = Field(default=None, ge=1, le=180, description="Apertura del cono")
+    duty_cycle: float | None = Field(
+        default=None, ge=0.001, le=1.0,
+        description="Duty cycle (pico/promedio): 1.0 = CW, <1 = pulsado",
+    )
 
 
 class StartRequest(BaseModel):
@@ -34,6 +45,10 @@ class MissileLaunchRequest(BaseModel):
     potencia: float | None = Field(default=None, ge=10, le=100, description="Potencia HPM en kW")
     radio: float | None = Field(default=None, ge=50, le=200, description="Radio de efecto en metros")
     guiado: bool = Field(default=True, description="Guiado por navegación proporcional en vuelo (False = balístico)")
+    duty_cycle: float | None = Field(
+        default=None, ge=0.001, le=1.0,
+        description="Duty cycle del pulso del misil: 1.0 = CW, <1 = pulsado",
+    )
 
 
 class MissileReloadRequest(BaseModel):
@@ -48,6 +63,24 @@ class JamStartRequest(BaseModel):
 
 class SpeedRequest(BaseModel):
     escala: float = Field(ge=0.1, le=10, description="Multiplicador de velocidad: 1, 2, 5, 10...")
+
+
+class ExperimentRequest(BaseModel):
+    formacion: Literal["cuadrada", "circular", "aleatoria", "linea", "v"] = Field(
+        default="circular", description="Formación del enjambre"
+    )
+    cantidad: int = Field(default=30, ge=1, le=500, description="Drones por réplica")
+    replicas: int = Field(default=50, ge=2, le=2000, description="Réplicas Monte Carlo")
+    t_max_s: float = Field(default=60.0, gt=0, le=600, description="Tiempo simulado por réplica (s)")
+    semilla: int = Field(default=1234, description="Semilla base (réplica i usa semilla + i)")
+    arma_tipo: Literal["canion", "misil", "ninguna"] = Field(
+        default="canion", description="Política de arma de la réplica"
+    )
+    arma_delay_s: float = Field(default=1.0, ge=0, description="Instante del disparo/lanzamiento (s)")
+    potencia: float | None = Field(default=None, ge=1, le=1000, description="Potencia del cañón (kW)")
+    direccion: float | None = Field(default=None, ge=0, lt=360, description="Azimut (None = auto/valor por defecto)")
+    misil_potencia: float | None = Field(default=None, ge=10, le=100, description="Potencia HPM del misil (kW)")
+    misil_radio: float | None = Field(default=None, ge=50, le=200, description="Radio de efecto del misil (m)")
 
 
 def get_simulation() -> SimulationEngine:
@@ -103,7 +136,7 @@ def set_speed(sim: SimulationDep, body: SpeedRequest) -> dict:
 def fire_hpm(sim: SimulationDep, body: FireRequest | None = None) -> dict:
     """Dispara el cañón HPM estático de tierra (cono direccional)."""
     params = body or FireRequest()
-    return sim.fire(params.potencia, params.direccion, params.apertura_cono)
+    return sim.fire(params.potencia, params.direccion, params.apertura_cono, params.duty_cycle)
 
 
 @router.get("/drones")
@@ -133,6 +166,7 @@ def launch_missile(sim: SimulationDep, body: MissileLaunchRequest) -> dict:
         potencia=body.potencia,
         radio=body.radio,
         guiado=body.guiado,
+        duty_cycle=body.duty_cycle,
     )
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("message", "Error al lanzar"))
@@ -257,3 +291,140 @@ def load_scenario(scenario_id: str, sim: SimulationDep) -> dict:
 def start_demo(sim: SimulationDep) -> dict:
     """Inicia la demo automática con enjambre circular."""
     return sim.run_demo()
+
+
+@router.post("/experiments")
+def start_experiment(body: ExperimentRequest) -> dict:
+    """Lanza un experimento Monte Carlo en background (réplicas headless)."""
+    cfg = ExperimentConfig(
+        formacion=body.formacion,
+        cantidad=body.cantidad,
+        replicas=body.replicas,
+        t_max_s=body.t_max_s,
+        semilla=body.semilla,
+        arma=WeaponPolicy(
+            tipo=body.arma_tipo,
+            delay_s=body.arma_delay_s,
+            potencia=body.potencia,
+            direccion=body.direccion,
+            misil_potencia=body.misil_potencia,
+            misil_radio=body.misil_radio,
+        ),
+    )
+    exp_id = experiment_manager.start(cfg)
+    return {"experiment_id": exp_id, "status": "corriendo"}
+
+
+@router.get("/experiments")
+def list_experiments() -> dict:
+    """Lista los experimentos registrados con su estado y progreso."""
+    registros = experiment_manager.list()
+    return {
+        "total": len(registros),
+        "experimentos": [
+            {
+                "id": r["id"],
+                "status": r["status"],
+                "completadas": r["completadas"],
+                "replicas": r["replicas"],
+                "config": r["config"],
+            }
+            for r in registros
+        ],
+    }
+
+
+@router.get("/experiments/{exp_id}")
+def get_experiment(exp_id: str) -> dict:
+    """Estado, progreso y estadística de un experimento.
+
+    Métrica primaria: ``resumen.fraccion_media`` (fracción neutralizada media
+    por réplica) con ``ic95_bootstrap`` e ``ic95_t``, más ``cv``, percentiles y
+    la serie de ``convergencia``. La réplica es la unidad de muestreo.
+
+    Métrica secundaria: ``resumen.aniquilacion_total`` — proporción de réplicas
+    en que cayó el enjambre completo, con IC de Wilson. Antes de P1-A esto se
+    publicaba como ``p_hat``/``ic95``, o sea como si fuera la probabilidad de
+    baja; no lo era y valía 0 en casi todo el espacio de operación (ver
+    docs/AUDITORIA_CHECKLIST.md §1.2).
+    """
+    registro = experiment_manager.get(exp_id)
+    if registro is None:
+        raise HTTPException(status_code=404, detail=f"Experimento '{exp_id}' no encontrado")
+    return registro
+
+
+@router.get("/sensibilidad")
+def get_sensibilidad(
+    distancia_m: float = 30.0,
+    n_base: int = 512,
+    r_morris: int = 30,
+) -> dict:
+    """Análisis de sensibilidad global del modelo de daño (Morris + Sobol).
+
+    Devuelve ``S₁`` (efecto principal) y ``S_T`` (efecto total, con
+    interacciones) por parámetro, el screening de Morris, y —lo que de verdad
+    importa— ``amenazas_a_la_validez``: los parámetros que dominan la varianza
+    **y no están calibrados** contra datos publicados.
+
+    Coste: ``n_base·(k+2)`` evaluaciones para Sobol (k = 13 parámetros) más
+    ``r_morris·(k+1)`` para Morris. Con los defaults son ~8 mil evaluaciones,
+    del orden de un segundo. Subir ``n_base`` reduce el error como 1/√N.
+    """
+    if not (32 <= n_base <= 8192):
+        raise HTTPException(status_code=400, detail="n_base debe estar entre 32 y 8192")
+    if not (4 <= r_morris <= 200):
+        raise HTTPException(status_code=400, detail="r_morris debe estar entre 4 y 200")
+    if not (0.1 <= distancia_m <= 100_000):
+        raise HTTPException(status_code=400, detail="distancia_m fuera de rango")
+    return informe_sensibilidad(
+        distancia_m=distancia_m, n_base=n_base, r_morris=r_morris
+    )
+
+
+@router.get("/manifest")
+def get_manifest() -> dict:
+    """Manifiesto de corrida: semilla activa y snapshot de la configuración relevante."""
+    return build_manifest()
+
+
+@router.get("/calibracion")
+def get_calibracion() -> dict:
+    """
+    Verifica en caliente, con la configuración de ESTA instancia corriendo,
+    que la calibración contra arXiv:2602.08477 (docs/FISICA_Y_MATEMATICA.md
+    §3.4) sigue vigente. No depende de que la simulación esté inicializada
+    — es una consulta directa al modelo físico (P1-D, CHECKLIST_MEJORAS.md).
+    Ver ``src.engine.validation.verificar_calibracion``.
+    """
+    return verificar_calibracion()
+
+
+@router.get("/export")
+def export_csv(sim: SimulationDep, tipo: str = "disparos", limit: int = 500) -> PlainTextResponse:
+    """Exporta el historial de disparos o los eventos del log en formato CSV."""
+    if tipo == "disparos":
+        filas: list[dict] = list(sim.analytics.shot_history)[-limit:]
+    elif tipo == "eventos":
+        filas = [dict(e) for e in list(sim.logs)[-limit:]]
+        for fila in filas:
+            fila["datos"] = json.dumps(fila.get("datos", {}), ensure_ascii=False)
+    else:
+        raise HTTPException(status_code=400, detail="tipo debe ser 'disparos' o 'eventos'")
+
+    salida = io.StringIO()
+    if filas:
+        campos: list[str] = []
+        for fila in filas:
+            for clave in fila:
+                if clave not in campos:
+                    campos.append(clave)
+        writer = csv.DictWriter(salida, fieldnames=campos)
+        writer.writeheader()
+        writer.writerows(filas)
+
+    return PlainTextResponse(
+        salida.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{tipo}.csv"'},
+    )

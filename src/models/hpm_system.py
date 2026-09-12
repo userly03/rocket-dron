@@ -5,10 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import numpy as np
+from numpy.random import Generator
 
 from src.config import (
     FIELD_HEIGHT,
     FIELD_WIDTH,
+    HPM_DUTY_CYCLE,
     MISSILE_DEFAULT_POWER,
     MISSILE_DEFAULT_RADIUS,
     MISSILE_DETONATION_DISTANCE,
@@ -36,6 +38,11 @@ class HPMissileSystem:
     misiles: list[HPMissile] = field(default_factory=list)
     municion_total: int = MISSILE_MUNITION_TOTAL
     municion_restante: int = MISSILE_MUNITION_TOTAL
+    # RNG por instancia (P0-B): None conserva el generador global; se
+    # propaga a cada ``HPMissile`` que ``lanzar()`` crea, para que una
+    # réplica de experimento y la simulación interactiva no compartan
+    # estado aleatorio (ver src/utils/reproducibilidad.py).
+    rng: Generator | None = None
     _contador: int = field(default=0, init=False, repr=False)
 
     def lanzar(
@@ -47,6 +54,7 @@ class HPMissileSystem:
         radio: float | None = None,
         drones: list[Drone] | None = None,
         guiado: bool = True,
+        duty_cycle: float | None = None,
     ) -> dict:
         """
         Crea y lanza un misil HPM hacia el enjambre.
@@ -95,6 +103,8 @@ class HPMissileSystem:
             detonacion_distancia=MISSILE_DETONATION_DISTANCE,
             guiado=guiado,
             target_id=target_id,
+            duty_cycle=duty_cycle if duty_cycle is not None else HPM_DUTY_CYCLE,
+            rng=self.rng,
         )
 
         self.misiles.append(misil)

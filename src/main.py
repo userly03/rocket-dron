@@ -96,6 +96,7 @@ def root() -> dict:
             "scenarios": "GET /api/scenarios",
             "scenario_load": "POST /api/scenarios/{scenario_id}/load",
             "demo_start": "POST /api/demo/start",
+            "experiments": "POST /api/experiments · GET /api/experiments · GET /api/experiments/{id}",
             "websocket": "WS /ws",
             "docs": "/docs",
         },

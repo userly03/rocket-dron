@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
 
+from numpy.random import Generator
+
 from src.config import (
     FIELD_HEIGHT,
     FIELD_WIDTH,
@@ -28,6 +30,7 @@ from src.models.hpm_system import HPMissileSystem
 from src.models.jammer import Jammer
 from src.models.swarm import FormacionTipo, Swarm
 from src.utils.helpers import drone_to_dict
+from src.utils.reproducibilidad import rng as global_rng
 
 validacion_logger = logging.getLogger("simulador.validacion")
 
@@ -49,6 +52,15 @@ class SimulationEngine:
     missile_system: HPMissileSystem = field(default_factory=HPMissileSystem)
     jammer: Jammer = field(default_factory=Jammer)
     analytics: PhysicsAnalytics = field(default_factory=PhysicsAnalytics)
+    # RNG por instancia (P0-B): None (default) conserva el comportamiento
+    # previo a esta fase — swarm/misiles/dron sortean del generador global
+    # de src.utils.reproducibilidad. Un valor no-None (típicamente
+    # ``nuevo_generador(seed)``) aísla por completo la aleatoriedad de esta
+    # instancia: es lo que usa cada réplica de un experimento Monte Carlo
+    # (src/engine/experiments.py) para no compartir estado con el hilo de
+    # la simulación interactiva ni con otras réplicas/experimentos
+    # corriendo en paralelo. Ver docs/AUDITORIA_CHECKLIST.md §3.1.
+    rng: Generator | None = None
     estado: SimulationState = SimulationState.DETENIDA
     tiempo: float = 0.0
     tick: int = 0
@@ -70,8 +82,24 @@ class SimulationEngine:
         self.jammer.origen_x = HPM_ORIGIN_X
         self.jammer.origen_y = HPM_ORIGIN_Y
         self.jammer.origen_z = HPM_ORIGIN_Z
+
+        # Propagar el generador de esta instancia a los sub-sistemas que lo
+        # consumen. ``swarm``/``missile_system`` llegan construidos por su
+        # ``default_factory`` (sin generador, self.rng aún no existía) —
+        # hay que reasignarlo ANTES de poblar el enjambre, para que hasta el
+        # primer sorteo (posiciones/blindaje/cableado/polarización de los
+        # drones iniciales) quede aislado cuando se inyectó un generador.
+        # El jammer no sortea nada (umbral determinístico, ver Jammer), así
+        # que no tiene generador que propagar.
+        self.swarm.rng = self.rng
+        self.missile_system.rng = self.rng
+
         self.swarm.inicializar_formacion(FormacionTipo.CUADRADA.value, self.swarm_size)
         self._log("simulacion_inicializada", {"drones": self.swarm_size})
+
+    def _rng(self) -> Generator:
+        """Generador de esta instancia, o el global si no se inyectó ninguno."""
+        return self.rng if self.rng is not None else global_rng()
 
     def _log(self, evento: str, datos: dict | None = None) -> None:
         entrada = {
@@ -236,10 +264,25 @@ class SimulationEngine:
         potencia: float | None = None,
         direccion: float | None = None,
         apertura_cono: float | None = None,
+        duty_cycle: float | None = None,
     ) -> dict[str, Any]:
         with self._lock:
-            self.hpm.configurar(potencia, direccion, apertura_cono)
+            self.hpm.configurar(potencia, direccion, apertura_cono, duty_cycle)
             eventos = self.hpm.disparar(self.swarm.drones)
+            rechazo = self.hpm.ultimo_rechazo
+
+            if rechazo is not None:
+                # Presupuesto energético/térmico (P2-F): el arma rechazó el
+                # disparo ANTES de tocar el enjambre. Camino limpio, sin
+                # excepción — no hay evento de disparo que registrar en
+                # analíticas/log porque el disparo no ocurrió.
+                self._log("hpm_disparo_rechazado", {"motivo": rechazo})
+                return {
+                    "message": f"Disparo rechazado: {rechazo}",
+                    "eventos": [],
+                    "hpm": self.hpm.to_dict(),
+                    "conteo_estados": self.swarm.contar_por_estado(),
+                }
 
             shot = self.analytics.record_cannon_shot(
                 self.hpm.potencia,
@@ -304,6 +347,7 @@ class SimulationEngine:
         potencia: float | None = None,
         radio: float | None = None,
         guiado: bool = True,
+        duty_cycle: float | None = None,
     ) -> dict[str, Any]:
         """Lanza un misil HPM hacia el enjambre."""
         with self._lock:
@@ -315,6 +359,7 @@ class SimulationEngine:
                 radio=radio,
                 drones=self.swarm.drones,
                 guiado=guiado,
+                duty_cycle=duty_cycle,
             )
 
         if result.get("success"):
@@ -459,6 +504,36 @@ class SimulationEngine:
         with self._lock:
             return [drone_to_dict(d) for d in self.swarm.drones]
 
+    def _tick(self, dt: float, mover_enjambre: bool = True) -> tuple[list[dict], list[dict]]:
+        """Avanza la simulación un paso, de forma síncrona y sin hilo.
+
+        Extraído del bucle para que el runner de experimentos Monte Carlo
+        (``src/engine/experiments.py``) pueda avanzar la simulación headless
+        y determinista. ``mover_enjambre=False`` reproduce la rama "pausada
+        con misiles en vuelo": solo actualiza misiles y reloj, sin tocar el
+        enjambre.
+
+        Returns:
+            Tupla (eventos_jamming, eventos_misil) para procesar por el llamador.
+        """
+        # Presupuesto energético/térmico del cañón (P2-F): enfriamiento y
+        # recarga avanzan con el reloj de la simulación, tanto en el bucle
+        # de 60 FPS como en el runner de experimentos Monte Carlo (única
+        # razón de ser de este método extraído) — un arma que nunca corre
+        # este tick nunca se enfría ni recarga.
+        self.hpm.actualizar(dt)
+
+        eventos_jamming: list[dict] = []
+        if mover_enjambre:
+            self.swarm.actualizar(dt)
+            eventos_jamming = self.jammer.actualizar(self.swarm.drones)
+        eventos_misil = self.missile_system.actualizar_misiles(
+            self.swarm.drones, dt
+        )
+        self.tiempo += dt
+        self.tick += 1
+        return eventos_jamming, eventos_misil
+
     def _run_loop(self) -> None:
         dt = 1.0 / self.fps
         last_time = time.perf_counter()
@@ -468,6 +543,8 @@ class SimulationEngine:
                 now = time.perf_counter()
                 elapsed = now - last_time
                 if elapsed >= dt:
+                    ticked = False
+                    eventos_misil: list[dict] = []
                     with self._lock:
                         hay_misiles = any(
                             m.estado in (MissileEstado.LANZADO, MissileEstado.VOLANDO)
@@ -475,17 +552,17 @@ class SimulationEngine:
                         )
                         if hay_misiles:
                             sim_dt = dt * self.time_scale
-                            eventos_misil = self.missile_system.actualizar_misiles(
-                                self.swarm.drones, sim_dt
+                            _, eventos_misil = self._tick(
+                                sim_dt, mover_enjambre=False
                             )
-                            self.tiempo += sim_dt
-                            self.tick += 1
-                            if eventos_misil:
-                                self._process_missile_events(eventos_misil)
-                            snapshot = self._build_snapshot()
-                            self._notify_listeners(snapshot)
-                            self._notify_async_listeners(snapshot)
+                            ticked = True
                             last_time = now
+                    if eventos_misil:
+                        self._process_missile_events(eventos_misil)
+                    if ticked:
+                        snapshot = self._build_snapshot()
+                        self._notify_listeners(snapshot)
+                        self._notify_async_listeners(snapshot)
                 time.sleep(max(0.001, dt - elapsed if elapsed < dt else 0.05))
                 continue
 
@@ -495,13 +572,8 @@ class SimulationEngine:
             if elapsed >= dt:
                 with self._lock:
                     sim_dt = dt * self.time_scale
-                    self.swarm.actualizar(sim_dt)
-                    eventos_jamming = self.jammer.actualizar(self.swarm.drones)
-                    eventos_misil = self.missile_system.actualizar_misiles(
-                        self.swarm.drones, sim_dt
-                    )
-                    self.tiempo += sim_dt
-                    self.tick += 1
+                    eventos_jamming, eventos_misil = self._tick(sim_dt)
+                    last_time = now
 
                 if eventos_jamming:
                     self._process_jamming_events(eventos_jamming)
@@ -512,7 +584,6 @@ class SimulationEngine:
                 snapshot = self._build_snapshot()
                 self._notify_listeners(snapshot)
                 self._notify_async_listeners(snapshot)
-                last_time = now
             else:
                 time.sleep(max(0.001, dt - elapsed))
 

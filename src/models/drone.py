@@ -5,19 +5,26 @@ from __future__ import annotations
 import math
 from enum import Enum
 
-import numpy as np
+from numpy.random import Generator
 
 from src.config import (
     DRONE_BOB_AMPLITUDE_M,
     DRONE_BOB_PERIOD_S,
+    DRONE_CABLE_LENGTH_MAX_M,
+    DRONE_CABLE_LENGTH_MIN_M,
+    DRONE_POLARIZATION_MIN,
+    HPM_FREQUENCY_GHZ,
     HPM_MODEL,
 )
 from src.engine.hpm_engine import (
     apply_hardening_odds,
     calculate_neutralization_probability,
     calculate_neutralization_probability_friis,
+    resonance_frequency_ghz,
+    susceptibility_coupling_factor,
 )
 from src.engine.physics import update_position
+from src.utils.reproducibilidad import rng as global_rng
 
 
 class DroneEstado(str, Enum):
@@ -41,6 +48,9 @@ class Drone:
         z: float = 100.0,
         blindaje: str = "estandar",
         e_threshold_mult: float = 1.0,
+        cable_length_m: float | None = None,
+        polarization: float | None = None,
+        rng: Generator | None = None,
     ) -> None:
         self.id = drone_id
         self.x = x
@@ -50,11 +60,34 @@ class Drone:
         self.salud = salud
         self.estado = DroneEstado.ACTIVO
 
+        # RNG por instancia (P0-B): None conserva el generador global (mismo
+        # comportamiento que antes). Debe fijarse ANTES de los sorteos de
+        # cable_length_m/polarization/_bob_phase de abajo, que dependen de
+        # ``self._rng()``. Cuando ``Swarm`` construye el dron le pasa su
+        # propio generador, para que una réplica de experimento y la
+        # simulación interactiva nunca compartan estado aleatorio.
+        self.rng = rng
+
         # Blindaje heterogéneo: un enjambre real no es homogéneo — algunas
         # unidades llevan mejor apantallado/protección que otras, lo que se
         # traduce en un umbral de susceptibilidad (V/m) más alto.
         self.blindaje = blindaje
         self.e_threshold_mult = e_threshold_mult
+
+        # Huella de susceptibilidad: longitud de cableado interno (fija su
+        # frecuencia de resonancia y por tanto η(f) a la frecuencia del arma)
+        # y factor de mismatch de polarización [0,1]. None → sorteo al crear
+        # el dron, como el blindaje.
+        self.cable_length_m = (
+            cable_length_m
+            if cable_length_m is not None
+            else float(self._rng().uniform(DRONE_CABLE_LENGTH_MIN_M, DRONE_CABLE_LENGTH_MAX_M))
+        )
+        self.polarization = (
+            polarization
+            if polarization is not None
+            else float(self._rng().uniform(DRONE_POLARIZATION_MIN, 1.0))
+        )
 
         # Radar: si el dron fue detectado por el radar en el tick actual
         # (gobierna la selección automática de blancos, no la física del
@@ -69,11 +102,24 @@ class Drone:
         # pierde altitud por su velocidad horizontal.
         self.z_base = z
         self.z = z
-        self._bob_phase = float(np.random.uniform(0, 2 * math.pi))
+        self._bob_phase = float(self._rng().uniform(0, 2 * math.pi))
         self._tiempo_vuelo = 0.0
 
         # Última probabilidad de neutralización calculada (para reportes/validación).
         self.ultima_probabilidad = 0.0
+
+    def _rng(self) -> Generator:
+        """Generador de esta instancia, o el global si no se inyectó ninguno."""
+        return self.rng if self.rng is not None else global_rng()
+
+    def factor_acoplamiento(self, frequency_ghz: float = HPM_FREQUENCY_GHZ) -> float:
+        """Factor de amplitud acoplada a esta frecuencia: √(η(f_res)·pol)."""
+        return susceptibility_coupling_factor(
+            self.cable_length_m, self.polarization, frequency_ghz
+        )
+
+    def frecuencia_resonancia_ghz(self) -> float:
+        return resonance_frequency_ghz(self.cable_length_m)
 
     def mover(self, dt: float) -> None:
         """Actualiza la posición según velocidad y ángulo, y la altitud (oscilación)."""
@@ -96,9 +142,13 @@ class Drone:
         distancia: float,
         angulo_offset: float = 0.0,
         apertura_cono: float = 30.0,
+        duty_cycle: float = 1.0,
     ) -> bool:
         """
         Calcula probabilidad de neutralización según el modelo HPM.
+
+        ``duty_cycle`` separa potencia promedio de pico (daño latchup por
+        campo instantáneo); 1.0 = CW, compatible con el modelo calibrado.
 
         Returns:
             True si el dron fue neutralizado en este impacto.
@@ -112,6 +162,10 @@ class Drone:
                 distancia=distancia,
                 apertura_cono=apertura_cono,
                 angulo_offset=angulo_offset,
+                duty_cycle=duty_cycle,
+                cable_length_m=self.cable_length_m,
+                polarization=self.polarization,
+                frequency_ghz=HPM_FREQUENCY_GHZ,
             )
             # Blindaje: reducción proporcional en espacio de momios, no
             # desplazando el umbral E (ver apply_hardening_odds — desplazar
@@ -127,7 +181,7 @@ class Drone:
             )
 
         self.ultima_probabilidad = probabilidad
-        impacto = float(np.random.random()) < probabilidad
+        impacto = float(self._rng().random()) < probabilidad
         dano = probabilidad * potencia * 0.5
         self.salud = max(0.0, self.salud - dano)
 

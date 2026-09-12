@@ -14,6 +14,7 @@ from src.config import (
     FIELD_WIDTH,
     HPM_BEAM_SIGMA,
     HPM_COUPLING_K,
+    HPM_DUTY_CYCLE,
     HPM_E_THRESHOLD_V_M,
     HPM_FREQUENCY_GHZ,
     HPM_K_CONSTANT,
@@ -27,6 +28,9 @@ from src.engine.hpm_engine import compute_target_parameters, friis_diagnostics
 class PhysicsAnalytics:
     """Seguimiento de métricas físicas, disparos y cobertura HPM."""
 
+    # Parámetro INTERNO de gaussian_neutralization_prob, usado solo para
+    # pintar el heatmap (get_heatmap) — no gobierna ninguna baja y no se
+    # publica por get_physics_panel (ver docs/AUDITORIA_CHECKLIST.md §4.1).
     coupling_k: float = HPM_COUPLING_K
     frequency_ghz: float = HPM_FREQUENCY_GHZ
     pulse_duration_ns: float = HPM_PULSE_DURATION_NS
@@ -81,6 +85,19 @@ class PhysicsAnalytics:
     ) -> float:
         """
         Modelo gaussiano: P = 1 - exp(-k · P · exp(-r²/2σ²))
+
+        Uso exclusivo: intensidad del mapa de calor (``get_heatmap``) — un
+        perfil suave, barato de calcular en una grilla, para PINTAR dónde el
+        haz es más intenso. NO es el modelo de daño: ni la rama ``friis``
+        (Friis + campo E + sigmoide de susceptibilidad) ni la ``legacy``
+        (exponencial sobre ``HPM_K_CONSTANT``, ver ``calculate_neutralization
+        _probability``) usan esta gaussiana para decidir si un dron muere —
+        ``Drone.recibir_daño``/``HPMissile.calcular_daño`` no la llaman en
+        ningún punto. Publicarla en ``get_physics_panel`` como si gobernara
+        las bajas fue el defecto documentado en docs/AUDITORIA_CHECKLIST.md
+        §4.1 y corregido en P0-C: un tercer modelo con apariencia física en
+        pantalla que no mataba a nadie. No exponer ``coupling_k`` ni esta
+        fórmula fuera de ``get_heatmap``.
         """
         sigma = sigma or self.beam_sigma
         if distancia <= 0:
@@ -159,23 +176,28 @@ class PhysicsAnalytics:
         self,
         potencia_kw: float,
         radio_efecto: float | None = None,
+        hpm: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         radio = radio_efecto or self.beam_sigma * 2
         energy_mj = self._pulse_energy_mj(potencia_kw)
         area_m2 = math.pi * radio**2
         field_intensity = (potencia_kw * 1000.0) / area_m2 if area_m2 > 0 else 0.0
-        prob_referencia = self.gaussian_neutralization_prob(potencia_kw, radio / 2)
 
+        # "formula" refleja SIEMPRE el modelo que de verdad decide las bajas
+        # (ver Drone.recibir_daño/HPMissile.calcular_daño), nunca la gaussiana
+        # de gaussian_neutralization_prob (esa es solo para pintar el
+        # heatmap — ver su docstring). Default = modelo "legacy"
+        # (P = 1 - exp(-k·potencia/d²), con la k que ese modelo SÍ usa,
+        # HPM_K_CONSTANT); la rama "friis" de abajo la sobreescribe con la
+        # fórmula real de ese modelo. docs/AUDITORIA_CHECKLIST.md §4.1.
         panel = {
             "modelo_hpm": HPM_MODEL,
             "potencia_kw": potencia_kw,
             "frecuencia_ghz": self.frequency_ghz,
             "radio_efecto_m": round(radio, 2),
-            "coupling_k": self.coupling_k,
             "beam_sigma": self.beam_sigma,
             "pulse_duration_ns": self.pulse_duration_ns,
-            "formula": "P = 1 - exp(-k · P · exp(-r²/2σ²))",
-            "probabilidad_referencia": round(prob_referencia, 4),
+            "formula": f"P = 1 - exp(-k · potencia / d²)  (k = HPM_K_CONSTANT = {HPM_K_CONSTANT})",
             "energia_pulso_mj": round(energy_mj, 4),
             "intensidad_campo_w_m2": round(field_intensity, 2),
             "total_energy_mj": round(self.total_energy_mj, 4),
@@ -186,16 +208,41 @@ class PhysicsAnalytics:
         }
 
         if HPM_MODEL == "friis":
-            diag = friis_diagnostics(potencia_kw, distancia=radio / 2, apertura_cono=360.0)
+            diag = friis_diagnostics(
+                potencia_kw,
+                distancia=radio / 2,
+                apertura_cono=360.0,
+                duty_cycle=HPM_DUTY_CYCLE,
+            )
             panel.update(
                 {
-                    "formula": "S = P·G/(4πr²)  →  E = √(S·377)  →  P = sigmoide(E, E_umbral)",
+                    "formula": "S = P_pico·G/(4πr²)  →  E = √(S·377)  →  E_eff = E·g(τ)  →  P = sigmoide(E_eff, E_umbral)",
                     "ganancia_antena_dbi": round(10 * math.log10(max(diag["ganancia_antena"], 1e-9)), 2),
                     "densidad_potencia_w_m2": diag["densidad_potencia_w_m2"],
                     "campo_e_v_m": diag["campo_e_v_m"],
+                    "campo_e_efectivo_v_m": diag["campo_e_efectivo_v_m"],
                     "campo_e_umbral_v_m": HPM_E_THRESHOLD_V_M,
+                    "potencia_pico_kw": diag["potencia_pico_kw"],
+                    "duty_cycle": diag["duty_cycle"],
+                    "acoplamiento_pulso": diag["acoplamiento_pulso"],
                 }
             )
+
+        if hpm:
+            # Presupuesto energético/térmico del arma (P2-F): lo que
+            # gobierna la cadencia sostenida real (ver HPMWeapon), no un
+            # tercer modelo decorativo — mismo criterio que P0-C aplicó a
+            # gaussian_neutralization_prob (docs/FISICA_Y_MATEMATICA.md
+            # hallazgo 8): el panel solo publica lo que gobierna las bajas o
+            # el estado real del sistema.
+            panel["presupuesto_arma"] = {
+                "energia_actual_kj": hpm.get("energia_actual_kj"),
+                "energia_maxima_kj": hpm.get("energia_maxima_kj"),
+                "temperatura_c": hpm.get("temperatura_c"),
+                "temperatura_max_c": hpm.get("temperatura_max_c"),
+                "listo_para_disparar": hpm.get("listo_para_disparar"),
+                "ultimo_rechazo": hpm.get("ultimo_rechazo"),
+            }
 
         return panel
 
@@ -305,7 +352,7 @@ class PhysicsAnalytics:
 
         potencia = hpm.get("potencia", 25)
         return {
-            "physics": self.get_physics_panel(potencia),
+            "physics": self.get_physics_panel(potencia, hpm=hpm),
             "metrics": {
                 "total_energy_mj": round(self.total_energy_mj, 4),
                 "total_energy_mj_mega": round(self.total_energy_mj / 1e6, 6),

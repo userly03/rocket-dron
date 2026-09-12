@@ -115,7 +115,9 @@ Edita `.env`:
 | `HPM_E_THRESHOLD_V_M` / `HPM_SIGMOID_STEEPNESS` | Umbral de susceptibilidad (V/m) y pendiente de la sigmoide del **cañón**, ajustados contra arXiv:2602.08477 | 500 / 0.0075 |
 | `HPM_MISSILE_E_THRESHOLD_V_M` / `HPM_MISSILE_SIGMOID_STEEPNESS` | Ídem para el **misil** (arquetipo de área, no plato) | 30 / 0.15 |
 | `HPM_ORIGIN_X` / `HPM_ORIGIN_Y` / `HPM_ORIGIN_Z` | Posición del cañón HPM | 0 / 0 / 8 |
-| `HPM_FREQUENCY_GHZ`, `HPM_COUPLING_K`, `HPM_PULSE_DURATION_NS`, `HPM_BEAM_SIGMA` | Parámetros del panel físico/analíticas (modelo gaussiano de referencia, no el `friis`/`legacy` de arriba) | 2.45, 0.42, 100, 50 |
+| `HPM_FREQUENCY_GHZ`, `HPM_PULSE_DURATION_NS` | Frecuencia de operación del arma y duración de referencia del pulso — entran al modelo de daño `friis` | 2.45, 100 |
+| `HPM_COUPLING_K`, `HPM_BEAM_SIGMA` | Parámetros **solo del mapa de calor** (`gaussian_neutralization_prob`): pintan dónde el haz es más intenso. **No deciden ninguna baja** y ya no se publican en el panel físico — ver hallazgo 8 de `docs/FISICA_Y_MATEMATICA.md` | 0.42, 50 |
+| `RADAR_FREQUENCY_GHZ` | Frecuencia del radar de detección, **independiente** de la del arma: la ecuación de radar lleva λ², así que compartirlas hacía que barrer la frecuencia del arma cambiara el alcance de detección y confundiera el experimento de resonancia | 2.45 |
 | `MISSILE_SPEED` | Velocidad del misil HPM (m/s) | 400 |
 | `MISSILE_DEFAULT_POWER` / `MISSILE_DEFAULT_RADIUS` | Potencia/radio de efecto por defecto | 50 / 100 |
 | `MISSILE_MUNITION_TOTAL` | Munición máxima | 10 |

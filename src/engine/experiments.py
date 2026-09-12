@@ -1,0 +1,635 @@
+"""Runner de experimentos Monte Carlo headless.
+
+Ejecuta N réplicas de un escenario (misma configuración, misma política de
+arma, distinta sub-semilla) y las agrega en estadística con señal.
+
+LA UNIDAD DE MUESTREO ES LA RÉPLICA (P1-A). Esto no es un detalle de
+implementación, es lo que hace que los intervalos sean válidos: los drones de
+una misma réplica comparten geometría, semilla y configuración, así que sus
+resultados individuales **no son Bernoulli independientes**. Agregar bajas por
+dron y meterlas en un intervalo binomial (Wilson) daría un IC demasiado
+estrecho por correlación intra-réplica. Cada réplica aporta UNA observación: su
+fracción neutralizada.
+
+MÉTRICA PRIMARIA — ``fraccion_media``: media de la fracción neutralizada por
+réplica, con dos intervalos del 95%:
+
+- ``ic95_bootstrap``: bootstrap de percentiles sobre las fracciones de réplica.
+  Elección declarada: es simple, no supone normalidad (la distribución de la
+  fracción está acotada en [0,1] y suele ser asimétrica cerca de los extremos,
+  que es justo donde opera un arma HPM a media/larga distancia) y no necesita
+  dependencias nuevas. No se usa bootstrap-t ni BCa: ganarían precisión en la
+  cobertura para n chico, a costa de complejidad que no se puede verificar sin
+  scipy (que está en el venv pero NO declarado en requirements.txt).
+- ``ic95_t``: intervalo por t de Student sobre las mismas fracciones. Se
+  reporta como contraste barato y verificable a mano: si los dos ICs difieren
+  mucho, la distribución es muy asimétrica y eso **es información**, no ruido.
+
+También: ``desviacion_estandar``, ``cv`` (coeficiente de variación σ/μ) y
+percentiles p5/p25/p50/p75/p95. El CV es el que permite comparar contra el
+paper de referencia, que reporta CV ≈ 39% a 30 m (ver
+docs/REFERENCIA_PAPER_2602.08477.md §3) — criterio de aceptación del ítem P1-B.
+Los percentiles importan porque con un enjambre parcialmente alcanzable la
+distribución puede ser multimodal y la media sola lo esconde.
+
+MÉTRICA SECUNDARIA — ``aniquilacion_total``: proporción de réplicas en las que
+cayó el enjambre COMPLETO, con su IC de Wilson (ahí sí la réplica es un ensayo
+Bernoulli legítimo, así que Wilson es correcto). Esto es lo que antes de P1-A
+se reportaba como ``p_hat``/``ic95``, o sea como si fuera "la probabilidad de
+baja". No lo era, y en casi todo el espacio de operación vale 0: medido con la
+configuración por defecto (cañón 25 kW contra enjambre a ~700 m) daba 1 baja en
+240 exposiciones y reportaba p̂=0 con IC=[0, 0.32] — un estimador ciego, que
+además dejaba sin gradiente al ítem P3-B (coevolución genética: un fitness
+constante 0 no evoluciona nada). Ver docs/AUDITORIA_CHECKLIST.md §1.2.
+
+- ``convergencia``: serie de la fracción media acumulada y el semiancho de su
+  IC cada réplica, para verificar que el estimador se estabiliza con N.
+
+Cada réplica crea su propia ``SimulationEngine`` **sin hilo** y avanza con
+``SimulationEngine._tick(dt)`` — el mismo paso que usa el bucle en tiempo
+real, así que los números del experimento son los del modelo en producción.
+
+RNG por réplica, aislado (P0-B): cada réplica construye su propio
+``numpy.random.Generator`` con ``nuevo_generador(cfg.semilla + i)`` y se lo
+inyecta a su ``SimulationEngine`` (que a su vez lo propaga a
+``Swarm``/``HPMissileSystem``/``Drone``/``HPMissile``, ver
+src/utils/reproducibilidad.py). No hay generador compartido con nadie: ni con
+el hilo de la simulación interactiva, ni con otras réplicas, ni con otros
+experimentos corriendo en paralelo. Antes de este cambio las réplicas
+sembraban el generador GLOBAL de ``src/utils/reproducibilidad.py``
+(``seed_simulacion(cfg.semilla + i)``), el mismo que consume
+``SimulationEngine._run_loop`` de la simulación interactiva — un stopgap
+documentado que hacía que dos consumidores concurrentes del generador se
+corrompieran mutuamente (ver docs/AUDITORIA_CHECKLIST.md §3.1). Con la
+inyección, esa limitación queda cerrada: ``tests/test_aislamiento_rng.py``
+verifica que un experimento corrido en paralelo con la simulación
+interactiva, y dos experimentos concurrentes con la misma semilla, dan
+resultados bit a bit idénticos a correrlos aislados.
+"""
+
+from __future__ import annotations
+
+import threading
+import time
+import uuid
+from dataclasses import dataclass, field
+from typing import Any
+
+import numpy as np
+
+from src import config as config_mod
+from src.engine.parametros import EspecificacionMC
+from src.engine.simulation import SimulationEngine
+from src.utils.reproducibilidad import build_manifest, nuevo_generador
+
+Z_95 = 1.959963984540054
+
+# t de Student al 97.5% (bilateral 95%) por grados de libertad. Tabla en vez de
+# scipy: scipy está en el venv pero NO en requirements.txt, así que el entorno
+# no es reproducible desde requirements y no se puede depender de él (ver
+# docs/AUDITORIA_CHECKLIST.md §4.6).
+#
+# Cuánto error introduce truncar la tabla: a df=30 la t (2.042) está un 4.0%
+# por encima de la normal (1.960), NO menos del 1% — la convergencia t→normal
+# es lenta. Recién alrededor de df≈120 (t=1.980) el error baja del 1%. Por eso
+# la tabla llega a 120 en vez de a 30, y para df intermedios se toma el df
+# tabulado INMEDIATAMENTE INFERIOR: da un t algo mayor, o sea un intervalo
+# algo más ancho — conservador, que es el lado correcto para equivocarse en un
+# intervalo de confianza.
+_T_975 = {
+    1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447, 7: 2.365,
+    8: 2.306, 9: 2.262, 10: 2.228, 11: 2.201, 12: 2.179, 13: 2.160, 14: 2.145,
+    15: 2.131, 16: 2.120, 17: 2.110, 18: 2.101, 19: 2.093, 20: 2.086,
+    21: 2.080, 22: 2.074, 23: 2.069, 24: 2.064, 25: 2.060, 26: 2.056,
+    27: 2.052, 28: 2.048, 29: 2.045, 30: 2.042,
+    40: 2.021, 50: 2.009, 60: 2.000, 80: 1.990, 100: 1.984, 120: 1.980,
+}
+_T_975_DF = sorted(_T_975)
+
+# Semilla del remuestreo bootstrap. Fija a propósito: un IC que cambia de
+# corrida en corrida sobre los mismos datos no es reportable. El bootstrap usa
+# su propio Generator aislado (nuevo_generador), no el global ni el de la
+# réplica.
+BOOTSTRAP_SEED = 20260912
+BOOTSTRAP_REMUESTREOS = 10_000
+
+
+def t_critico_975(n: int) -> float:
+    """Valor crítico t al 95% bilateral para ``n`` observaciones (df = n-1).
+
+    Para un df no tabulado se usa el tabulado inmediatamente inferior (t algo
+    mayor ⇒ intervalo algo más ancho: conservador). Por encima de df=120 se
+    usa la normal, donde el error ya es < 1%.
+    """
+    df = n - 1
+    if df <= 0:
+        return float("nan")
+    if df in _T_975:
+        return float(_T_975[df])
+    inferiores = [d for d in _T_975_DF if d < df]
+    if not inferiores or df > _T_975_DF[-1]:
+        return float(Z_95)
+    return float(_T_975[inferiores[-1]])
+
+
+def intervalo_t(valores: list[float] | np.ndarray) -> tuple[float, float]:
+    """IC del 95% por t de Student sobre la media, recortado a [0, 1].
+
+    Las observaciones son fracciones (acotadas en [0,1]), así que el intervalo
+    se recorta: un límite fuera de [0,1] no es interpretable como fracción. El
+    recorte se declara porque degrada la cobertura nominal cerca de los
+    extremos — es precisamente el caso donde ``ic95_bootstrap`` es preferible.
+    """
+    x = np.asarray(valores, dtype=float)
+    n = x.size
+    if n == 0:
+        return (0.0, 0.0)
+    if n == 1:
+        return (float(x[0]), float(x[0]))
+    media = float(x.mean())
+    # ddof=1: varianza muestral (estimador no sesgado), no poblacional.
+    error_estandar = float(x.std(ddof=1)) / (n**0.5)
+    semiancho = t_critico_975(n) * error_estandar
+    return (max(0.0, media - semiancho), min(1.0, media + semiancho))
+
+
+def intervalo_bootstrap(
+    valores: list[float] | np.ndarray,
+    remuestreos: int = BOOTSTRAP_REMUESTREOS,
+    seed: int = BOOTSTRAP_SEED,
+) -> tuple[float, float]:
+    """IC del 95% por bootstrap de percentiles sobre la media.
+
+    Remuestrea con reemplazo las observaciones POR RÉPLICA (no por dron: ver el
+    docstring del módulo) y toma los percentiles 2.5 y 97.5 de la distribución
+    de medias remuestreadas.
+
+    Determinista por construcción: usa ``nuevo_generador(seed)``, un Generator
+    aislado. Mismos datos ⇒ mismo intervalo, siempre.
+
+    Caso degenerado: si todas las observaciones son idénticas (todas 0 o todas
+    1, que ocurre de verdad — un arma inefectiva a larga distancia da todas 0),
+    todas las medias remuestreadas coinciden y el intervalo colapsa a un punto.
+    Eso es correcto y es lo que el bootstrap debe decir: con esos datos no hay
+    variabilidad observada. No se ensancha artificialmente.
+    """
+    x = np.asarray(valores, dtype=float)
+    n = x.size
+    if n == 0:
+        return (0.0, 0.0)
+    if n == 1:
+        return (float(x[0]), float(x[0]))
+
+    gen = nuevo_generador(seed)
+    idx = gen.integers(0, n, size=(remuestreos, n))
+    medias = x[idx].mean(axis=1)
+    lo, hi = np.percentile(medias, [2.5, 97.5])
+    return (float(max(0.0, lo)), float(min(1.0, hi)))
+
+
+def wilson_interval(k: int, n: int, z: float = Z_95) -> tuple[float, float]:
+    """Intervalo de confianza de Wilson para una proporción (k éxitos en n).
+
+    Mejor comportamiento que el IC normal en los extremos (p̂ cerca de 0 o 1),
+    típicos de las probabilidades de baja HPM a media/larga distancia.
+    """
+    if n <= 0:
+        return (0.0, 0.0)
+    p = k / n
+    z2 = z * z
+    denom = 1.0 + z2 / n
+    center = (p + z2 / (2.0 * n)) / denom
+    half = (z / denom) * (p * (1.0 - p) / n + z2 / (4.0 * n * n)) ** 0.5
+    return (max(0.0, center - half), min(1.0, center + half))
+
+
+@dataclass
+class WeaponPolicy:
+    """Política de arma mínima para una réplica.
+
+    - "canion": un disparo del cañón HPM estático en ``delay_s`` (dirección
+      fija; ``direccion=None`` conserva el azimut por defecto del arma).
+    - "misil": un misil lanzado desde el origen del arma en ``delay_s``
+      (``direccion=None`` = auto-apuntado al centroide detectado, igual que
+      el lanzamiento manual por API).
+    - "ninguna": grupo control (métrica base del escenario sin arma).
+    """
+
+    tipo: str = "ninguna"
+    delay_s: float = 1.0
+    potencia: float | None = None
+    direccion: float | None = None
+    misil_potencia: float | None = None
+    misil_radio: float | None = None
+
+
+@dataclass
+class ExperimentConfig:
+    formacion: str = "circular"
+    cantidad: int = 30
+    replicas: int = 50
+    t_max_s: float = 60.0
+    dt: float = 1.0 / 30.0
+    semilla: int = 1234
+    arma: WeaponPolicy = field(default_factory=WeaponPolicy)
+
+
+def run_replica(cfg: ExperimentConfig, replica_idx: int) -> dict[str, Any]:
+    """Ejecuta una réplica completa y devuelve su métrica primaria.
+
+    Crea un generador NUEVO con ``nuevo_generador(cfg.semilla + replica_idx)``
+    y se lo inyecta al motor: la réplica i es reproducible de forma aislada
+    sin tocar (ni depender de) el generador global — así puede correr en
+    paralelo con la simulación interactiva o con otras réplicas/experimentos.
+    """
+    gen = nuevo_generador(cfg.semilla + replica_idx)
+
+    sim = SimulationEngine(swarm_size=cfg.cantidad, rng=gen)
+    sim.configure_swarm(cfg.formacion, cfg.cantidad)
+
+    disparado = False
+    while sim.tiempo < cfg.t_max_s:
+        if (
+            not disparado
+            and cfg.arma.tipo != "ninguna"
+            and sim.tiempo >= cfg.arma.delay_s
+        ):
+            if cfg.arma.tipo == "canion":
+                sim.fire(
+                    potencia=cfg.arma.potencia,
+                    direccion=cfg.arma.direccion,
+                )
+            else:
+                sim.launch_missile(
+                    x=sim.hpm.origen_x,
+                    y=sim.hpm.origen_y,
+                    angulo=cfg.arma.direccion,
+                    potencia=cfg.arma.misil_potencia,
+                    radio=cfg.arma.misil_radio,
+                )
+            disparado = True
+
+        sim._tick(cfg.dt)
+
+        conteo = sim.swarm.contar_por_estado()
+        if conteo["neutralizado"] >= len(sim.swarm.drones):
+            break
+
+    conteo = sim.swarm.contar_por_estado()
+    total = len(sim.swarm.drones)
+    neutralizados = conteo["neutralizado"]
+    return {
+        "replica": replica_idx,
+        "semilla": cfg.semilla + replica_idx,
+        "neutralizados": neutralizados,
+        "total": total,
+        # MÉTRICA PRIMARIA de la réplica (P1-A): su fracción neutralizada. Es
+        # la observación que entra a los intervalos del resumen.
+        "fraccion": (neutralizados / total) if total > 0 else 0.0,
+        "t_sim": round(sim.tiempo, 3),
+        # MÉTRICA SECUNDARIA: ¿cayó el enjambre completo? Ensayo Bernoulli
+        # legítimo a nivel réplica, pero vale 0 en casi todo el espacio de
+        # operación — no confundir con "probabilidad de baja".
+        "exito": neutralizados >= total and total > 0,
+    }
+
+
+@dataclass
+class ExperimentRecord:
+    id: str
+    config: dict[str, Any]
+    manifest: dict[str, Any]
+    status: str = "corriendo"
+    completadas: int = 0
+    resultados: list[dict[str, Any]] = field(default_factory=list)
+    resumen: dict[str, Any] | None = None
+    error: str | None = None
+
+
+class ExperimentManager:
+    """Ejecuta experimentos en un hilo background y expone progreso/resultados."""
+
+    def __init__(self) -> None:
+        self._records: dict[str, ExperimentRecord] = {}
+        self._lock = threading.Lock()
+
+    def start(self, cfg: ExperimentConfig) -> str:
+        exp_id = f"exp-{uuid.uuid4().hex[:8]}"
+        record = ExperimentRecord(
+            id=exp_id,
+            config={
+                "formacion": cfg.formacion,
+                "cantidad": cfg.cantidad,
+                "replicas": cfg.replicas,
+                "t_max_s": cfg.t_max_s,
+                "dt": cfg.dt,
+                "semilla": cfg.semilla,
+                "arma": {
+                    "tipo": cfg.arma.tipo,
+                    "delay_s": cfg.arma.delay_s,
+                    "potencia": cfg.arma.potencia,
+                    "direccion": cfg.arma.direccion,
+                    "misil_potencia": cfg.arma.misil_potencia,
+                    "misil_radio": cfg.arma.misil_radio,
+                },
+            },
+            manifest=build_manifest({"experimento": {"id": exp_id}}),
+        )
+        with self._lock:
+            self._records[exp_id] = record
+
+        hilo = threading.Thread(
+            target=self._run,
+            args=(record, cfg),
+            daemon=True,
+            name=f"experiment-{exp_id}",
+        )
+        hilo.start()
+        return exp_id
+
+    def _run(self, record: ExperimentRecord, cfg: ExperimentConfig) -> None:
+        try:
+            for i in range(cfg.replicas):
+                resultado = run_replica(cfg, i)
+                with self._lock:
+                    record.resultados.append(resultado)
+                    record.completadas = i + 1
+
+            with self._lock:
+                record.resumen = self._summarize(record.resultados)
+                record.status = "completado"
+        except Exception as exc:  # noqa: BLE001 — reportar cualquier falla al cliente
+            with self._lock:
+                record.status = "error"
+                record.error = f"{type(exc).__name__}: {exc}"
+
+    @staticmethod
+    def _summarize(resultados: list[dict[str, Any]]) -> dict[str, Any]:
+        """Agrega las réplicas en estadística con señal (P1-A).
+
+        La unidad de muestreo es la réplica: cada una aporta UNA observación
+        (su fracción neutralizada). Ver el docstring del módulo para por qué
+        agregar por dron sería inválido.
+
+        Todos los valores de salida son ``float``/``int`` nativos de Python, no
+        escalares de numpy: el registro viaja por ``GET /api/experiments/{id}``
+        y ``np.float64`` no serializa limpio a JSON en todos los caminos de
+        FastAPI.
+        """
+        n = len(resultados)
+        if n == 0:
+            return {"replicas": 0}
+
+        fracciones = [float(r["fraccion"]) for r in resultados]
+        arr = np.asarray(fracciones, dtype=float)
+
+        fraccion_media = float(arr.mean())
+        # ddof=1: varianza muestral. Con n=1 numpy daría NaN, así que se acota.
+        desv = float(arr.std(ddof=1)) if n > 1 else 0.0
+        boot_lo, boot_hi = intervalo_bootstrap(arr)
+        t_lo, t_hi = intervalo_t(arr)
+
+        # Métrica secundaria: aniquilación total del enjambre. Acá la réplica
+        # SÍ es un ensayo Bernoulli, así que Wilson es el intervalo correcto.
+        exitos = sum(1 for r in resultados if r["exito"])
+        aniq_lo, aniq_hi = wilson_interval(exitos, n)
+
+        # Convergencia de la MÉTRICA PRIMARIA: media acumulada y semiancho de
+        # su IC. El bootstrap se remuestrea en cada paso, así que se usa un
+        # número reducido de remuestreos para que la serie no domine el coste
+        # del experimento (la serie es diagnóstica, no reportable por sí sola).
+        convergencia = []
+        for i in range(1, n + 1):
+            parcial = arr[:i]
+            c_lo, c_hi = intervalo_bootstrap(parcial, remuestreos=1000)
+            convergencia.append(
+                {
+                    "n": i,
+                    "fraccion_media": round(float(parcial.mean()), 4),
+                    "semiancho": round((c_hi - c_lo) / 2.0, 4),
+                }
+            )
+
+        p5, p25, p50, p75, p95 = (
+            float(v) for v in np.percentile(arr, [5, 25, 50, 75, 95])
+        )
+
+        return {
+            "replicas": n,
+            # ── MÉTRICA PRIMARIA ──
+            "fraccion_media": round(fraccion_media, 4),
+            "ic95_bootstrap": [round(boot_lo, 4), round(boot_hi, 4)],
+            "ic95_t": [round(t_lo, 4), round(t_hi, 4)],
+            "desviacion_estandar": round(desv, 4),
+            # Coeficiente de variación σ/μ. Contraste contra el CV ≈ 39% que
+            # reporta el paper a 30 m (docs/REFERENCIA_PAPER_2602.08477.md §3)
+            # — criterio de aceptación de P1-B. None si la media es 0: el CV no
+            # está definido ahí, y devolver 0 o inf sería mentir.
+            "cv": round(desv / fraccion_media, 4) if fraccion_media > 0 else None,
+            "percentiles": {
+                "p5": round(p5, 4), "p25": round(p25, 4), "p50": round(p50, 4),
+                "p75": round(p75, 4), "p95": round(p95, 4),
+            },
+            "convergencia": convergencia,
+            "fracciones_por_replica": [round(f, 4) for f in fracciones],
+            "neutralizados_por_replica": [int(r["neutralizados"]) for r in resultados],
+            # ── MÉTRICA SECUNDARIA ──
+            # Antes de P1-A esto se reportaba como "p_hat"/"ic95", o sea como
+            # si fuera la probabilidad de baja. No lo es: es P(cae el enjambre
+            # COMPLETO), que vale 0 en casi todo el espacio de operación.
+            "aniquilacion_total": {
+                "replicas_con_enjambre_aniquilado": exitos,
+                "proporcion": round(exitos / n, 4),
+                "ic95_wilson": [round(aniq_lo, 4), round(aniq_hi, 4)],
+            },
+        }
+
+    def get(self, exp_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            record = self._records.get(exp_id)
+            if record is None:
+                return None
+            return {
+                "id": record.id,
+                "status": record.status,
+                "config": record.config,
+                "completadas": record.completadas,
+                "replicas": record.config["replicas"],
+                "progress": record.completadas / max(1, record.config["replicas"]),
+                "resumen": record.resumen,
+                "resultados": record.resultados,
+                "error": record.error,
+                "manifest": record.manifest,
+            }
+
+    def list(self) -> list[dict[str, Any]]:
+        with self._lock:
+            ids = sorted(self._records.keys(), reverse=True)
+        return [resumen for exp_id in ids if (resumen := self.get(exp_id)) is not None]
+
+
+experiment_manager = ExperimentManager()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# P1-B/P1-C · Monte Carlo de parámetros sobre un blanco único
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Es el experimento del paper de referencia, y la prueba de aceptación de las
+# dos fases: su salida se contrasta directamente contra 51.4% @ 20 m y
+# 13.1% @ 40 m (Tabla de docs/REFERENCIA_PAPER_2602.08477.md §7) y contra el
+# CV ≈ 39% @ 30 m que el paper reporta.
+#
+# Es deliberadamente SEPARADO del MC de enjambre (``run_replica``): el número
+# publicado es la probabilidad de baja de UN blanco bajo incertidumbre de
+# parámetros, no el resultado de una simulación de enjambre. Mezclar las dos
+# cosas fue el defecto original — se reportaba una métrica de enjambre
+# (aniquilación total) como si fuera la probabilidad de baja del paper.
+
+
+def _factor_taper_haz(offset_deg: float, apertura_deg: float) -> float:
+    """Atenuación en AMPLITUD por desapunte, coherente con ``friis_diagnostics``.
+
+    El motor aplica ``cos²`` a la densidad de POTENCIA, así que en amplitud de
+    campo el taper es ``cos¹`` (la raíz). Se replica exactamente eso acá para
+    que el MC de blanco único y el motor de simulación no discrepen.
+    (Que ese taper no sea un patrón de antena real es una limitación conocida
+    y separada: es el ítem P2-C del checklist.)
+    """
+    semi = apertura_deg / 2.0
+    if semi <= 0:
+        return 1.0
+    if abs(offset_deg) >= semi:
+        return 0.0
+    normalizado = abs(offset_deg) / semi
+    return float(np.cos(normalizado * (np.pi / 2.0)))
+
+
+def monte_carlo_blanco_unico(
+    distancia_m: float,
+    espec: "EspecificacionMC | None" = None,
+    n: int = 10_000,
+    seed: int = 8477,
+    duty_cycle: float = 1.0,
+    pulse_duration_ns: float | None = None,
+    modelo_dano: str = "subsistemas",
+) -> dict[str, Any]:
+    """Monte Carlo de parámetros sobre un blanco a ``distancia_m``, en el eje.
+
+    Reproduce el experimento del paper: por cada tirada se muestrean los ocho
+    parámetros (potencia, diámetro de plato, eficiencia de apertura, error de
+    apuntado, ángulo de polarización, longitud de cable y los umbrales de los
+    cinco subsistemas), se propaga la cadena física completa y se evalúa la
+    probabilidad de baja.
+
+    Cadena por tirada:
+
+        1. G = η·(πD/λ)²                       (plato real, P1-B)
+        2. S = P_pico·G/(4πr²) · taper(θ_err)²  (Friis + desapunte)
+        3. E_inc = √(S·377)
+        4. E_inc ·= g(τ)                        (Wunsch-Bell, P1-E)
+        5. E_acop = E_inc · k · f_pol           (acoplamiento, P1-C)
+        6. P = OR-gate sobre los 5 subsistemas  (ecuación 7 del paper)
+
+    SOBRE EL PASO 5 — ``√η_pol`` va CRUDO, sin normalizar. Historia, porque el
+    error importa: una primera versión lo normalizaba (``√η_pol / E[√η_pol]``)
+    para preservar la media del acoplamiento, y ``k`` se había ajustado contra
+    los puntos publicados con un cálculo DETERMINISTA. Las dos decisiones
+    juntas eran un error de método: ajustar un determinista a puntos que son
+    salida de un Monte Carlo absorbe el sesgo del MC dentro del parámetro —
+    exactamente el defecto §1.3 de la auditoría, cometido de nuevo. Se
+    descartó. Ahora ``k`` se ajusta con el MC dentro del lazo y ``√η_pol`` se
+    aplica crudo, que es lo coherente: el parámetro y su uso se calibran con el
+    mismo procedimiento.
+
+    ⚠ Ni así el modelo cierra: ver ``tests/test_parametros.py::
+    TestModeloSubsistemasBloqueado`` y docs/FISICA_Y_MATEMATICA.md §3.6. El
+    modelo de subsistemas está BLOQUEADO a falta de confirmar la cadena de
+    acoplamiento contra el PDF del paper.
+
+    Devuelve la probabilidad media de baja, su IC del 95% por bootstrap, el
+    coeficiente de variación, percentiles y los diagnósticos de campo.
+    """
+    from src.engine.hpm_engine import (
+        VACUUM_IMPEDANCE_OHM,
+        antenna_gain_from_dish,
+        calculate_neutralization_probability_friis,
+        campo_acoplado_v_m,
+        dish_beamwidth_deg,
+        probabilidad_dano_sistema,
+        pulse_coupling_factor,
+    )
+    from src.engine.parametros import EspecificacionMC as _Espec
+
+    if espec is None:
+        espec = _Espec.del_paper()
+
+    gen = nuevo_generador(seed)
+    muestras = [espec.muestrear(gen) for _ in range(n)]
+
+    # √η_pol crudo: el acoplamiento y su parámetro k se calibran con el mismo
+    # procedimiento (MC en el lazo), así que normalizar acá rompería esa
+    # coherencia. Ver la nota del docstring sobre el error descartado.
+    f_pol = np.array([m.eta_polarizacion**0.5 for m in muestras], dtype=float)
+
+    g_tau = pulse_coupling_factor(pulse_duration_ns)
+    duty = float(np.clip(duty_cycle, 1e-3, 1.0))
+    r = max(float(distancia_m), 1e-6)
+
+    probabilidades = np.empty(n, dtype=float)
+    campos_incidentes = np.empty(n, dtype=float)
+
+    for i, m in enumerate(muestras):
+        ganancia = antenna_gain_from_dish(
+            m.diametro_plato_m, m.eficiencia_apertura, config_mod.HPM_FREQUENCY_GHZ
+        )
+        apertura = dish_beamwidth_deg(m.diametro_plato_m, config_mod.HPM_FREQUENCY_GHZ)
+        taper = _factor_taper_haz(m.error_apuntado_deg, apertura)
+
+        potencia_pico_w = (m.potencia_kw / duty) * 1000.0
+        densidad = (potencia_pico_w * ganancia) / (4.0 * np.pi * r**2) * taper**2
+        e_inc = float(np.sqrt(max(densidad, 0.0) * VACUUM_IMPEDANCE_OHM)) * g_tau
+        campos_incidentes[i] = e_inc
+
+        if modelo_dano == "subsistemas":
+            e_acop = campo_acoplado_v_m(e_inc) * float(f_pol[i])
+            probabilidades[i] = probabilidad_dano_sistema(
+                e_acop, m.umbrales_subsistemas
+            )
+        elif modelo_dano == "agregado":
+            probabilidades[i] = calculate_neutralization_probability_friis(
+                potencia_kw=m.potencia_kw,
+                distancia=r,
+                apertura_cono=apertura,
+                angulo_offset=m.error_apuntado_deg,
+                duty_cycle=duty,
+                pulse_duration_ns=pulse_duration_ns,
+            )
+        else:
+            raise ValueError(
+                f"modelo_dano debe ser 'subsistemas' o 'agregado', no {modelo_dano!r}"
+            )
+
+    media = float(probabilidades.mean())
+    desv = float(probabilidades.std(ddof=1)) if n > 1 else 0.0
+    lo, hi = intervalo_bootstrap(probabilidades, remuestreos=2000, seed=seed + 1)
+    p5, p50, p95 = (float(v) for v in np.percentile(probabilidades, [5, 50, 95]))
+
+    return {
+        "distancia_m": r,
+        "tiradas": n,
+        "modelo_dano": modelo_dano,
+        "probabilidad_media": round(media, 6),
+        "ic95_bootstrap": [round(lo, 6), round(hi, 6)],
+        "desviacion_estandar": round(desv, 6),
+        # CV de la probabilidad de baja entre tiradas. Contraste contra el
+        # CV ≈ 39% @ 30 m que reporta el paper.
+        "cv": round(desv / media, 6) if media > 0 else None,
+        "percentiles": {"p5": round(p5, 6), "p50": round(p50, 6), "p95": round(p95, 6)},
+        "campo_incidente_medio_v_m": round(float(campos_incidentes.mean()), 4),
+        "campo_incidente_cv": (
+            round(float(campos_incidentes.std(ddof=1) / campos_incidentes.mean()), 6)
+            if n > 1 and campos_incidentes.mean() > 0 else None
+        ),
+        "espec": espec.to_dict(),
+    }
