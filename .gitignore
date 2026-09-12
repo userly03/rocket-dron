@@ -18,3 +18,7 @@ npm-debug.log*
 .idea/
 *.swp
 .DS_Store
+
+# Salida de graphify (artefacto generado, ~6MB). Se reconstruye con:
+#   graphify update .
+graphify-out/

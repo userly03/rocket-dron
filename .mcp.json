@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "graphify": {
+      "type": "stdio",
+      "command": "/home/fennec/.local/share/uv/tools/graphifyy/bin/python",
+      "args": [
+        "-m",
+        "graphify.serve",
+        "/home/fennec/Documentos/simulador-ew/graphify-out/graph.json"
+      ],
+      "env": {}
+    }
+  }
+}

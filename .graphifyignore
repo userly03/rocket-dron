@@ -1,0 +1,8 @@
+# Bundles de terceros: three.js vendorizado. Son ~2200 nodos de código
+# minificado que no describen la arquitectura de este proyecto y ahogan
+# los ~350 nodos reales de src/.
+frontend/js/vendor/
+frontend/node_modules/
+# Salida del propio graphify y cachés
+graphify-out/
+.pytest_cache/
