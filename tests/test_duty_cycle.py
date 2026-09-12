@@ -223,50 +223,93 @@ class TestAlcance90PorCiento:
         assert pulsado / cw == pytest.approx((pico_pulsado / pico_cw) ** 0.5, rel=1e-4)
 
     def test_brecha_absoluta_documentada(self):
-        """Los alcances absolutos NO reproducen los 18 m / 88 m del paper, y
-        la brecha está cuantificada y atribuida.
+        """Los alcances absolutos NO reproducen los 18 m / 88 m del paper — y ahora
+        se sabe POR QUÉ: esas cifras son inconsistentes con la propia tabla del paper.
 
-        Medido: CW ≈ 11.74 m (paper 18 m), pulsado ≈ 52.50 m (paper 88 m) —
-        un 35% y un 40% por debajo.
+        Medido tras P1-F (función de enlace log-logística): CW ≈ 8.74 m (paper
+        18 m), pulsado ≈ 39.09 m (paper 88 m).
 
-        CAUSA DOMINANTE (cuantificada, no conjeturada): el umbral AGREGADO del
-        simulador exige E = E₀ + ln(9)/k = 500 + ln(9)/0.0075 = **793 V/m**
-        para llegar al 90% de baja. A 18 m el simulador tiene 517 V/m y el
-        paper 552 V/m — o sea que el paper declara 90% de baja a ~552 V/m,
-        menos del 70% del campo que el umbral agregado necesita. La diferencia
-        de ganancia (20.6 vs 21.2 dBi, −6.4% en campo) explica solo una parte
-        pequeña: corregida sola, movería el alcance a ~12.5 m, no a 18 m.
+        HALLAZGO SOBRE LA REFERENCIA (no sobre el simulador). Los tres números
+        publicados son mutuamente inconsistentes bajo CUALQUIER ajuste de dos
+        parámetros:
 
-        Lo que falta es el modelo de 5 subsistemas en OR-gate del paper
-        (P_system = 1 − Π(1−pᵢ), con E₅₀ de 150 a 350 V/m): cinco
-        oportunidades de fallar alcanzan el 90% a un campo mucho menor que una
-        única sigmoide centrada en 500 V/m. Eso es exactamente el ítem P1-C del
-        checklist, y esta brecha es su evidencia cuantitativa.
+          (a) 51.4 % @ 20 m  →  E = 497.2 V/m
+          (b) 13.1 % @ 40 m  →  E = 248.6 V/m
+          (c) 90 % @ ~18 m   →  E = 552.4 V/m
 
-        Este test NO afloja una tolerancia hasta pasar: fija la brecha medida
-        para que quede visible y falle si cambia, en cualquier dirección. Si
-        P1-C cierra la brecha, este test debe fallar y actualizarse — eso es
-        lo que se quiere.
+        De (a)+(b) sale un parámetro de forma b = 2.81. De (a)+(c) sale
+        b = 20.32 — un factor **7.2** de discrepancia. Entre 497 y 552 V/m
+        (un +11 % de campo) la probabilidad tendría que saltar de 51.4 % a 90 %,
+        lo que exige una pendiente siete veces mayor que la que fijan sus
+        propios dos puntos. Con la logística vieja pasa lo mismo: E₀=500 y
+        k=0.0075 (ajustados a (a)+(b)) dan P(552.4) = 0.597, no 0.90.
+
+        EXPLICACIÓN MÁS PROBABLE (inferencia, no dato del paper): las cifras de
+        90 % de alcance salen de su curva **determinista**, no de la Monte
+        Carlo. El paper declara 83 % @ 20 m y 20 % @ 40 m en determinista, y
+        esos puntos dan b = 4.29; determinista-83 % @ 20 m combinado con 90 % @
+        18 m da b = 5.81 — mismo orden. El 20.32 es el outlier. El simulador
+        calibra contra los puntos **Monte Carlo**, así que no puede reproducir
+        una cifra derivada del determinista.
+
+        CONSECUENCIA: el criterio de aceptación original de P1-E (18 m / 88 m)
+        **nunca fue alcanzable** desde los puntos de calibración. Eso explica
+        retroactivamente por qué la brecha no cerró ni con la logística ni con
+        la log-logística. Se conserva el test para fijar la brecha medida y
+        detectar si cambia, NO como criterio de validación del modelo.
         """
         cw = self._alcance(self.POTENCIA_CW_KW, 1.0)
         pulsado = self._alcance(self.POTENCIA_PULSADA_PROMEDIO_KW, self.DUTY_PULSADO)
 
-        assert cw == pytest.approx(11.74, abs=0.15)
-        assert pulsado == pytest.approx(52.50, abs=0.60)
-        # La brecha va en la dirección esperada: el umbral agregado es más
-        # exigente que el OR-gate del paper, así que el alcance queda corto.
+        assert cw == pytest.approx(8.74, abs=0.15)
+        assert pulsado == pytest.approx(39.09, abs=0.60)
+        # La brecha va en la dirección esperada por la inconsistencia de (c).
         assert cw < 18.0
         assert pulsado < 88.0
 
+    def test_la_cifra_de_90pc_del_paper_es_internamente_inconsistente(self):
+        """Fija el hallazgo de arriba como aritmética verificable, no como prosa.
+
+        Si alguien "arregla" el modelo para alcanzar los 18 m manteniendo los
+        dos puntos de calibración, este test falla — porque es matemáticamente
+        imposible con dos parámetros, y el fallo señalaría que se introdujo un
+        tercero sin declararlo.
+        """
+        import math
+
+        E_20M, E_40M = 497.2, 248.6
+        E_18M = E_20M * 20 / 18
+
+        def forma(e_a, o_a, e_b, o_b):
+            return math.log((1 / o_a - 1) / (1 / o_b - 1)) / math.log(e_b / e_a)
+
+        b_desde_tabla = forma(E_20M, 0.514, E_40M, 0.131)
+        b_desde_alcance = forma(E_20M, 0.514, E_18M, 0.90)
+
+        assert b_desde_tabla == pytest.approx(2.81, abs=0.02)
+        assert b_desde_alcance == pytest.approx(20.32, abs=0.2)
+        assert b_desde_alcance / b_desde_tabla > 5.0
+
+        # La hipótesis determinista sí es coherente en orden de magnitud.
+        b_determinista = forma(E_20M, 0.83, E_40M, 0.20)
+        b_det_mas_alcance = forma(E_20M, 0.83, E_18M, 0.90)
+        assert 3.5 < b_determinista < 5.5
+        assert 4.5 < b_det_mas_alcance < 7.0
+
     def test_el_alcance_decrece_al_subir_el_umbral(self):
         """Chequeo de sanidad direccional del buscador de alcance."""
-        from src.config import HPM_E_THRESHOLD_V_M
+        from src.config import HPM_LOGLOGISTIC_E50_V_M
 
+        # MODIFICADO en P1-F: antes se parcheaba ``e_threshold``, que es el
+        # parámetro de la logística. Con la log-logística por defecto ese
+        # argumento se ignora, así que el test habría quedado comparando dos
+        # corridas idénticas — pasando por casualidad y sin probar nada. Ahora
+        # se parchea ``e50``, el parámetro que de verdad gobierna.
         laxo = alcance_para_probabilidad(
-            0.90, self.POTENCIA_CW_KW, e_threshold=HPM_E_THRESHOLD_V_M * 0.5
+            0.90, self.POTENCIA_CW_KW, e50=HPM_LOGLOGISTIC_E50_V_M * 0.5
         )
         estricto = alcance_para_probabilidad(
-            0.90, self.POTENCIA_CW_KW, e_threshold=HPM_E_THRESHOLD_V_M * 2.0
+            0.90, self.POTENCIA_CW_KW, e50=HPM_LOGLOGISTIC_E50_V_M * 2.0
         )
         assert laxo is not None and estricto is not None
         assert laxo > estricto

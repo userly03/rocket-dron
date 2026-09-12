@@ -33,18 +33,82 @@ from src.config import (
     HPM_E_THRESHOLD_V_M,
     HPM_FREQUENCY_GHZ,
     HPM_K_CONSTANT,
+    HPM_LINK_FUNCTION,
+    HPM_LOGLOGISTIC_B,
+    HPM_LOGLOGISTIC_E50_V_M,
     HPM_MISSILE_E_THRESHOLD_V_M,
+    HPM_MISSILE_LOGLOGISTIC_B,
+    HPM_MISSILE_LOGLOGISTIC_E50_V_M,
     HPM_MISSILE_SIGMOID_STEEPNESS,
     HPM_PULSE_DURATION_NS,
     HPM_PULSE_TAU_ADIABATICO_NS,
     HPM_PULSE_TAU_ESTACIONARIO_NS,
     HPM_SIGMOID_STEEPNESS,
     HPM_SUBSISTEMAS,
+    HPM_SUBSISTEMAS_LOGLOGISTIC_B,
 )
 from src.engine.radar_engine import SPEED_OF_LIGHT_M_S
 from src.utils.helpers import angle_difference, distance, distance3d
 
 VACUUM_IMPEDANCE_OHM = 377.0
+
+
+def probabilidad_desde_campo(
+    campo_v_m: float,
+    e_threshold: float,
+    steepness: float,
+    e50: float,
+    b: float,
+    link: str | None = None,
+) -> float:
+    """
+    Convierte un campo E (V/m) en probabilidad de daño, según la función de
+    enlace configurada (``HPM_LINK_FUNCTION``).
+
+    **log_logistica** (default desde P1-F):
+
+        P(E) = 1 / (1 + (E₅₀/E)^b)        P(0) = 0 exacto,  P(∞) = 1
+
+    **logistica** (legacy, se conserva para comparar y para no romper tuning
+    previo):
+
+        P(E) = 1 / (1 + exp(-k·(E - E₀)))     P(0) = 1/(1+exp(k·E₀)) ≠ 0
+
+    POR QUÉ CAMBIÓ EL DEFAULT. La logística tiene soporte en todo ℝ, pero el
+    campo eléctrico es positivo. El resultado era un **piso** de 2.30 % (modelo
+    agregado) o 3.30 % (OR-gate de cinco subsistemas) a campo CERO: un dron sin
+    campo aplicado tenía 2-3 % de caer. Más allá de ~97 m más de la mitad de la
+    probabilidad reportada era ese piso, y a 700 m —todo el rango de combate por
+    defecto— el 90.7 % del número era artefacto. Ver
+    docs/FISICA_Y_MATEMATICA.md §3.7.
+
+    La log-logística (equivalentemente, una logística en ``ln E``) es el modelo
+    estándar de dosis-respuesta para dosis positivas, justamente porque el
+    soporte de la distribución de umbrales es ``(0, ∞)``. Ajusta los MISMOS dos
+    puntos publicados con los MISMOS dos parámetros libres, y con residuo
+    exacto (0.0000 pp) en vez de −1.92 pp.
+
+    Conversión entre familias, cuando hace falta migrar parámetros: la que
+    **preserva la pendiente en E₅₀** es ``b = E₅₀/σ``, porque
+    ``dP/dE|E₅₀`` vale ``1/(4σ)`` en la logística y ``b/(4·E₅₀)`` en la
+    log-logística.
+    """
+    modelo = HPM_LINK_FUNCTION if link is None else link
+
+    if modelo == "log_logistica":
+        if campo_v_m <= 0.0:
+            return 0.0
+        e50_seguro = max(float(e50), 1e-9)
+        return float(np.clip(1.0 / (1.0 + (e50_seguro / campo_v_m) ** b), 0.0, 1.0))
+
+    if modelo == "logistica":
+        exponent = -steepness * (campo_v_m - e_threshold)
+        return float(np.clip(1.0 / (1.0 + np.exp(exponent)), 0.0, 1.0))
+
+    raise ValueError(
+        f"HPM_LINK_FUNCTION debe ser 'log_logistica' o 'logistica', no {modelo!r}"
+    )
+
 
 
 def resonance_frequency_ghz(cable_length_m: float) -> float:
@@ -347,6 +411,9 @@ def calculate_neutralization_probability_friis(
     angulo_offset: float = 0.0,
     e_threshold: float = HPM_E_THRESHOLD_V_M,
     steepness: float = HPM_SIGMOID_STEEPNESS,
+    e50: float = HPM_LOGLOGISTIC_E50_V_M,
+    b: float = HPM_LOGLOGISTIC_B,
+    link: str | None = None,
     duty_cycle: float = 1.0,
     pulse_duration_ns: float | None = None,
     cable_length_m: float | None = None,
@@ -381,9 +448,9 @@ def calculate_neutralization_probability_friis(
         cable_length_m, polarization, frequency_ghz
     )
     campo_blanco = diag["campo_e_efectivo_v_m"] * acoplamiento
-    exponent = -steepness * (campo_blanco - e_threshold)
-    probabilidad = 1.0 / (1.0 + np.exp(exponent))
-    return float(np.clip(probabilidad, 0.0, 1.0))
+    return probabilidad_desde_campo(
+        campo_blanco, e_threshold, steepness, e50, b, link
+    )
 
 
 def calculate_area_neutralization_probability_friis(
@@ -391,6 +458,9 @@ def calculate_area_neutralization_probability_friis(
     distancia: float,
     e_threshold: float = HPM_MISSILE_E_THRESHOLD_V_M,
     steepness: float = HPM_MISSILE_SIGMOID_STEEPNESS,
+    e50: float = HPM_MISSILE_LOGLOGISTIC_E50_V_M,
+    b: float = HPM_MISSILE_LOGLOGISTIC_B,
+    link: str | None = None,
     duty_cycle: float = 1.0,
     pulse_duration_ns: float | None = None,
     cable_length_m: float | None = None,
@@ -421,9 +491,9 @@ def calculate_area_neutralization_probability_friis(
         cable_length_m, polarization, frequency_ghz
     )
     campo_blanco = diag["campo_e_efectivo_v_m"] * acoplamiento
-    exponent = -steepness * (campo_blanco - e_threshold)
-    probabilidad = 1.0 / (1.0 + np.exp(exponent))
-    return float(np.clip(probabilidad, 0.0, 1.0))
+    return probabilidad_desde_campo(
+        campo_blanco, e_threshold, steepness, e50, b, link
+    )
 
 
 def apply_hardening_odds(probabilidad: float, factor: float) -> float:
@@ -502,6 +572,9 @@ def alcance_para_probabilidad(
     pulse_duration_ns: float | None = None,
     e_threshold: float = HPM_E_THRESHOLD_V_M,
     steepness: float = HPM_SIGMOID_STEEPNESS,
+    e50: float = HPM_LOGLOGISTIC_E50_V_M,
+    b: float = HPM_LOGLOGISTIC_B,
+    link: str | None = None,
     dist_min_m: float = 0.1,
     dist_max_m: float = 100_000.0,
     tolerancia_m: float = 1e-3,
@@ -533,6 +606,9 @@ def alcance_para_probabilidad(
             angulo_offset=0.0,
             e_threshold=e_threshold,
             steepness=steepness,
+            e50=e50,
+            b=b,
+            link=link,
             duty_cycle=duty_cycle,
             pulse_duration_ns=pulse_duration_ns,
         )
@@ -615,7 +691,9 @@ def dish_beamwidth_deg(
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-def probabilidad_dano_subsistema(campo_v_m: float, e50: float, sigma_e: float) -> float:
+def probabilidad_dano_subsistema(
+    campo_v_m: float, e50: float, sigma_e: float, link: str | None = None
+) -> float:
     """Sigmoide de daño de UN subsistema: P = 1/(1+exp(-(E-E₅₀)/σ_E)).
 
     Nótese la parametrización: el paper usa ``σ_E`` (ancho, en V/m), mientras
@@ -623,13 +701,23 @@ def probabilidad_dano_subsistema(campo_v_m: float, e50: float, sigma_e: float) -
     recíprocos: ``steepness = 1/σ_E``. Se conserva la del paper acá para poder
     tomar la Tabla 1 literalmente, sin conversiones que inviten a errores.
     """
-    s = max(float(sigma_e), 1e-9)
-    return float(np.clip(1.0 / (1.0 + np.exp(-(campo_v_m - e50) / s)), 0.0, 1.0))
+    return probabilidad_desde_campo(
+        campo_v_m,
+        e_threshold=e50,
+        steepness=1.0 / max(float(sigma_e), 1e-9),
+        e50=e50,
+        # b = E₅₀/σ preserva la pendiente en E₅₀. Para la Tabla 1 del paper da
+        # exactamente 5.0 en los cinco subsistemas, de ahí el default de
+        # config (HPM_SUBSISTEMAS_LOGLOGISTIC_B).
+        b=HPM_SUBSISTEMAS_LOGLOGISTIC_B,
+        link=link,
+    )
 
 
 def probabilidad_dano_sistema(
     campo_v_m: float,
     subsistemas: dict[str, tuple[float, float]] | None = None,
+    link: str | None = None,
 ) -> float:
     """
     Probabilidad de baja del dron por lógica **OR-gate** sobre sus subsistemas
@@ -650,7 +738,9 @@ def probabilidad_dano_sistema(
     tabla = HPM_SUBSISTEMAS if subsistemas is None else subsistemas
     supervivencia = 1.0
     for e50, sigma_e in tabla.values():
-        supervivencia *= 1.0 - probabilidad_dano_subsistema(campo_v_m, e50, sigma_e)
+        supervivencia *= 1.0 - probabilidad_dano_subsistema(
+            campo_v_m, e50, sigma_e, link
+        )
     return float(np.clip(1.0 - supervivencia, 0.0, 1.0))
 
 

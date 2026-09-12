@@ -49,7 +49,8 @@ class TestPuntosDeReferencia:
             f"la calibración a 20m se movió: {punto['probabilidad_calculada']:.4f} "
             f"calculado vs {punto['probabilidad_simulador_documentada']:.4f} "
             "documentado en docs/FISICA_Y_MATEMATICA.md §3.4 — revisar si cambió "
-            "HPM_E_THRESHOLD_V_M, HPM_SIGMOID_STEEPNESS, HPM_CONE_APERTURE o "
+            "HPM_LOGLOGISTIC_E50_V_M, HPM_LOGLOGISTIC_B, HPM_LINK_FUNCTION, "
+            "HPM_CONE_APERTURE o "
             "HPM_DUTY_CYCLE"
         )
 
@@ -60,7 +61,8 @@ class TestPuntosDeReferencia:
             f"la calibración a 40m se movió: {punto['probabilidad_calculada']:.4f} "
             f"calculado vs {punto['probabilidad_simulador_documentada']:.4f} "
             "documentado en docs/FISICA_Y_MATEMATICA.md §3.4 — revisar si cambió "
-            "HPM_E_THRESHOLD_V_M, HPM_SIGMOID_STEEPNESS, HPM_CONE_APERTURE o "
+            "HPM_LOGLOGISTIC_E50_V_M, HPM_LOGLOGISTIC_B, HPM_LINK_FUNCTION, "
+            "HPM_CONE_APERTURE o "
             "HPM_DUTY_CYCLE"
         )
 
@@ -159,21 +161,43 @@ class TestDeteccionDeRegresiones:
     test corra.
     """
 
-    def test_detecta_cambio_de_umbral_de_campo(self, monkeypatch):
-        monkeypatch.setattr(config, "HPM_E_THRESHOLD_V_M", config.HPM_E_THRESHOLD_V_M + 50)
-        resultado = verificar_calibracion()
-        desviacion_maxima = max(
-            abs(p["desviacion_vs_simulador_documentado_pp"]) for p in resultado["puntos"].values()
+    @staticmethod
+    def _desviacion_maxima() -> float:
+        return max(
+            abs(p["desviacion_vs_simulador_documentado_pp"])
+            for p in verificar_calibracion()["puntos"].values()
         )
-        assert desviacion_maxima > TOLERANCIA_REGRESION_SIMULADOR_PP
 
-    def test_detecta_cambio_de_pendiente_de_sigmoide(self, monkeypatch):
-        monkeypatch.setattr(config, "HPM_SIGMOID_STEEPNESS", config.HPM_SIGMOID_STEEPNESS * 1.5)
-        resultado = verificar_calibracion()
-        desviacion_maxima = max(
-            abs(p["desviacion_vs_simulador_documentado_pp"]) for p in resultado["puntos"].values()
+    def test_detecta_cambio_de_umbral_de_campo(self, monkeypatch):
+        """MODIFICADO en P1-F: ahora parchea el umbral de la LOG-LOGÍSTICA.
+
+        Antes parcheaba ``HPM_E_THRESHOLD_V_M`` (el umbral de la logística).
+        Al cambiar la función de enlace por defecto, ese parámetro dejó de
+        gobernar y el test **dejó de detectar** — que es precisamente para lo
+        que existía. Fue el test el que descubrió que
+        ``verificar_calibracion`` no estaba pasando ``e50``/``b``/``link``
+        explícitos, así que el ``monkeypatch`` no los alcanzaba.
+        """
+        monkeypatch.setattr(
+            config, "HPM_LOGLOGISTIC_E50_V_M", config.HPM_LOGLOGISTIC_E50_V_M + 50
         )
-        assert desviacion_maxima > TOLERANCIA_REGRESION_SIMULADOR_PP
+        assert self._desviacion_maxima() > TOLERANCIA_REGRESION_SIMULADOR_PP
+
+    def test_detecta_cambio_de_forma_de_la_log_logistica(self, monkeypatch):
+        """MODIFICADO en P1-F: el exponente ``b`` reemplaza a ``steepness``."""
+        monkeypatch.setattr(
+            config, "HPM_LOGLOGISTIC_B", config.HPM_LOGLOGISTIC_B * 1.5
+        )
+        assert self._desviacion_maxima() > TOLERANCIA_REGRESION_SIMULADOR_PP
+
+    def test_detecta_cambio_de_funcion_de_enlace(self, monkeypatch):
+        """NUEVO en P1-F: volver a la logística mueve la calibración.
+
+        Es la regresión más grave posible tras P1-F —reintroduciría el piso de
+        2.30 % a campo cero— así que tiene que ser detectada.
+        """
+        monkeypatch.setattr(config, "HPM_LINK_FUNCTION", "logistica")
+        assert self._desviacion_maxima() > TOLERANCIA_REGRESION_SIMULADOR_PP
 
     def test_detecta_cambio_de_apertura_del_cono(self, monkeypatch):
         monkeypatch.setattr(config, "HPM_CONE_APERTURE", config.HPM_CONE_APERTURE + 5)

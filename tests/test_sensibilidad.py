@@ -156,46 +156,57 @@ class TestFuncionDeModelo:
             valores = {p.nombre: p.escalar(u) for p in espacio_parametros_dano()}
             assert 0.0 <= probabilidad_baja_desde_vector(valores, 30.0) <= 1.0
 
-    def test_desapunte_extremo_deja_el_PISO_de_la_sigmoide(self):
-        """⚠ DEFECTO DOCUMENTADO: a campo CERO la probabilidad NO es cero.
+    def test_desapunte_extremo_anula_la_probabilidad(self):
+        """✅ CORREGIDO en P1-F: a campo cero la probabilidad es CERO.
 
-        Fuera del haz el taper va a 0, así que el campo incidente es
-        exactamente 0 — y sin embargo el OR-gate devuelve **3.30 %**.
+        Este test existía en su forma inversa —fijaba el piso de 3.30 % del
+        OR-gate como defecto documentado— y estaba escrito para **fallar el día
+        que alguien lo corrigiera**. Se corrigió: la función de enlace pasó de
+        logística en ``E`` (soporte en todo ℝ) a log-logística (soporte en
+        ``(0, ∞)``), que da ``P(0) = 0`` exacto.
 
-        CAUSA RAÍZ: la sigmoide logística opera sobre ``E`` y tiene soporte en
-        todo ℝ, pero el campo eléctrico es una magnitud POSITIVA. ``P(0) ≠ 0``
-        es una consecuencia estructural de haber elegido una logística en ``E``
-        en vez de en ``ln E``.
-
-        Magnitud del artefacto (medido, ver docs/FISICA_Y_MATEMATICA.md §3.7):
-          · modelo agregado:     P(0) = 2.30 %
-          · OR-gate 5 subsistemas: P(0) = 3.30 %
-          · más allá de ~97 m, MÁS DE LA MITAD de la probabilidad reportada es
-            piso, no física
-          · a 700 m (el rango de combate por defecto) el **90.7 %** del número
-            reportado es artefacto
-
-        Este test fija el defecto para que no se pierda. **Si falla, alguien lo
-        corrigió** (ítem P1-F del checklist) y hay que actualizar el test, la
-        calibración y re-correr la sensibilidad.
+        Lo que se ganó, medido: a 700 m —el rango de combate por defecto— la
+        probabilidad pasó de 0.0253 (de la cual el 90.7 % era piso) a
+        0.00004, un factor 630. Y los dos puntos de calibración publicados se
+        reproducen con residuo **exacto** en vez de −1.92 pp, con los mismos
+        dos parámetros libres. Ver docs/FISICA_Y_MATEMATICA.md §3.7.
         """
         valores = {p.nombre: p.escalar(0.5) for p in espacio_parametros_dano()}
         valores["error_apuntado_deg"] = 90.0
-        p_fuera_del_haz = probabilidad_baja_desde_vector(valores, 30.0)
-        assert p_fuera_del_haz > 0.0, "si es 0, el piso se corrigió: ver P1-F"
-        assert p_fuera_del_haz == pytest.approx(0.033, abs=0.002)
+        assert probabilidad_baja_desde_vector(valores, 30.0) == 0.0
 
-    def test_el_piso_es_independiente_de_la_distancia(self):
-        """Confirma que es un piso y no un decaimiento: a 30 m y a 30 km, igual.
+    def test_no_queda_piso_a_ninguna_distancia(self):
+        """Fuera del haz la probabilidad es 0 a cualquier distancia, no un residuo.
 
-        Es la firma de un artefacto: una cantidad física que no depende de la
-        distancia cuando no hay campo.
+        Reemplaza al test que verificaba que el piso era independiente de la
+        distancia (la firma del artefacto). Ahora verifica lo contrario: que no
+        hay nada que sea independiente de la distancia porque no hay piso.
         """
         valores = {p.nombre: p.escalar(0.5) for p in espacio_parametros_dano()}
         valores["error_apuntado_deg"] = 90.0
-        cerca = probabilidad_baja_desde_vector(valores, 30.0)
-        lejos = probabilidad_baja_desde_vector(valores, 30_000.0)
-        assert cerca == pytest.approx(lejos, abs=1e-12)
+        for distancia in (1.0, 30.0, 700.0, 30_000.0):
+            assert probabilidad_baja_desde_vector(valores, distancia) == 0.0
+
+    def test_la_logistica_legacy_si_tiene_piso(self):
+        """Control: el defecto sigue presente en la función de enlace vieja.
+
+        Confirma que la corrección es de la función de enlace y no un cambio de
+        parámetros disfrazado, y documenta la magnitud exacta del piso viejo
+        para que quede en la suite.
+        """
+        from src.engine.hpm_engine import probabilidad_desde_campo
+
+        piso_logistica = probabilidad_desde_campo(
+            0.0, e_threshold=500.0, steepness=0.0075,
+            e50=487.389, b=2.8106, link="logistica",
+        )
+        assert piso_logistica == pytest.approx(0.0230, abs=0.0005)
+
+        piso_log_logistica = probabilidad_desde_campo(
+            0.0, e_threshold=500.0, steepness=0.0075,
+            e50=487.389, b=2.8106, link="log_logistica",
+        )
+        assert piso_log_logistica == 0.0
 
 
 class TestScreeningMorris:

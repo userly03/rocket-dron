@@ -437,9 +437,25 @@ class TestEstimadorTieneSenalEnElMotorReal:
     """
 
     def test_reporta_el_efecto_y_un_ic_mucho_mas_estrecho_que_v1(self):
+        """El estimador mide el efecto cuando HAY efecto, con IC estrecho.
+
+        MODIFICADO en P1-F, y el motivo importa. Este test usaba el cañón
+        contra el enjambre por defecto (~700 m) y verificaba `bajas > 0`.
+        Tras eliminar el piso de la sigmoide, ese escenario da **exactamente
+        0 bajas en 12 réplicas** — y ése es el resultado FÍSICAMENTE CORRECTO:
+        un cañón de 25 kW con un haz de 15° contra un enjambre a 700 m no hace
+        nada. Las bajas que el test veía antes eran el piso del 2.30 % a campo
+        cero, no física (ver docs/FISICA_Y_MATEMATICA.md §3.7: a 700 m el
+        90.7 % del número reportado era artefacto).
+
+        Así que el escenario pasa al arma que **sí engancha**: el misil, que
+        vuela hasta el enjambre y detona a ~80 m. El propósito del test se
+        conserva intacto —demostrar que el estimador mide en vez de reportar
+        0— sin fabricar señal a partir de un artefacto.
+        """
         cfg = ExperimentConfig(
-            replicas=12, cantidad=30, t_max_s=12.0,
-            arma=WeaponPolicy(tipo="canion", delay_s=1.0),
+            replicas=10, cantidad=30, t_max_s=20.0,
+            arma=WeaponPolicy(tipo="misil", delay_s=1.0),
         )
         resultados = [run_replica(cfg, i) for i in range(cfg.replicas)]
         s = ExperimentManager._summarize(resultados)
@@ -451,13 +467,31 @@ class TestEstimadorTieneSenalEnElMotorReal:
         assert s["fraccion_media"] > 0.0
 
         # Y el IC es mucho más estrecho que el [0, 0.3244] de Wilson sobre
-        # aniquilación total. El ancho de v1 era 0.3244.
+        # aniquilación total que reportaba v1.
         lo, hi = s["ic95_bootstrap"]
         assert (hi - lo) < 0.10, f"IC demasiado ancho: [{lo}, {hi}]"
 
         # La métrica vieja sigue siendo 0 acá: se conserva, pero ya no es la
         # que se lee como "probabilidad de baja".
         assert s["aniquilacion_total"]["proporcion"] == 0.0
+
+    def test_el_canion_a_700m_no_hace_nada_y_el_estimador_lo_dice(self):
+        """NUEVO en P1-F: el escenario por defecto da 0, y es la respuesta correcta.
+
+        Complemento del test anterior: verifica que el estimador reporta
+        **cero** cuando de verdad no hay efecto, en vez del 0.0056 que
+        reportaba cuando el piso de la sigmoide inyectaba bajas espurias. Un
+        estimador que nunca dice cero no sirve para decidir nada.
+        """
+        cfg = ExperimentConfig(
+            replicas=8, cantidad=30, t_max_s=12.0,
+            arma=WeaponPolicy(tipo="canion", delay_s=1.0),
+        )
+        resultados = [run_replica(cfg, i) for i in range(cfg.replicas)]
+        s = ExperimentManager._summarize(resultados)
+        assert sum(r["neutralizados"] for r in resultados) == 0
+        assert s["fraccion_media"] == 0.0
+        assert s["ic95_bootstrap"] == [0.0, 0.0]
 
     def test_a_quemarropa_contra_verdad_conocida_del_motor(self):
         """VERDAD CONOCIDA a través del motor real, no sintética.

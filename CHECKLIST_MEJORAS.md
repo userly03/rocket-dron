@@ -248,7 +248,7 @@
       verifica como test de implementación, NO como validación física; el contenido
       falsable de P1-E son la continuidad, los exponentes y el techo.
 
-- [ ] **P1-F · 🔴 Eliminar el piso de la sigmoide: logística en `ln E`, no en `E`**
+- [x] **P1-F · 🔴 Eliminar el piso de la sigmoide: logística en `ln E`, no en `E`**
       *(encontrado por P2-A el 2026-09-12 — no estaba en v1 ni en v2)*
       qué: la sigmoide de daño es logística en `E` y tiene soporte en todo ℝ, pero el
       campo eléctrico es POSITIVO. Consecuencia estructural: **`P(E=0) ≠ 0`.** Medido:
@@ -281,6 +281,54 @@
       reproducen con residuo < 0.1 pp; `tests/test_calibracion.py` actualizado con los
       valores nuevos y su justificación; sensibilidad re-corrida (los índices cambian:
       el piso estaba comprimiendo la varianza a rango largo).
+      **CERRADO (2026-09-12).** `HPM_LINK_FUNCTION = "log_logistica"` por defecto; la
+      logística queda seleccionable. `P(E=0) = 0` **exacto** en las dos rutas de daño.
+      **Calibración movida y documentada:** 0.4356/0.1187 → **0.4677/0.1113**. Nótese
+      que queda MÁS CERCA del paper a 20 m (−4.63 pp contra −7.84 pp). A 700 m la
+      probabilidad cayó de 0.0253 a **0.00004** (factor 630).
+      Se ajustó contra el campo del **paper**, no del simulador: `E₅₀` es propiedad de
+      la electrónica del blanco, no de la antena del arma — ajustarlo contra el campo
+      del simulador habría metido el déficit de ganancia del emisor dentro del umbral
+      del blanco, el mismo error de categoría del hallazgo 2. El residuo de −4.63 pp
+      es atribuible a ese déficit y se cierra con `HPM_ANTENNA_MODEL = "plato"`.
+      **Conversión entre familias:** `b = E₅₀/σ` preserva la pendiente en `E₅₀`.
+      Aplicada a la Tabla 1 del paper da **exactamente 5.0 en los cinco subsistemas**
+      → hallazgo propio: la columna `σ_E` es literalmente `E₅₀/5` y **no aporta
+      información independiente** de la columna `E₅₀`.
+      **9 tests se movieron, cada uno con su justificación en el propio test.** Dos
+      merecen mención:
+      · El detector de regresiones de P1-D **dejó de detectar** y lo destapó su propio
+        test: `verificar_calibracion` no pasaba `e50`/`b`/`link` explícitos, así que
+        `monkeypatch` no los alcanzaba. Es la misma trampa que P1-D había resuelto, un
+        nivel más arriba. Reparado y ampliado con un test nuevo que detecta el cambio
+        de función de enlace (la regresión más grave posible tras P1-F).
+      · `test_el_alcance_decrece_al_subir_el_umbral` parcheaba `e_threshold`, que la
+        log-logística ignora: habría quedado comparando dos corridas idénticas,
+        pasando por casualidad sin probar nada.
+      **Efecto colateral valioso:** con el piso fuera, el cañón a 700 m da
+      **exactamente 0 bajas en 12 réplicas** — la respuesta físicamente correcta. El
+      `0.0056` de P1-A era íntegramente piso. Un estimador que nunca dice cero no sirve
+      para decidir nada: los tests de P1-A se reorganizaron para validar con el misil
+      (que sí engancha) más un test nuevo que verifica que el cañón reporta cero.
+      **Pendiente:** re-correr el informe de sensibilidad y actualizar §3.8 — los
+      índices cambian porque el piso comprimía la varianza a rango largo.
+
+- [x] **P1-G · 🔴 Los tres números del paper son mutuamente inconsistentes**
+      *(hallazgo derivado de P1-F, no es trabajo de código)*
+      51.4 % @ 20 m y 13.1 % @ 40 m fijan `b = 2.81`; el alcance de 90 % de baja de
+      ~18 m exige `b = 20.32` — factor **7.2**. Entre 497 y 552 V/m (+11 % de campo) la
+      probabilidad tendría que saltar de 51.4 % a 90 %. Pasa con cualquier ajuste de dos
+      parámetros, logística incluida (`P(552.4) = 0.597`, no 0.90).
+      Explicación más probable (**inferencia**, no dato): los 18 m salen de su curva
+      **determinista**, no de la Monte Carlo contra la que el simulador calibra. Los
+      puntos deterministas del paper (83 % @ 20 m, 20 % @ 40 m) dan `b = 4.29`, y
+      determinista + 18 m da `b = 5.81`: mismo orden. El 20.32 es el outlier.
+      **Consecuencia retroactiva: el criterio de aceptación de P1-E (18 m/88 m) nunca
+      fue alcanzable desde los puntos de calibración.** Explica por qué la brecha no
+      cerró ni con la logística (11.74 m) ni con la log-logística (8.74 m).
+      Fijado como aritmética verificable en
+      `test_la_cifra_de_90pc_del_paper_es_internamente_inconsistente`. No es corregible
+      desde acá: es un problema de la referencia. **Confirmar contra el PDF.**
 
 ## P2 — Física que cambia números en el rango real (semanas)
 
@@ -370,7 +418,7 @@
       diferida queda atribuida al disparo original en la curva de efectividad; la fracción
       upset/damage aparece en el panel.
 
-- [ ] **P2-E · OPFOR reactivo + perfiles de pérdida de enlace** *(era P2-06)*
+- [x] **P2-E · OPFOR reactivo + perfiles de pérdida de enlace** *(era P2-06)*
       qué: (i) **partir `DroneEstado` en `estado_salud` y `estado_enlace`** — prerrequisito
       que v1 no listaba; (ii) memoria del último punto de impacto con repulsor decadente;
       (iii) el jammer asigna perfil lost-link por dron (hover/aterrizar/RTH/flyaway) en
@@ -382,6 +430,41 @@
       done: tras una detonación la distancia media del enjambre al punto de impacto
       aumenta; cada perfil lost-link tiene test; un dron interferido sigue contando como
       vecino en `compute_headings`; suite verde.
+      **CERRADO (2026-09-12).** 22 tests nuevos en `tests/test_opfor.py`.
+      **Estado partido sin romper la interfaz:** `estado_salud` (ACTIVO/DANADO/
+      NEUTRALIZADO) y `estado_enlace` (OK/INTERFERIDO) como ejes ortogonales, con
+      `estado` conservado como **propiedad derivada** (prioridad NEUTRALIZADO >
+      INTERFERIDO > DANADO > ACTIVO) más un setter de compatibilidad que enruta cada
+      valor a su eje **sin cruzarlos**. Verificado: un dron dañado Y sin enlace es
+      ahora representable (antes imposible), los cuatro casos del getter dan lo mismo
+      que antes, y asignar `estado = NEUTRALIZADO` a un dron interferido no le borra el
+      enlace perdido. `HPMissile.detonar`, `HPMWeapon`, `drone_to_dict`, el frontend y
+      los tests existentes siguen funcionando sin cambios.
+      **Dispersión post-impacto contra su CONTROL** (mismo escenario, misma semilla,
+      `amenaza_intensidad = 0`): distancia media al punto de impacto **22.54 m vs
+      19.34 m**, un **+16.6 %**. Sin el control el test no probaría nada — el enjambre
+      se mueve igual de todos modos.
+      **Bug del vecino corregido:** un dron con enlace perdido ya no desaparece del
+      flocking de sus vecinos. Verificado en un caso no degenerado: el rumbo del vecino
+      es 60° con el interferido presente y 90° sin él.
+      **Los cuatro perfiles, medidos:** flyaway se aleja monótonamente (100→250→400→550 m
+      del centro); RTH converge al centro (100→2.4 m y luego orbita, porque no puede
+      detenerse); aterrizar desciende a 2 m/s y toca suelo en **t = 49.9 s** desde 100 m
+      (predicho 50.0) y **queda inerte para siempre** incluso tras recuperar el enlace;
+      hover mantiene posición. Fracciones RTH 0.40 / HOVER 0.30 / ATERRIZAR 0.20 /
+      FLYAWAY 0.10, justificadas contra doctrina pública de failsafe de flight
+      controllers, con flyaway deliberadamente no nulo.
+      **El quinto término del flocking está argumentado, no añadido:** es la misma forma
+      funcional que la separación (1/distancia) contra un punto en memoria en vez de un
+      vecino; es condicional (aporta **cero** exacto sin impactos previos, así que un
+      enjambre nunca atacado vuela idéntico a antes de P2-E); decae; y es falsable por
+      el test de control. Mismo criterio que la nota de diseño del término `home`.
+      Corregida además una inconsistencia preexistente: la rama `n<2` de
+      `compute_headings` no aplicaba `BOIDS_HOME_WEIGHT` al término home, a diferencia
+      de las otras dos ramas.
+      ⚠ **nota:** `RTH` orbita alrededor del centro al llegar (no puede frenar). Es
+      consistente con el modelo de velocidad constante del simulador, pero un RTH real
+      aterriza o mantiene posición al llegar. Anotado, no corregido.
 
 - [x] **P2-F · Presupuesto de potencia primaria y térmico del arma**
       qué: cargador/PRF/límite térmico del cañón; energía por disparo y tiempo de

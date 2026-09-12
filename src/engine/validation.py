@@ -235,7 +235,14 @@ CALIBRACION_DISTANCIA_M: dict[str, float] = {"20m": 20.0, "40m": 40.0}
 # que usa esta función) y verificado contra §3.4, que documenta 43.6% y
 # 11.9% — coincide. Esta es la fotografía que protege el test de regresión:
 # si se mueve, algo cambió en el modelo o en un default, no en el paper.
-CALIBRACION_SIMULADOR_DOCUMENTADA: dict[str, float] = {"20m": 0.436, "40m": 0.119}
+# ACTUALIZADO en P1-F (2026-09-12): la función de enlace pasó de logística en
+# ``E`` a **log-logística**, porque la logística tiene soporte en todo ℝ y daba
+# ``P(E=0) = 2.30 %`` — un piso que a 700 m era el 90.7 % del número reportado
+# (ver docs/FISICA_Y_MATEMATICA.md §3.7). Valores anteriores: 0.436 / 0.119.
+# Los nuevos quedan MÁS CERCA del paper a 20 m (−4.63 pp contra −7.84 pp antes),
+# porque los parámetros log-logísticos se ajustaron a los dos puntos publicados
+# de forma exacta.
+CALIBRACION_SIMULADOR_DOCUMENTADA: dict[str, float] = {"20m": 0.4677, "40m": 0.1113}
 
 # Tolerancia contra la fotografía del simulador (arriba): estos números
 # salen matemáticamente de la configuración actual, así que si se mueven más
@@ -290,8 +297,23 @@ def verificar_calibracion() -> dict[str, Any]:
             distancia=distancia,
             apertura_cono=config.HPM_CONE_APERTURE,
             angulo_offset=0.0,
+            # Los cinco parámetros del modelo de daño se leen de ``config``
+            # POR ATRIBUTO en el momento de la llamada y se pasan EXPLÍCITOS.
+            # No es estilo: ``calculate_neutralization_probability_friis``
+            # captura sus defaults al importar ``hpm_engine``, así que si se
+            # confiara en ellos un ``monkeypatch.setattr(config, ...)`` no
+            # tendría ningún efecto y los tests de regresión de
+            # ``TestDeteccionDeRegresiones`` pasarían sin poder fallar —
+            # decorativos. Se verificó que ocurre.
+            # AMPLIADO en P1-F: al añadir la función de enlace log-logística
+            # hubo que sumar ``e50``, ``b`` y ``link`` a esta lista. Dos tests
+            # de regresión lo detectaron al dejar de detectar: hasta que se
+            # pasaron explícitos, parchear los parámetros nuevos no movía nada.
             e_threshold=config.HPM_E_THRESHOLD_V_M,
             steepness=config.HPM_SIGMOID_STEEPNESS,
+            e50=config.HPM_LOGLOGISTIC_E50_V_M,
+            b=config.HPM_LOGLOGISTIC_B,
+            link=config.HPM_LINK_FUNCTION,
             duty_cycle=config.HPM_DUTY_CYCLE,
             cable_length_m=None,
             polarization=None,

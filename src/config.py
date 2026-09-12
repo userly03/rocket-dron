@@ -134,6 +134,82 @@ MISSILE_PN_GAIN: float = float(os.getenv("MISSILE_PN_GAIN", "4.0"))
 # "legacy": modelo exponencial ad-hoc original (se conserva para no romper tuning/tests previos).
 HPM_MODEL: str = os.getenv("HPM_MODEL", "friis")
 
+# --- Función de enlace del modelo de daño (P1-F) ---
+# "log_logistica" (default): P(E) = 1/(1+(E₅₀/E)^b)
+# "logistica"     (legacy) : P(E) = 1/(1+exp(-k·(E-E₀)))
+#
+# POR QUÉ SE CAMBIÓ EL DEFAULT. La logística opera sobre ``E`` y tiene soporte
+# en **todo ℝ**, pero el campo eléctrico es una magnitud **positiva**.
+# Consecuencia estructural, no un detalle numérico:
+#
+#     P(E=0) = 1/(1+exp(k·E₀)) = 1/(1+exp(0.0075·500)) = 2.30 %
+#
+# Un dron sin ningún campo aplicado tenía 2.30 % de probabilidad de caer (3.30 %
+# con el OR-gate de cinco subsistemas, que compone cinco colas). Dicho en
+# términos del modelo de umbrales que la sigmoide representa: una logística en
+# ``E`` afirma que una fracción de la población de componentes falla a campo
+# **negativo**, que no significa nada.
+#
+# Cuánto contaminaba (medido, docs/FISICA_Y_MATEMATICA.md §3.7): más allá de
+# ~97 m MÁS DE LA MITAD de la probabilidad reportada era ese piso, y a 700 m
+# —con el enjambre circular por defecto a 500-900 m, o sea TODO el rango de
+# combate— el **90.7 %** del número era artefacto.
+#
+# La log-logística (equivalentemente: una logística en ``ln E``) da
+# ``P(0) = 0`` exacto y ``P(∞) = 1``, y es el modelo estándar de
+# dosis-respuesta para dosis positivas, precisamente porque el soporte de la
+# distribución de umbrales es ``(0, ∞)``. Encontrado por el análisis de
+# sensibilidad (§3.8), no buscado.
+HPM_LINK_FUNCTION: str = os.getenv("HPM_LINK_FUNCTION", "log_logistica")
+
+# Parámetros de la log-logística del CAÑÓN, ajustados a los MISMOS dos puntos
+# publicados que calibraban la logística (arXiv:2602.08477: 51.4 % @ 20 m con
+# E = 497.2 V/m, 13.1 % @ 40 m con E = 248.6 V/m). El ajuste es **exacto**:
+# residuo 0.0000 pp en AMBOS puntos, contra −1.92 pp que daba la logística. Dos
+# parámetros libres igual que antes — no se compró el arreglo con más grados de
+# libertad.
+#
+# DECISIÓN METODOLÓGICA DECLARADA: se ajusta contra el campo que calcula **el
+# paper** (497.2 / 248.6 V/m), no contra el que calcula el simulador
+# (465.48 / 232.74 V/m, un −6.4 % por usar G ≈ 26000/θ² en vez de la fórmula de
+# plato). El motivo: ``E₅₀`` es una propiedad de la **electrónica del blanco**,
+# no de la antena del arma. Ajustarlo contra el campo del simulador metería el
+# déficit de ganancia del EMISOR dentro del umbral del BLANCO — exactamente el
+# error de categoría del hallazgo 2/§1.3 de la auditoría, que fue lo que dejó
+# el umbral viejo en 500 V/m, por encima de los cinco umbrales reales.
+#
+# Consecuencia aceptada: con ``HPM_ANTENNA_MODEL = "apertura"`` el simulador
+# queda −4.63 pp por debajo del paper a 20 m. Ese residuo es **enteramente
+# atribuible** al déficit de ganancia ya medido, y se cierra poniendo
+# ``HPM_ANTENNA_MODEL = "plato"`` (G = η(πD/λ)² → 21.16 dBi contra los 21.2
+# publicados). Se deja como dos decisiones separadas a propósito.
+HPM_LOGLOGISTIC_E50_V_M: float = float(os.getenv("HPM_LOGLOGISTIC_E50_V_M", "487.389"))
+HPM_LOGLOGISTIC_B: float = float(os.getenv("HPM_LOGLOGISTIC_B", "2.8106"))
+
+# Ídem para el MISIL. Convertidos desde los parámetros logísticos previos
+# (E₀ = 30 V/m, steepness = 0.15) con la transformación que **preserva la
+# pendiente en E₅₀**:
+#     logística:     dP/dE|E₅₀ = 1/(4σ)
+#     log-logística: dP/dE|E₅₀ = b/(4·E₅₀)
+#     igualando  ⇒   b = E₅₀/σ = 30·0.15 = 4.5
+# Es una conversión, no una recalibración: el misil nunca tuvo puntos de datos
+# propios (su umbral es una concesión de jugabilidad, ver §4 del doc de física).
+HPM_MISSILE_LOGLOGISTIC_E50_V_M: float = float(
+    os.getenv("HPM_MISSILE_LOGLOGISTIC_E50_V_M", "30.0")
+)
+HPM_MISSILE_LOGLOGISTIC_B: float = float(os.getenv("HPM_MISSILE_LOGLOGISTIC_B", "4.5"))
+
+# Exponente de forma de la log-logística de los SUBSISTEMAS. La misma
+# conversión b = E₅₀/σ aplicada a la Tabla 1 del paper da **exactamente 5.0
+# para los cinco subsistemas** (150/30, 200/40, 250/50, 300/60, 350/70).
+# HALLAZGO PROPIO: eso significa que la columna σ_E de la Tabla 1 es
+# literalmente E₅₀/5 y **no aporta información independiente** de la columna
+# E₅₀ — el paper describe los cinco subsistemas con un único parámetro de forma
+# y cinco umbrales, aunque presente diez números.
+HPM_SUBSISTEMAS_LOGLOGISTIC_B: float = float(
+    os.getenv("HPM_SUBSISTEMAS_LOGLOGISTIC_B", "5.0")
+)
+
 # Umbral de susceptibilidad del CAÑÓN (arma direccional, plato de alta ganancia).
 # Calibrado por ajuste numérico directo contra los dos puntos de datos publicados
 # en arXiv:2602.08477 (25kW CW, plato de 60cm/21.2dBi @ 2.45GHz):
@@ -422,6 +498,71 @@ JAMMING_DEFAULT_POWER: float = float(os.getenv("JAMMING_DEFAULT_POWER", "80"))
 JAMMING_CONE_APERTURE: float = float(os.getenv("JAMMING_CONE_APERTURE", "45"))
 JAMMING_E_THRESHOLD_V_M: float = float(os.getenv("JAMMING_E_THRESHOLD_V_M", "4"))
 JAMMING_SIGMOID_STEEPNESS: float = float(os.getenv("JAMMING_SIGMOID_STEEPNESS", "0.6"))
+
+# --- OPFOR reactivo: memoria de amenaza + repulsor con decaimiento (P2-E) ---
+# Un enjambre con control reactivo real no vuelve a formación inmediatamente
+# tras un impacto: cada dron recuerda dónde fue el último golpe (detonación
+# de misil o exposición al cañón que le "pegó cerca") y durante un rato se
+# aleja de ese punto, encima del flocking normal — dispersión post-ataque.
+# Ver Drone.registrar_impacto/actualizar_amenaza y el 5to término de
+# src/engine/flocking.py::compute_headings.
+#
+# Constante de tiempo del decaimiento exponencial de la intensidad de la
+# memoria (intensidad *= exp(-dt/tau)). 5s da un "susto" que domina el
+# comportamiento durante unos pocos segundos tras el golpe (varias veces la
+# constante de tiempo del giro acotado de boids) y se disuelve en el orden
+# de 15-20s (3-4·tau) — lo bastante para ver dispersión real en cualquier
+# corrida de longitud típica de este simulador, sin dejar al enjambre
+# huyendo indefinidamente de un punto que ya no es una amenaza.
+THREAT_MEMORY_DECAY_TAU_S: float = float(os.getenv("THREAT_MEMORY_DECAY_TAU_S", "5.0"))
+# Peso del término de amenaza en compute_headings, mismo orden de magnitud
+# que los pesos de boids existentes (separación 1.5, alineación/cohesión
+# 1.0, home 1.5) pero algo mayor: una reacción de pánico post-impacto real
+# debería, al menos brevemente, dominar sobre la cohesión/alineación local
+# (que es exactamente lo que hace que un enjambre atacado se disperse en
+# vez de seguir volando en formación ordenada).
+BOIDS_THREAT_WEIGHT: float = float(os.getenv("BOIDS_THREAT_WEIGHT", "2.5"))
+
+# --- OPFOR reactivo: perfiles de pérdida de enlace (P2-E) ---
+# Antes, perder el enlace (jammer) "congelaba" al dron (Drone.mover
+# retornaba temprano) — no es lo que hace un dron real: ejecuta un
+# comportamiento de contingencia PROGRAMADO. Se sortea un perfil por dron
+# al crearlo (como el blindaje), con el generador inyectado, no el global.
+#
+# Reparto por defecto, basado en la doctrina pública de failsafe de
+# radio-control de flight controllers reales (Ardupilot/PX4/DJI, que
+# documentan explícitamente estos cuatro comportamientos como opciones de
+# failsafe configurables):
+#   - RTH (0.40): el failsafe primario recomendado y más comúnmente
+#     configurado por defecto en la práctica — la mayoría del enjambre
+#     "hace lo correcto".
+#   - HOVER (0.30): mantener posición ("Loiter"/"Brake") es el
+#     comportamiento INMEDIATO casi universal antes de que se cumpla el
+#     timeout que dispara RTH/Land — con timeouts cortos, una fracción
+#     grande del enjambre queda efectivamente en este estado la mayor
+#     parte del tiempo que dura la pérdida de enlace.
+#   - ATERRIZAR (0.20): "Land now" es el otro failsafe primario soportado
+#     por (casi) todo flight controller moderno, preferido en operación
+#     urbana/restringida donde alejarse no es aceptable.
+#   - FLYAWAY (0.10): la falla residual real y documentada del propio
+#     ecosistema (GPS/compás caído, firmware sin failsafe configurado,
+#     etc.) — deliberadamente NO cero: es precisamente el caso que hace de
+#     un enjambre sin enlace una amenaza que sigue existiendo, no un
+#     problema resuelto por completo. Las cuatro fracciones suman 1.0.
+DRONE_LOST_LINK_RTH_FRACTION: float = float(os.getenv("DRONE_LOST_LINK_RTH_FRACTION", "0.40"))
+DRONE_LOST_LINK_HOVER_FRACTION: float = float(os.getenv("DRONE_LOST_LINK_HOVER_FRACTION", "0.30"))
+DRONE_LOST_LINK_ATERRIZAR_FRACTION: float = float(
+    os.getenv("DRONE_LOST_LINK_ATERRIZAR_FRACTION", "0.20")
+)
+DRONE_LOST_LINK_FLYAWAY_FRACTION: float = float(
+    os.getenv("DRONE_LOST_LINK_FLYAWAY_FRACTION", "0.10")
+)
+# Tasa de descenso del perfil ATERRIZAR, en m/s. Del orden de un descenso
+# controlado tipo "land now" de un multirotor real (1-3 m/s), no una caída
+# libre ni un descenso instantáneo.
+DRONE_LOST_LINK_DESCENT_RATE_M_S: float = float(
+    os.getenv("DRONE_LOST_LINK_DESCENT_RATE_M_S", "2.0")
+)
 
 # --- Logging de validación en terminal ---
 SIM_LOG_LEVEL: str = os.getenv("SIM_LOG_LEVEL", "INFO")

@@ -13,7 +13,7 @@ from src.config import (
     JAMMING_SIGMOID_STEEPNESS,
 )
 from src.engine.hpm_engine import compute_target_parameters, friis_diagnostics
-from src.models.drone import Drone, DroneEstado
+from src.models.drone import Drone, EstadoEnlace, EstadoSalud
 
 
 @dataclass
@@ -82,23 +82,29 @@ class Jammer:
         Reevalúa, para cada dron no neutralizado, si queda (o deja de
         estar) ``INTERFERIDO``.
 
+        Opera directamente sobre ``estado_enlace`` (P2-E, Parte 1) — ya NO
+        reconstruye la salud por inferencia (`DANADO if salud<50 else
+        ACTIVO`) al recuperar el enlace, que era frágil: al ser
+        ``estado_salud`` un eje ortogonal, la recuperación del enlace
+        sencillamente no lo toca, sea cual sea su valor real.
+
         Returns:
             Lista de eventos de cambio de estado (para log/terminal).
         """
         eventos: list[dict] = []
 
         for drone in drones:
-            if drone.estado == DroneEstado.NEUTRALIZADO:
+            if drone.estado_salud == EstadoSalud.NEUTRALIZADO:
                 continue
 
             en_zona = self._en_zona_de_efecto(drone)
-            estaba_interferido = drone.estado == DroneEstado.INTERFERIDO
+            estaba_interferido = drone.estado_enlace == EstadoEnlace.INTERFERIDO
 
             if en_zona and not estaba_interferido:
-                drone.estado = DroneEstado.INTERFERIDO
+                drone.estado_enlace = EstadoEnlace.INTERFERIDO
                 eventos.append({"tipo": "dron_interferido", "drone_id": drone.id})
             elif not en_zona and estaba_interferido:
-                drone.estado = DroneEstado.DANADO if drone.salud < 50 else DroneEstado.ACTIVO
+                drone.estado_enlace = EstadoEnlace.OK
                 eventos.append({"tipo": "dron_recuperado", "drone_id": drone.id})
 
         return eventos

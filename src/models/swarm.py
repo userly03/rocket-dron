@@ -28,7 +28,7 @@ from src.config import (
 from src.engine.flocking import compute_headings
 from src.engine.physics import check_boundary_collision, reflect_angle
 from src.engine.radar_engine import evaluar_deteccion
-from src.models.drone import Drone, DroneEstado
+from src.models.drone import Drone, DroneEstado, EstadoEnlace, EstadoSalud
 from src.utils.helpers import distance3d
 from src.utils.reproducibilidad import rng as global_rng
 
@@ -228,19 +228,35 @@ class Swarm:
     def actualizar(self, dt: float) -> None:
         """Mueve todos los drones activos y resuelve colisiones con bordes."""
         if BOIDS_ENABLED:
-            activos = [
-                d for d in self.drones
-                if d.estado not in (DroneEstado.NEUTRALIZADO, DroneEstado.INTERFERIDO)
+            # Bug corregido (P2-E, auditoría §3.4): antes se excluía del
+            # cálculo a los drones con enlace perdido, así que
+            # desaparecían del flocking de sus VECINOS — seguían
+            # físicamente ahí (compitiendo por el mismo espacio aéreo),
+            # pero como si no existieran para separación/alineación/
+            # cohesión. Ahora entran al cálculo igual que cualquier otro
+            # dron con salud (solo se excluyen los neutralizados, que sí
+            # dejaron de existir como amenaza física); lo único que
+            # cambia es que el rumbo que ``compute_headings`` les asigna
+            # NO se les aplica a ELLOS MISMOS: mientras el enlace está
+            # perdido, su propio rumbo lo gobierna el perfil de
+            # contingencia (ver ``Drone.mover``), no el flocking.
+            con_flocking = [
+                d for d in self.drones if d.estado_salud != EstadoSalud.NEUTRALIZADO
             ]
-            nuevos_angulos = compute_headings(activos, dt, self.centro_x, self.centro_y)
-            for drone in activos:
-                drone.angulo = nuevos_angulos[drone.id]
+            nuevos_angulos = compute_headings(con_flocking, dt, self.centro_x, self.centro_y)
+            for drone in con_flocking:
+                if drone.estado_enlace == EstadoEnlace.OK:
+                    drone.angulo = nuevos_angulos[drone.id]
 
         for drone in self.drones:
-            if drone.estado == DroneEstado.NEUTRALIZADO:
+            if drone.estado_salud == EstadoSalud.NEUTRALIZADO:
                 continue
 
-            drone.mover(dt)
+            # home_x/home_y: centro de la zona de patrulla, reutilizado
+            # como punto de retorno del perfil lost-link RTH (P2-E, Parte
+            # 3) — el mismo punto al que ya converge la 4ta regla de
+            # boids para drones con enlace normal.
+            drone.mover(dt, home_x=self.centro_x, home_y=self.centro_y)
 
             new_x, new_y, collided_x, collided_y = check_boundary_collision(
                 drone.x, drone.y, FIELD_WIDTH, FIELD_HEIGHT, margin=10.0
@@ -260,6 +276,17 @@ class Swarm:
                 RADAR_RCS_M2,
                 RADAR_NOISE_FLOOR_W,
             )
+
+    def actualizar_amenazas(self, dt: float) -> None:
+        """
+        Decae la memoria de amenaza de todos los drones un paso ``dt``
+        (P2-E, Parte 2) — ver ``Drone.actualizar_amenaza`` y el término de
+        repulsión en ``compute_headings``. Se llama desde
+        ``SimulationEngine._tick`` independientemente de si el enjambre se
+        mueve por flocking este tick.
+        """
+        for drone in self.drones:
+            drone.actualizar_amenaza(dt)
 
     def drones_activos(self) -> list[Drone]:
         return [d for d in self.drones if d.estado == DroneEstado.ACTIVO]

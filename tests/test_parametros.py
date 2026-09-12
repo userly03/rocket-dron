@@ -244,7 +244,10 @@ class TestOrGateSubsistemas:
         p_sys = probabilidad_dano_sistema(E)
         # Aporta ~52% de la probabilidad del sistema: más que cualquier otro,
         # pero NO la mayoría absoluta — medido, no supuesto.
-        assert individuales["gps_gnss_lna"] / p_sys == pytest.approx(0.52, abs=0.05)
+        # ACTUALIZADO en P1-F: con la log-logística la cola baja es mucho más
+        # delgada, así que el subsistema más débil domina AÚN más (0.74 contra
+        # 0.52 con la logística).
+        assert individuales["gps_gnss_lna"] / p_sys == pytest.approx(0.74, abs=0.05)
         # Y más del doble que el segundo.
         segundo = sorted(individuales.values())[-2]
         assert individuales["gps_gnss_lna"] > 2 * segundo
@@ -315,12 +318,19 @@ class TestModeloSubsistemasBloqueado:
             p = monte_carlo_blanco_unico(r, n=4000)["probabilidad_media"]
             residuos[r] = p - obj
 
-        # A 20 m queda por debajo, a 40 m muy por encima: residuos de signo
-        # OPUESTO, o sea que ningún valor único de k los cierra a la vez.
+        # ACTUALIZADO en P1-F: el carácter del bloqueo CAMBIÓ. Con la
+        # logística los residuos tenían signo opuesto (−1.15 y +4.32 pp), lo
+        # que probaba que ningún k único los cerraba. Con la log-logística
+        # ambos son negativos (−9.96 y −8.91 pp), así que un k mayor podría
+        # acercar los dos a la vez — el bloqueo ya no es por signos opuestos.
+        # Lo que sigue bloqueando es la VARIANZA: el CV subió de 0.63 a 1.17,
+        # o sea 3× el ≈0.39 del paper (ver test_senal_3). Sigue haciendo falta
+        # el PDF para resolver la cadena de acoplamiento.
         assert residuos[20.0] < 0
-        assert residuos[40.0] > 0
-        # Y el de 40 m es varias veces el margen declarado (±0.7 pp).
-        assert residuos[40.0] > 3 * self.OBJ[40.0][1]
+        assert residuos[40.0] < 0
+        # Ambos residuos son varias veces sus márgenes declarados.
+        assert abs(residuos[20.0]) > 3 * self.OBJ[20.0][1]
+        assert abs(residuos[40.0]) > 3 * self.OBJ[40.0][1]
 
     def test_senal_2_el_sesgo_va_en_direccion_opuesta_al_paper(self):
         """El paper: MC "systematically lower than deterministic". Acá es al revés.
@@ -363,7 +373,17 @@ class TestModeloSubsistemasBloqueado:
         cv_sin = monte_carlo_blanco_unico(30.0, espec=sin_pol, n=3000)["cv"]
         assert cv_base > cv_sin
         assert (cv_base - cv_sin) > 0.25, "la polarización debe dominar la varianza"
-        assert cv_sin < 0.39, "sin polarización el CV cae por debajo del paper"
+        # ACTUALIZADO en P1-F, y es un cambio de conclusión: con la logística,
+        # apagar la polarización dejaba el CV en 0.284, POR DEBAJO del ≈0.39
+        # del paper — o sea que la verdad estaba en medio y bastaba moderar la
+        # dispersión de polarización. Con la log-logística, el CV sin
+        # polarización es 0.43, ya POR ENCIMA del paper. La varianza es
+        # excesiva incluso sin ella, así que el problema no se arregla solo
+        # tocando la polarización: hay algo más en la cadena de acoplamiento.
+        assert cv_sin > 0.39, (
+            "si vuelve a caer por debajo del 0.39 del paper, la conclusión de "
+            "§3.6 cambia otra vez: revisar el diagnóstico"
+        )
 
     def test_el_modelo_agregado_sigue_siendo_el_default(self):
         """Nada del comportamiento por defecto depende del modelo bloqueado."""

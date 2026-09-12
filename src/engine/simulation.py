@@ -293,6 +293,8 @@ class SimulationEngine:
                 self.hpm.origen_y,
             )
 
+            self._sembrar_memoria_amenaza(eventos, self.hpm.origen_x, self.hpm.origen_y)
+
         self._log(
             "hpm_disparo",
             {
@@ -403,6 +405,38 @@ class SimulationEngine:
         )
         return result
 
+    def _sembrar_memoria_amenaza(
+        self, eventos: list[dict], impacto_x: float, impacto_y: float
+    ) -> None:
+        """
+        Memoria de amenaza (P2-E, Parte 2): siembra en cada dron afectado la
+        posición del impacto que acaba de recibir, para el repulsor con
+        decaimiento de ``compute_headings`` (ver ``Drone.registrar_impacto``).
+
+        ``impacto_x``/``impacto_y`` es la posición del origen físico del
+        evento, no necesariamente la posición del dron:
+        - Detonación de misil (``_process_missile_events``): el punto de
+          detonación real — hay una explosión con una posición concreta.
+        - Disparo de cañón (``fire``): el cañón es un haz DIRECCIONAL
+          continuo, no una explosión puntual — no existe un "punto de
+          impacto" independiente del propio dron. Se usa el origen del
+          arma como proxy: la reacción natural a "algo me está irradiando
+          desde allá" es alejarse de esa dirección, no de un punto
+          arbitrario en el aire.
+
+        Se siembra memoria para TODO dron que aparece en ``eventos`` (todo
+        dron dentro del cono/radio de efecto estuvo expuesto al pulso),
+        neutralizado o no — un dron neutralizado nunca vuelve a llamar a
+        ``compute_headings`` de todos modos, así que es inocuo.
+        """
+        if not eventos:
+            return
+        by_id = {d.id: d for d in self.swarm.drones}
+        for evento in eventos:
+            drone = by_id.get(evento["drone_id"])
+            if drone is not None:
+                drone.registrar_impacto(impacto_x, impacto_y)
+
     def _process_jamming_events(self, eventos: list[dict]) -> None:
         interferidos = [e["drone_id"] for e in eventos if e["tipo"] == "dron_interferido"]
         recuperados = [e["drone_id"] for e in eventos if e["tipo"] == "dron_recuperado"]
@@ -428,6 +462,14 @@ class SimulationEngine:
                     evento["impactos"],
                     self.tiempo,
                     evento["misil_id"],
+                )
+                # Memoria de amenaza (P2-E, Parte 2): a diferencia del cañón,
+                # una detonación de misil SÍ tiene un punto de explosión
+                # real y concreto (evento["x"]/["y"]) — se usa directamente,
+                # sin necesidad del proxy que hace falta para el cañón (ver
+                # ``_sembrar_memoria_amenaza``).
+                self._sembrar_memoria_amenaza(
+                    evento["impactos"], evento["x"], evento["y"]
                 )
                 self._log(
                     "misil_detonado",
@@ -522,6 +564,14 @@ class SimulationEngine:
         # razón de ser de este método extraído) — un arma que nunca corre
         # este tick nunca se enfría ni recarga.
         self.hpm.actualizar(dt)
+
+        # Memoria de amenaza (P2-E, Parte 2): el decaimiento es una función
+        # del tiempo transcurrido, no del flocking — avanza siempre que
+        # avanza el reloj de la simulación, tanto si el enjambre se mueve
+        # este tick (``mover_enjambre=True``) como si está en la rama
+        # "pausada con misiles en vuelo" (la memoria de un dron no se
+        # "congela" solo porque no se esté recalculando su rumbo).
+        self.swarm.actualizar_amenazas(dt)
 
         eventos_jamming: list[dict] = []
         if mover_enjambre:

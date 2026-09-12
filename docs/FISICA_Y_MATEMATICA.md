@@ -33,7 +33,8 @@ Se revisó cada fórmula del proyecto contra literatura real (ver
 | 6 | La tabla de configuración del README tenía datos obsoletos (`HPM_K_CONSTANT` listado como `0.015` en la tabla, pero `250` en el texto). | Baja | **Corregido**. |
 | 7 | El blindaje heterogéneo (§8.1) multiplicaba el umbral de campo E por 2.5× para simular drones "blindados" — pero al vivir ese umbral dentro de una sigmoide no lineal, la reducción real de probabilidad resultaba de **14× a 821×** según la distancia (no 2.5×), dejando a los drones blindados prácticamente invencibles en todo el rango de combate real (probabilidad ~0.003%-0.03% a 80-200m). | **Alta** (blindaje inutilizable) | **Corregido**: `apply_hardening_odds()` aplica la reducción en espacio de momios (`odds = p/(1-p)`, dividido por el factor) en vez de desplazar el umbral — da una reducción consistente de 1×-2.5× en todo el rango, no un colapso exponencial. Ver [§8.1](#81-blindaje-heterogéneo-srcmodelsdronepy-srcmodelsswarmpy). |
 | 8 | `PhysicsAnalytics.get_physics_panel` publicaba `probabilidad_referencia`, `formula` y `coupling_k` derivados de `gaussian_neutralization_prob` (`P = 1 - exp(-k·P·exp(-r²/2σ²))`) — un TERCER modelo que ni `friis` ni `legacy` usan para decidir bajas (`Drone.recibir_daño`/`HPMissile.calcular_daño` nunca lo llaman), pintado en el frontend (`charts.js`, `index.html`) como si fuera la física gobernante. Exactamente el defecto que esta misma tabla dice haber corregido en otros hallazgos. | **Alta** (número físico en pantalla que no gobierna nada) | **Corregido** (P0-C): `get_physics_panel` ya no publica `probabilidad_referencia` ni `coupling_k`; `formula` refleja siempre el modelo activo (`legacy`: `P = 1 - exp(-k·potencia/d²)` con `HPM_K_CONSTANT`, la k que ese modelo sí usa; `friis`: la cadena Friis→E→sigmoide ya correcta). `gaussian_neutralization_prob` se conserva, documentada como modelo de visualización exclusivo de `get_heatmap`. Frontend actualizado para no mostrar `coupling_k`. Auditoría §4.1. |
-| 9 | **La sigmoide de daño es logística en `E`, que tiene soporte en todo ℝ, pero el campo eléctrico es positivo — de ahí que `P(E=0) = 2.30%` (modelo agregado) y `3.30%` (OR-gate de 5 subsistemas).** Más allá de ~97 m más de la mitad de la probabilidad reportada es ese piso, y a 700 m —el rango de combate por defecto, con el enjambre circular a 500-900 m— el **90.7%** del número es artefacto. Afecta retroactivamente la lectura de la métrica de P1-A. Encontrado por el análisis de sensibilidad ([§3.8](#38-análisis-de-sensibilidad-global-morris--sobol)), no buscado. | **Alta** (todo el rango de combate por defecto está en zona de artefacto) | **Diagnosticado y corrección verificada, NO aplicada todavía** (ítem P1-F): la log-logística `P = 1/(1+(E₅₀/E)^b)` da `P(0)=0` exacto y ajusta los dos puntos publicados con residuo **0.0000 pp** (contra −1.92 pp del modelo actual) con los mismos 2 parámetros. Se registra como ítem propio porque **mueve la calibración**. Ver [§3.7](#37--el-piso-de-la-sigmoide-pe0--0). |
+| 9 | **La sigmoide de daño es logística en `E`, que tiene soporte en todo ℝ, pero el campo eléctrico es positivo — de ahí que `P(E=0) = 2.30%` (modelo agregado) y `3.30%` (OR-gate de 5 subsistemas).** Más allá de ~97 m más de la mitad de la probabilidad reportada es ese piso, y a 700 m —el rango de combate por defecto, con el enjambre circular a 500-900 m— el **90.7%** del número es artefacto. Afecta retroactivamente la lectura de la métrica de P1-A. Encontrado por el análisis de sensibilidad ([§3.8](#38-análisis-de-sensibilidad-global-morris--sobol)), no buscado. | **Alta** (todo el rango de combate por defecto está en zona de artefacto) | ✅ **CORREGIDO (P1-F)**: la log-logística `P = 1/(1+(E₅₀/E)^b)` da `P(0)=0` exacto y ajusta los dos puntos publicados con residuo **0.0000 pp** (contra −1.92 pp del modelo actual) con los mismos 2 parámetros. `HPM_LINK_FUNCTION = "log_logistica"` es el default; la logística queda seleccionable. La calibración se movió a 0.4677/0.1113 (más CERCA del paper a 20 m: −4.63 pp contra −7.84 pp). A 700 m la probabilidad cayó un factor 630. Ver [§3.7](#37--el-piso-de-la-sigmoide-pe0--0---corregido-p1-f). |
+| 10 | **Los tres números publicados del paper son mutuamente inconsistentes.** 51.4 % @ 20 m y 13.1 % @ 40 m fijan un parámetro de forma `b = 2.81`; el alcance de 90 % de baja de ~18 m exige `b = 20.32` — un factor **7.2**. Entre 497 y 552 V/m (+11 % de campo) la probabilidad tendría que saltar de 51.4 % a 90 %. Ocurre bajo cualquier ajuste de dos parámetros, logística incluida. | Media (afecta qué se puede exigir al simulador, no al simulador en sí) | **Diagnosticado, no corregible desde acá**: es un problema de la referencia. Explicación más probable (inferencia): los 18 m salen de su curva **determinista**, no de la Monte Carlo contra la que el simulador calibra — los puntos deterministas dan `b ≈ 4.3-5.8`, mismo orden. Consecuencia: el criterio de aceptación de P1-E (18 m/88 m) **nunca fue alcanzable**, lo que explica retroactivamente por qué la brecha no cerraba. Fijado como aritmética verificable en `tests/test_duty_cycle.py`. Ver [§3.7.1](#371--los-tres-números-publicados-del-paper-son-mutuamente-inconsistentes). |
 
 **Lo que SÍ ya estaba bien** (verificado, no solo asumido):
 - `S = P·G/(4πr²)` — el término `4πr²` es literalmente el área de una esfera; la propagación ya era 3D en el cálculo (no en el render, ver hallazgo 5).
@@ -426,10 +427,14 @@ Las tres señales están fijadas en
 invertida a propósito: los tests verifican que el modelo **no** cierra. Si
 alguien lo arregla, fallan — y eso es el único modo de saber que se arregló.
 
-### 3.7 🔴 El piso de la sigmoide: `P(E=0) ≠ 0`
+### 3.7 ✅ El piso de la sigmoide: `P(E=0) ≠ 0` — CORREGIDO (P1-F)
 
-**Hallado por el análisis de sensibilidad (§3.8), no buscado.** Es el defecto
-más consecuente encontrado hasta ahora, y estaba a la vista desde el principio.
+**Hallado por el análisis de sensibilidad (§3.8), no buscado.** Fue el defecto
+más consecuente encontrado, y estaba a la vista desde el principio.
+
+> **Estado: corregido el 2026-09-12.** La función de enlace por defecto
+> (`HPM_LINK_FUNCTION`) es ahora `log_logistica`. Lo que sigue documenta el
+> defecto, su magnitud medida y la corrección aplicada.
 
 #### El defecto
 
@@ -496,14 +501,88 @@ Ajuste a los dos puntos publicados:
 **Mismos dos parámetros libres, ajuste exacto en ambos puntos, y sin
 artefacto.** A 700 m da `0.000040` en vez de `0.025326`: un factor 633.
 
-Está registrado como ítem **P1-F** del checklist, no aplicado como arreglo
-silencioso, porque **mueve la calibración** y eso es una decisión que merece su
-propio ítem y su propia actualización de `tests/test_calibracion.py`. El defecto
-queda fijado por
-`tests/test_sensibilidad.py::TestFuncionDeModelo::test_desapunte_extremo_deja_el_PISO_de_la_sigmoide`,
-que falla el día que se corrija.
+#### Lo que se aplicó y lo que se ganó
 
----
+`HPM_LINK_FUNCTION = "log_logistica"` es el default desde P1-F. La logística se
+conserva seleccionable (`"logistica"`) para comparar y para no romper tuning
+previo. Resultados medidos:
+
+| | Antes (logística) | Después (log-logística) |
+|---|---|---|
+| `P(E=0)`, modelo agregado | 0.0230 | **0** exacto |
+| `P(E=0)`, OR-gate 5 subsistemas | 0.0330 | **0** exacto |
+| Calibración @ 20 m | 0.4356 (−7.84 pp vs paper) | **0.4677** (−4.63 pp) |
+| Calibración @ 40 m | 0.1187 (−1.23 pp) | **0.1113** (−1.97 pp) |
+| `P` @ 700 m | 0.0253 (90.7 % artefacto) | **0.00004** (factor 630) |
+
+**Decisión metodológica declarada.** Los parámetros se ajustaron contra el campo
+que calcula **el paper** (497.2 / 248.6 V/m), no contra el del simulador
+(465.48 / 232.74 V/m, un −6.4 % por usar `G ≈ 26000/θ²`). Motivo: `E₅₀` es una
+propiedad de la **electrónica del blanco**, no de la antena del arma. Ajustarlo
+contra el campo del simulador habría metido el déficit de ganancia del EMISOR
+dentro del umbral del BLANCO — el mismo error de categoría del hallazgo 2 que
+dejó el umbral viejo en 500 V/m. El residuo de −4.63 pp que queda a 20 m es
+**enteramente atribuible** a ese déficit, y se cierra poniendo
+`HPM_ANTENNA_MODEL = "plato"` (§3.8 lo mide: 21.16 dBi contra los 21.2
+publicados). Son dos decisiones separadas a propósito.
+
+#### Conversión entre familias, y un hallazgo sobre la Tabla 1 del paper
+
+La transformación que **preserva la pendiente en `E₅₀`** es `b = E₅₀/σ`, porque
+`dP/dE|E₅₀` vale `1/(4σ)` en la logística y `b/(4·E₅₀)` en la log-logística.
+
+Aplicada a los cinco subsistemas de la Tabla 1 da **exactamente 5.0 en los
+cinco** (150/30, 200/40, 250/50, 300/60, 350/70). **Hallazgo propio: la columna
+`σ_E` de la Tabla 1 es literalmente `E₅₀/5` y no aporta información
+independiente** — el paper describe los cinco subsistemas con un único parámetro
+de forma y cinco umbrales, aunque presente diez números.
+
+#### 3.7.1 🔴 Los tres números publicados del paper son mutuamente inconsistentes
+
+Consecuencia inesperada de haber ajustado bien. El paper publica:
+
+- **(a)** 51.4 % @ 20 m → `E` = 497.2 V/m
+- **(b)** 13.1 % @ 40 m → `E` = 248.6 V/m
+- **(c)** alcance de 90 % de baja ≈ 18 m → `E` = 552.4 V/m
+
+Bajo **cualquier** ajuste de dos parámetros no se sostienen a la vez:
+
+| Puntos usados | Parámetro de forma `b` |
+|---|---|
+| (a) + (b) | **2.81** |
+| (a) + (c) | **20.32** |
+
+Un factor **7.2** de discrepancia. Entre 497 y 552 V/m —un +11 % de campo— la
+probabilidad tendría que saltar de 51.4 % a 90 %, lo que exige una pendiente
+siete veces mayor que la que fijan sus propios dos puntos. Con la logística pasa
+lo mismo: `E₀ = 500`, `k = 0.0075` (ajustados a (a)+(b)) dan `P(552.4) = 0.597`,
+no 0.90.
+
+**Explicación más probable — y esto es inferencia, no dato del paper:** la cifra
+de 90 % de alcance sale de su curva **determinista**, no de la Monte Carlo. El
+paper declara 83 % @ 20 m y 20 % @ 40 m en determinista; esos puntos dan
+`b = 4.29`, y determinista-83 % @ 20 m combinado con 90 % @ 18 m da `b = 5.81` —
+mismo orden de magnitud. El 20.32 es el outlier. El simulador calibra contra los
+puntos **Monte Carlo**, así que estructuralmente no puede reproducir una cifra
+derivada del determinista.
+
+**Consecuencia retroactiva:** el criterio de aceptación original de P1-E
+(18 m / 88 m) **nunca fue alcanzable** desde los puntos de calibración. Eso
+explica por qué la brecha no cerró ni con la logística (11.74 m) ni con la
+log-logística (8.74 m). El test de alcance se conserva para fijar la brecha
+medida y detectar si cambia, **no** como criterio de validación del modelo, y la
+inconsistencia quedó como aritmética verificable en
+`tests/test_duty_cycle.py::TestAlcance90PorCiento::test_la_cifra_de_90pc_del_paper_es_internamente_inconsistente`.
+
+#### Efecto colateral valioso: el estimador ahora dice cero
+
+Con el piso eliminado, el escenario por defecto (cañón de 25 kW contra el
+enjambre circular a ~700 m) da **exactamente 0 bajas en 12 réplicas**. Es la
+respuesta físicamente correcta, y el `0.0056` que el estimador reportaba antes
+era íntegramente el piso. **Un estimador que nunca dice cero no sirve para
+decidir nada.** Los tests de P1-A se reorganizaron en consecuencia: el estimador
+se valida ahora con el misil (que sí engancha, detonando a ~80 m) y hay un test
+nuevo que verifica que el cañón a 700 m reporta cero.
 
 ### 3.8 Análisis de sensibilidad global (Morris + Sobol)
 

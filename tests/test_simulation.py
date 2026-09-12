@@ -35,11 +35,44 @@ class TestDrone:
         assert neutralizado or drone.salud < 100
 
     def test_dron_blindado_resiste_mas_que_estandar(self):
-        estandar = Drone(0, x=10, y=0, blindaje="estandar", e_threshold_mult=1.0)
-        blindado = Drone(1, x=10, y=0, blindaje="blindado", e_threshold_mult=2.5)
+        """El blindaje reduce los momios por EXACTAMENTE el factor declarado.
+
+        REESCRITO (P1-F). La versión anterior creaba los dos drones sin fijar
+        su huella de susceptibilidad, así que cada uno sorteaba longitud de
+        cable y polarización DISTINTAS y comparaba probabilidades que no eran
+        comparables: el factor de acoplamiento √(η·pol) varía más entre dos
+        sorteos que el 2.5× del blindaje, así que enmascaraba lo que el test
+        pretendía medir. **Medido: fallaba en 3 de 5 semillas** — pasaba por
+        suerte, y el cambio de función de enlace de P1-F lo destapó.
+
+        Ahora los dos drones difieren ÚNICAMENTE en el blindaje (cableado
+        resonante y polarización óptima en ambos), lo que permite verificar la
+        propiedad fuerte en vez de una desigualdad frágil: `apply_hardening_odds`
+        promete una reducción de momios por el factor exacto, y eso es lo que
+        se comprueba. Es la garantía del hallazgo 7 de
+        docs/FISICA_Y_MATEMATICA.md (desplazar el umbral dentro de la sigmoide
+        daba reducciones de 14× a 821× en vez del 2.5× pedido).
+        """
+        FACTOR = 2.5
+        # Cableado resonante a 2.45 GHz (λ/2 = 6.12 cm) y polarización óptima
+        # ⇒ factor de acoplamiento 1 en ambos: la única diferencia es el
+        # blindaje.
+        comun = {"x": 10, "y": 0, "cable_length_m": 0.0612, "polarization": 1.0}
+        estandar = Drone(0, blindaje="estandar", e_threshold_mult=1.0, **comun)
+        blindado = Drone(1, blindaje="blindado", e_threshold_mult=FACTOR, **comun)
+
         estandar.recibir_daño(potencia=30, distancia=50, angulo_offset=0)
         blindado.recibir_daño(potencia=30, distancia=50, angulo_offset=0)
-        assert blindado.ultima_probabilidad < estandar.ultima_probabilidad
+
+        p_e, p_b = estandar.ultima_probabilidad, blindado.ultima_probabilidad
+        assert p_b < p_e
+
+        momios_e = p_e / (1.0 - p_e)
+        momios_b = p_b / (1.0 - p_b)
+        assert momios_e / momios_b == pytest.approx(FACTOR, rel=1e-6), (
+            "el blindaje debe reducir los momios por el factor exacto, no por "
+            "un colapso exponencial (hallazgo 7)"
+        )
 
 
 class TestHPMEngine:
@@ -223,12 +256,24 @@ class TestJammer:
         assert eventos == []
         assert drone.estado == DroneEstado.ACTIVO
 
-    def test_jammer_interfiere_dron_en_cono_y_lo_congela(self):
+    def test_jammer_interfiere_dron_en_cono_y_activa_perfil_lost_link(self):
+        """
+        Desde P2-E, perder el enlace ya NO congela incondicionalmente al
+        dron: dispara uno de cuatro perfiles de contingencia (ver
+        tests/test_opfor.py para los otros tres). Este test fija el perfil
+        HOVER explícitamente (el más parecido al "congelamiento" que este
+        test verificaba antes de P2-E) para no depender del sorteo
+        aleatorio del perfil.
+        """
+        from src.models.drone import PerfilLostLink
         from src.models.jammer import Jammer
 
         jammer = Jammer()
         jammer.iniciar(direccion=0, potencia=50, apertura_cono=45)
-        drone = Drone(0, x=30, y=0, z=0, velocidad=10, angulo=90)
+        drone = Drone(
+            0, x=30, y=0, z=0, velocidad=10, angulo=90,
+            perfil_lost_link=PerfilLostLink.HOVER,
+        )
 
         eventos = jammer.actualizar([drone])
         assert any(e["tipo"] == "dron_interferido" for e in eventos)
@@ -236,7 +281,7 @@ class TestJammer:
 
         x_antes = drone.x
         drone.mover(dt=1.0)
-        assert drone.x == x_antes  # congelado: no responde a control
+        assert drone.x == x_antes  # perfil HOVER: mantiene posición
 
     def test_jammer_fuera_del_cono_no_interfiere(self):
         from src.models.jammer import Jammer
