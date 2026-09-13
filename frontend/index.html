@@ -158,6 +158,22 @@
               </div>
               <div id="lab-subs-result" class="lab-result hidden"></div>
             </div>
+
+            <div class="lab-block">
+              <h3>🧬 Coevolución genética arma↔enjambre (P3-B)</h3>
+              <p class="wta-hint">El arma y la defensa evolucionan una CONTRA la otra, generación tras generación, con el runner Monte Carlo real como fitness — no una heurística. Corre en background: tarda de decenas de segundos a un par de minutos según los parámetros.</p>
+              <div class="lab-controls">
+                <label>Generaciones <input type="number" id="coevo-generaciones" value="6" min="1" max="15" step="1"></label>
+                <label>Población <input type="number" id="coevo-poblacion" value="8" min="2" max="20" step="1"></label>
+                <label>Réplicas <input type="number" id="coevo-replicas" value="4" min="1" max="10" step="1"></label>
+                <button type="button" id="btn-coevo-start" class="btn btn-reset">🧬 CORRER COEVOLUCIÓN</button>
+              </div>
+              <div id="coevo-progress" class="lab-result hidden">
+                <div id="coevo-status-line"></div>
+                <div id="coevo-gen-bars" class="lab-bars"></div>
+              </div>
+              <div id="coevo-result" class="lab-result hidden"></div>
+            </div>
           </details>
         </section>
       </div>

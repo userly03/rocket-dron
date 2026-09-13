@@ -18,6 +18,14 @@ from src.engine.experiments import (
     experiment_manager,
     experimento_dosis_respuesta,
 )
+from src.api.coevolucion_jobs import (
+    MAX_GENERACIONES,
+    MAX_POBLACION,
+    MAX_REPLICAS,
+    MAX_T_MAX_S,
+    iniciar_job,
+    obtener_job,
+)
 from src.engine.simulation import SimulationEngine
 from src.engine.sensitivity import informe_sensibilidad
 from src.engine.targeting import planificar_asignacion
@@ -459,6 +467,50 @@ def get_desglose_subsistemas(
         ],
         "probabilidad_sistema_or_gate": round(probabilidad_dano_sistema(campo), 4),
     }
+
+
+class CoevolucionStartRequest(BaseModel):
+    n_generaciones: int = Field(default=6, ge=1, le=MAX_GENERACIONES)
+    tam_poblacion: int = Field(default=8, ge=2, le=MAX_POBLACION)
+    replicas_por_evaluacion: int = Field(default=4, ge=1, le=MAX_REPLICAS)
+    t_max_s: float = Field(default=6.0, ge=1.0, le=MAX_T_MAX_S)
+    seed: int = Field(default=2026)
+
+
+@router.post("/coevolucion/start")
+def start_coevolucion(body: CoevolucionStartRequest) -> dict:
+    """
+    Arranca una corrida de coevolución genética arma↔enjambre (P3-B) en un
+    hilo de background y devuelve de inmediato un ``job_id`` — la corrida
+    en sí tarda de decenas de segundos a unos minutos (Monte Carlo real
+    sobre el motor de simulación, no una heurística instantánea), así que
+    NO se espera acá: pollear ``GET /coevolucion/status/{job_id}``.
+
+    Los límites de los parámetros (``MAX_*`` en
+    ``src/api/coevolucion_jobs.py``) acotan el peor caso a algo razonable
+    para una herramienta interactiva — no son el límite que el algoritmo
+    en sí soporta, que puede correr con parámetros mucho más grandes desde
+    un script directo.
+    """
+    job_id = iniciar_job(
+        n_generaciones=body.n_generaciones,
+        tam_poblacion=body.tam_poblacion,
+        replicas_por_evaluacion=body.replicas_por_evaluacion,
+        t_max_s=body.t_max_s,
+        seed=body.seed,
+    )
+    return {"job_id": job_id}
+
+
+@router.get("/coevolucion/status/{job_id}")
+def get_coevolucion_status(job_id: str) -> dict:
+    """Estado de un job de coevolución: progreso generación a generación
+    mientras corre, resultado completo (frontera de Pareto incluida)
+    cuando ``estado == "completado"``."""
+    job = obtener_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job de coevolución no encontrado")
+    return job
 
 
 @router.get("/targeting/plan")

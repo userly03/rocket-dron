@@ -80,6 +80,14 @@
     btnLabSubsistemas: document.getElementById("btn-lab-subsistemas"),
     labSubsDistancia: document.getElementById("lab-subs-distancia"),
     labSubsResult: document.getElementById("lab-subs-result"),
+    coevoGeneraciones: document.getElementById("coevo-generaciones"),
+    coevoPoblacion: document.getElementById("coevo-poblacion"),
+    coevoReplicas: document.getElementById("coevo-replicas"),
+    btnCoevoStart: document.getElementById("btn-coevo-start"),
+    coevoProgress: document.getElementById("coevo-progress"),
+    coevoStatusLine: document.getElementById("coevo-status-line"),
+    coevoGenBars: document.getElementById("coevo-gen-bars"),
+    coevoResult: document.getElementById("coevo-result"),
     btnStart: document.getElementById("btn-start"),
     btnStop: document.getElementById("btn-stop"),
     btnReset: document.getElementById("btn-reset"),
@@ -107,6 +115,8 @@
     userAdjustingHpm: false,
     demoRunning: false,
     wtaPlan: null,
+    coevoJobId: null,
+    coevoPollTimer: null,
   };
 
   let wsClient = null;
@@ -246,6 +256,67 @@
       btn.disabled = false;
       btn.textContent = original;
     }
+  }
+
+  // Coevolución (P3-B): un job en background (POST arranca, GET pollea) —
+  // una corrida real tarda demasiado para un solo request síncrono. Ver
+  // src/api/coevolucion_jobs.py.
+  function renderCoevoProgress(job) {
+    ui.coevoProgress.classList.remove("hidden");
+    ui.coevoStatusLine.textContent =
+      `Generación ${job.progreso.length}/${job.parametros.n_generaciones} — corriendo...`;
+    ui.coevoGenBars.innerHTML = job.progreso.map((p) =>
+      `<div class="coevo-gen-row">
+        <span class="lab-bar-label">Gen ${p.generacion + 1}</span>
+        <span>arma media=${p.fitness_arma_media.toFixed(4)}</span>
+        <span>defensa media=${p.fitness_defensa_media.toFixed(4)}</span>
+      </div>`
+    ).join("");
+  }
+
+  function renderCoevoResultado(resultado) {
+    const armaF = resultado.mejor_arma_final;
+    const defF = resultado.mejor_defensa_final;
+    const fmtFrontera = (frontera, campo1, campo2) =>
+      frontera.length
+        ? frontera.map((p) => `(${p[campo1]}, ${p[campo2]})`).join(" · ")
+        : "sin puntos no-dominados";
+    ui.coevoResult.innerHTML = `
+      <div><strong>Arma final:</strong> potencia=${armaF.potencia_kw}kW, apertura=${armaF.apertura_cono}°, duty_cycle=${armaF.duty_cycle}</div>
+      <div><strong>Defensa final:</strong> formación=${defF.formacion}, cantidad=${defF.cantidad}</div>
+      <div style="margin-top:6px">Frontera de Pareto arma (potencia_kw, fracción neutralizada):<br>${fmtFrontera(resultado.frontera_pareto_arma, "potencia_kw", "fraccion_neutralizada")}</div>
+      <div style="margin-top:4px">Frontera de Pareto defensa (cantidad, supervivencia):<br>${fmtFrontera(resultado.frontera_pareto_defensa, "cantidad", "supervivencia")}</div>
+    `;
+    ui.coevoResult.classList.remove("hidden");
+  }
+
+  function pollCoevoJob(jobId) {
+    state.coevoJobId = jobId;
+    if (state.coevoPollTimer) clearInterval(state.coevoPollTimer);
+    state.coevoPollTimer = setInterval(async () => {
+      let job;
+      try {
+        job = await api(`/api/coevolucion/status/${jobId}`);
+      } catch (e) {
+        clearInterval(state.coevoPollTimer);
+        addLog(`Coevolución: ${e.message}`, "error");
+        ui.btnCoevoStart.disabled = false;
+        return;
+      }
+      renderCoevoProgress(job);
+      if (job.estado === "completado") {
+        clearInterval(state.coevoPollTimer);
+        ui.coevoStatusLine.textContent = `Completado — ${job.parametros.n_generaciones} generaciones.`;
+        renderCoevoResultado(job.resultado);
+        addLog("Coevolución: corrida completada", "info");
+        ui.btnCoevoStart.disabled = false;
+      } else if (job.estado === "error") {
+        clearInterval(state.coevoPollTimer);
+        ui.coevoStatusLine.textContent = `Error: ${job.error}`;
+        addLog(`Coevolución: ${job.error}`, "error");
+        ui.btnCoevoStart.disabled = false;
+      }
+    }, 1500);
   }
 
   function clearWtaPlan() {
@@ -670,6 +741,27 @@
       ui.labSubsResult.classList.remove("hidden");
       addLog(`Desglose @ ${distancia}m: subsistema más vulnerable ${d.subsistemas[0].nombre} (${(d.subsistemas[0].probabilidad * 100).toFixed(1)}%)`, "info");
     }));
+
+    ui.btnCoevoStart.addEventListener("click", async () => {
+      ui.btnCoevoStart.disabled = true;
+      ui.coevoResult.classList.add("hidden");
+      ui.coevoGenBars.innerHTML = "";
+      ui.coevoProgress.classList.remove("hidden");
+      ui.coevoStatusLine.textContent = "Arrancando...";
+      try {
+        const body = {
+          n_generaciones: +ui.coevoGeneraciones.value || 6,
+          tam_poblacion: +ui.coevoPoblacion.value || 8,
+          replicas_por_evaluacion: +ui.coevoReplicas.value || 4,
+        };
+        const r = await api("/api/coevolucion/start", { method: "POST", body: JSON.stringify(body) });
+        addLog(`Coevolución: job ${r.job_id} arrancado (${body.n_generaciones} generaciones)`, "info");
+        pollCoevoJob(r.job_id);
+      } catch (e) {
+        addLog(`Coevolución: ${e.message}`, "error");
+        ui.btnCoevoStart.disabled = false;
+      }
+    });
 
     ui.btnJamStart.addEventListener("click", async () => {
       try {

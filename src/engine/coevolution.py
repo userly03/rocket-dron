@@ -59,7 +59,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 
@@ -517,6 +517,7 @@ def coevolucionar(
     t_max_s: float = 8.0,
     cantidad_defensa_base: int = 20,
     seed: int = 2026,
+    on_generacion: Callable[[int, ResultadoCoevolucion], None] | None = None,
 ) -> ResultadoCoevolucion:
     """
     Corre ``n_generaciones`` de coevolución. Cada generación evalúa TODOS
@@ -529,6 +530,14 @@ def coevolucionar(
     Determinista: un único generador (``nuevo_generador(seed)``) gobierna
     la inicialización, selección, cruce y mutación de ambas poblaciones —
     misma semilla, mismo resultado byte a byte.
+
+    ``on_generacion(generacion_idx, resultado_parcial)``, si se pasa, se
+    llama al final de CADA generación con el ``resultado`` acumulado hasta
+    ahí (mismo objeto que se devuelve al final, ya con esa generación
+    agregada) — pensado para reportar progreso desde un job en background
+    (P3-B no tiene forma de correr "rápido": una corrida de varios minutos
+    necesita poder mostrar avance, no solo el resultado final). No cambia
+    nada de la lógica determinista del algoritmo.
     """
     gen = nuevo_generador(seed)
 
@@ -597,6 +606,9 @@ def coevolucionar(
             poblacion_defensa, fitness_defensa, gen, _cruzar_defensa, _mutar_defensa,
             GenomaDefensa.aleatorio,
         )
+
+        if on_generacion is not None:
+            on_generacion(generacion, resultado)
 
     return resultado
 

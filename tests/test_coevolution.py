@@ -210,6 +210,38 @@ class TestReproducibilidad:
         assert r1.frontera_arma() != r2.frontera_arma() or r1.frontera_defensa() != r2.frontera_defensa()
 
 
+class TestCallbackDeProgreso:
+    """on_generacion: el gancho que el job en background (frontend,
+    "Laboratorio") usa para reportar avance sin esperar a que termine toda
+    la corrida — no debe cambiar el resultado determinista del algoritmo."""
+
+    def test_se_llama_una_vez_por_generacion_con_el_indice_correcto(self):
+        llamadas = []
+        coevolucionar(
+            n_generaciones=3, tam_poblacion=4, replicas_por_evaluacion=2, t_max_s=4.0,
+            seed=7, on_generacion=lambda i, r: llamadas.append(i),
+        )
+        assert llamadas == [0, 1, 2]
+
+    def test_el_resultado_parcial_ya_tiene_la_generacion_actual_agregada(self):
+        longitudes = []
+        coevolucionar(
+            n_generaciones=3, tam_poblacion=4, replicas_por_evaluacion=2, t_max_s=4.0,
+            seed=7, on_generacion=lambda i, r: longitudes.append(len(r.fitness_arma_por_generacion)),
+        )
+        assert longitudes == [1, 2, 3]
+
+    def test_no_cambia_el_resultado_final_ni_la_reproducibilidad(self):
+        r_sin_callback = coevolucionar(
+            n_generaciones=3, tam_poblacion=4, replicas_por_evaluacion=2, t_max_s=4.0, seed=11,
+        )
+        r_con_callback = coevolucionar(
+            n_generaciones=3, tam_poblacion=4, replicas_por_evaluacion=2, t_max_s=4.0, seed=11,
+            on_generacion=lambda i, r: None,
+        )
+        assert resumen_json(r_sin_callback) == resumen_json(r_con_callback)
+
+
 class TestEvaluarEnfrentamiento:
     def test_devuelve_una_fraccion_valida(self):
         arma = GenomaArma(potencia_kw=60.0, apertura_cono=15.0, duty_cycle=0.01)
@@ -317,3 +349,62 @@ class TestCoevolucionCompleta:
         assert "frontera_pareto_defensa" in resumen
         assert resumen["mejor_arma_final"] is not None
         assert resumen["mejor_defensa_final"] is not None
+
+
+class TestJobDeCoevolucionEnBackground:
+    """El panel "Laboratorio" del frontend corre esto como un job async
+    (POST arranca, GET pollea) porque una corrida real tarda demasiado
+    para un endpoint síncrono — ver src/api/coevolucion_jobs.py."""
+
+    PARAMS_RAPIDOS = {
+        "n_generaciones": 2, "tam_poblacion": 3, "replicas_por_evaluacion": 1,
+        "t_max_s": 2.0, "seed": 99,
+    }
+
+    def _esperar_job(self, client, job_id, timeout_s=60):
+        import time
+
+        limite = time.monotonic() + timeout_s
+        while time.monotonic() < limite:
+            d = client.get(f"/api/coevolucion/status/{job_id}").json()
+            if d["estado"] != "ejecutando":
+                return d
+            time.sleep(0.5)
+        pytest.fail(f"el job {job_id} no terminó dentro de {timeout_s}s")
+
+    def test_arranca_y_termina_completado_con_progreso_y_resultado(self):
+        from fastapi.testclient import TestClient
+
+        from src.main import app
+
+        with TestClient(app) as client:
+            r = client.post("/api/coevolucion/start", json=self.PARAMS_RAPIDOS)
+            assert r.status_code == 200
+            job_id = r.json()["job_id"]
+
+            d = self._esperar_job(client, job_id)
+            assert d["estado"] == "completado"
+            assert d["error"] is None
+            assert len(d["progreso"]) == self.PARAMS_RAPIDOS["n_generaciones"]
+            assert [p["generacion"] for p in d["progreso"]] == [0, 1]
+            assert "frontera_pareto_arma" in d["resultado"]
+            assert "frontera_pareto_defensa" in d["resultado"]
+
+    def test_job_id_inexistente_da_404(self):
+        from fastapi.testclient import TestClient
+
+        from src.main import app
+
+        with TestClient(app) as client:
+            resp = client.get("/api/coevolucion/status/no-existe-este-id")
+            assert resp.status_code == 404
+
+    def test_rechaza_parametros_fuera_de_rango(self):
+        from fastapi.testclient import TestClient
+
+        from src.main import app
+
+        with TestClient(app) as client:
+            assert client.post("/api/coevolucion/start", json={"n_generaciones": 999}).status_code == 422
+            assert client.post("/api/coevolucion/start", json={"tam_poblacion": 1}).status_code == 422
+            assert client.post("/api/coevolucion/start", json={"t_max_s": 1000}).status_code == 422

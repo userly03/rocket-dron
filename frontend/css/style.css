@@ -744,6 +744,17 @@ body.view-spectrum .chart-box-spectrum { display: block !important; }
 .lab-badge-ok { color: var(--accent-green); font-weight: bold; }
 .lab-badge-bad { color: var(--accent-red); font-weight: bold; }
 
+.coevo-gen-row {
+  display: flex;
+  gap: 16px;
+  font-size: 0.7rem;
+  color: var(--text-primary);
+  padding: 3px 0;
+  border-bottom: 1px solid rgba(42, 74, 42, 0.3);
+}
+
+.coevo-gen-row .lab-bar-label { width: 60px; color: var(--accent-green); }
+
 .wta-hint {
   font-size: 0.68rem;
   color: var(--text-muted);
