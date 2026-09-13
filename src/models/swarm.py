@@ -27,9 +27,8 @@ from src.config import (
 )
 from src.engine.flocking import compute_headings
 from src.engine.physics import check_boundary_collision, reflect_angle
-from src.engine.radar_engine import evaluar_deteccion
+from src.engine.radar_engine import TrackManager
 from src.models.drone import Drone, DroneEstado, EstadoEnlace, EstadoSalud
-from src.utils.helpers import distance3d
 from src.utils.reproducibilidad import rng as global_rng
 
 
@@ -71,6 +70,11 @@ class Swarm:
         # otras réplicas corriendo en paralelo. Ver ``self._rng()``.
         self.rng = rng
 
+        # Radar dinámico (P2-G): un TrackManager por enjambre, igual que
+        # cada Swarm tiene su propio RNG — un experimento Monte Carlo con
+        # varias réplicas en paralelo no debe compartir tracks entre ellas.
+        self.track_manager = TrackManager()
+
     def _rng(self) -> Generator:
         """Generador de esta instancia, o el global si no se inyectó ninguno."""
         return self.rng if self.rng is not None else global_rng()
@@ -79,6 +83,10 @@ class Swarm:
         """Crea drones según el patrón de formación indicado."""
         self.formacion = FormacionTipo(tipo)
         self.drones.clear()
+        # Nueva formación = nuevo engagement: los tracks del radar (P2-G) no
+        # deben sobrevivir a un reinicio, o un id de dron reciclado heredaría
+        # el track (posición estimada) de un dron completamente distinto.
+        self.track_manager = TrackManager()
 
         if self.formacion == FormacionTipo.CUADRADA:
             self._crear_formacion_cuadrada(cantidad)
@@ -276,17 +284,18 @@ class Swarm:
                 drone.x, drone.y = new_x, new_y
                 drone.angulo = reflect_angle(drone.angulo, collided_x, collided_y)
 
-            dist_radar = distance3d(
-                HPM_ORIGIN_X, HPM_ORIGIN_Y, HPM_ORIGIN_Z, drone.x, drone.y, drone.z
-            )
-            drone.detectado, _ = evaluar_deteccion(
-                dist_radar,
-                RADAR_TX_POWER_W,
-                RADAR_ANTENNA_GAIN_DBI,
-                RADAR_FREQUENCY_GHZ,
-                RADAR_RCS_M2,
-                RADAR_NOISE_FLOOR_W,
-            )
+        # Radar dinámico (P2-G): UN solo barrido por tick sobre TODO el
+        # enjambre (no una evaluación aislada por dron dentro del loop de
+        # arriba) — un radar de barrido revisita el campo completo en cada
+        # ciclo, no dron por dron. Ver TrackManager.actualizar: propaga
+        # todos los tracks vivos por dead-reckoning cada tick, y solo cada
+        # RADAR_REVISITA_S segundos toma una medición fresca por dron.
+        self.track_manager.actualizar(
+            self.drones, dt,
+            HPM_ORIGIN_X, HPM_ORIGIN_Y, HPM_ORIGIN_Z,
+            RADAR_TX_POWER_W, RADAR_ANTENNA_GAIN_DBI, RADAR_FREQUENCY_GHZ,
+            RADAR_RCS_M2, RADAR_NOISE_FLOOR_W,
+        )
 
     def actualizar_amenazas(self, dt: float) -> None:
         """

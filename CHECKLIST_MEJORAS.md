@@ -575,7 +575,7 @@
       Arreglo trivial si se quiere: chequear `T + ΔT ≤ T_max` en vez de `T < T_max`.
 
 
-- [ ] **P2-G · Radar dinámico: barrido + filtro de track** *(era P2-05)*
+- [x] **P2-G · Radar dinámico: barrido + filtro de track** *(era P2-05)*
       qué: **en dos pasos.** (1) Extraer la detección de `Swarm.actualizar` a un
       `TrackManager` con estado propio (posición estimada, velocidad, edad, calidad),
       manteniendo el comportamiento actual. (2) Recién después: revisita, filtro α-β-γ,
@@ -593,6 +593,35 @@
       después. (paso 2): un dron dentro de rango se detecta recién tras la revisita; un
       dron que maniobra pierde el track; sin track no hay lock-on nuevo; los cambios en
       los números calibrados quedan documentados.
+      **CERRADO (2026-09-13).** `radar_engine.Track`/`TrackManager` + migración de
+      `HPMissile`/`HPMissileSystem`. 21 tests nuevos en `tests/test_radar_dinamico.py`.
+      **Paso 1 — regresión verificada:** en régimen estacionario (drones detenidos,
+      muchas revisitas) el conteo de detectados coincide **exacto** con
+      `evaluar_deteccion()` aplicada directamente — la ecuación no cambió, solo cuándo
+      se consulta y dónde vive el resultado.
+      **Paso 2 — barrido (`RADAR_REVISITA_S=1.0s`) + filtro α-β-γ**, validado
+      empíricamente antes de confiar en él: sobre una trayectoria de velocidad
+      constante (20s), el error de posición converge a <5m y la velocidad estimada
+      converge dentro de un 15% de la real; el error NO diverge entre 10s y 40s de
+      seguimiento (test explícito de estabilidad).
+      **Pérdida de track por maniobra** (`RADAR_PERDIDA_TRACK_RESIDUAL_M=120m`)
+      calibrada para distinguir vuelo normal de una maniobra real: verificado que 10s
+      de giro boids al máximo (30 m/s) NO pierde el track, mientras que un salto de 3×
+      el umbral SIEMPRE lo pierde.
+      **Migración quirúrgica de los consumidores:** la adquisición de un blanco NUEVO
+      (`_resolver_objetivo`, el centroide de auto-apuntado de `lanzar`) usa la posición
+      ESTIMADA del track; la NAVEGACIÓN una vez fijado el objetivo sigue usando la
+      posición VERDADERA sin cambios (el buscador propio del misil, documentado desde
+      antes de P2-G). Verificado con un caso donde posición real y track apuntan a
+      blancos opuestos: adquisición sigue al track, navegación sigue a la posición real.
+      **Impacto medido en la calibración de intercepción:** 30/30 lanzamientos con
+      semillas distintas detonaron correctamente (0 destruidos sin detonar) — la tasa
+      del ~99% documentada en `MISSILE_MAX_TURN_RATE_DEG_S` no se degrada.
+      Un test de regresión existente (`test_desacople_frecuencia.py`) pasaba de forma
+      **vacía** tras la migración (comparaba `0 == 0` porque su helper usaba `dt=0.0`,
+      que nunca dispara un barrido) — corregido forzando el reloj de barrido; ahora
+      compara conteos reales de nuevo.
+      Calibración intacta (0.4677/0.1113, desviación <0.003 pp).
 
 ## P3 — Frontera (una vez que el instrumento mide)
 

@@ -127,18 +127,29 @@ class HPMissile:
         """Generador de esta instancia, o el global si no se inyectó ninguno."""
         return self.rng if self.rng is not None else global_rng()
 
-    def mover(self, dt: float, drones: list[Drone] | None = None) -> None:
+    def mover(
+        self,
+        dt: float,
+        drones: list[Drone] | None = None,
+        track_manager=None,
+    ) -> None:
         """
         Actualiza posición, altitud y (si está guiado) rumbo del misil.
 
         ``drones`` es opcional y retrocompatible: sin lista de drones el
         misil vuela balístico (ángulo fijo), igual que antes.
+
+        ``track_manager`` (P2-G, Paso 2): el ``TrackManager`` del radar de
+        tierra, para que la ADQUISICIÓN de un blanco NUEVO (``
+        _resolver_objetivo``) use la posición ESTIMADA del track en vez de
+        la verdadera. ``None`` (default) conserva el comportamiento previo
+        a P2-G — retrocompatible para quien llame a ``mover`` sin él.
         """
         if self.estado not in (MissileEstado.LANZADO, MissileEstado.VOLANDO):
             return
 
         if self.guiado and drones:
-            self._aplicar_guiado(dt, drones)
+            self._aplicar_guiado(dt, drones, track_manager)
 
         self.x, self.y = update_position(
             self.x, self.y, self.velocidad, self.angulo, dt
@@ -150,16 +161,27 @@ class HPMissile:
         if self.estado == MissileEstado.LANZADO:
             self.estado = MissileEstado.VOLANDO
 
-    def _resolver_objetivo(self, drones: list[Drone]) -> Drone | None:
+    def _resolver_objetivo(self, drones: list[Drone], track_manager=None) -> Drone | None:
         """
         Devuelve el dron fijado, o re-engancha al detectado más cercano si
         el objetivo previo fue neutralizado.
 
-        El seguimiento de un blanco ya fijado ("lock-on") no requiere
+        El seguimiento de un blanco YA fijado ("lock-on") no requiere
         detección continua del radar de tierra (el buscador propio del
-        misil mantiene el track, como en un misil real); pero re-enganchar
-        a un blanco *nuevo* sí requiere que esté detectado — no se puede
-        adquirir lo que no se ve.
+        misil mantiene el track, como en un misil real) — este método
+        sigue devolviendo el ``Drone`` directamente, y la navegación en
+        ``_aplicar_guiado`` sigue usando su posición VERDADERA sin importar
+        cómo se resolvió acá: el buscador propio del misil se asume
+        perfecto una vez adquirido, un supuesto que P2-G no toca.
+
+        Re-enganchar a un blanco *nuevo* sí requiere que esté detectado —no
+        se puede adquirir lo que no se ve— y ACÁ es donde P2-G, Paso 2 sí
+        cambia algo: entre los candidatos detectados, el "más cercano" se
+        decide por la posición ESTIMADA del track (``track_manager``), no la
+        verdadera — es la posición que el radar de tierra realmente conoce
+        en el momento de la adquisición. Con ``track_manager=None``
+        (retrocompatible) se usa la posición verdadera, igual que antes de
+        P2-G.
         """
         activos = [d for d in drones if d.estado != DroneEstado.NEUTRALIZADO]
         if not activos:
@@ -174,11 +196,18 @@ class HPMissile:
         if not detectados:
             return None
 
-        objetivo = min(detectados, key=lambda d: distance(self.x, self.y, d.x, d.y))
+        if track_manager is not None:
+            def _distancia_estimada(d: Drone) -> float:
+                tx, ty, _tz = track_manager.posicion_para(d)
+                return distance(self.x, self.y, tx, ty)
+
+            objetivo = min(detectados, key=_distancia_estimada)
+        else:
+            objetivo = min(detectados, key=lambda d: distance(self.x, self.y, d.x, d.y))
         self.target_id = objetivo.id
         return objetivo
 
-    def _aplicar_guiado(self, dt: float, drones: list[Drone]) -> None:
+    def _aplicar_guiado(self, dt: float, drones: list[Drone], track_manager=None) -> None:
         """
         Ley de navegación proporcional (PN) simplificada:
 
@@ -193,10 +222,14 @@ class HPMissile:
         if dt <= 0:
             return
 
-        objetivo = self._resolver_objetivo(drones)
+        objetivo = self._resolver_objetivo(drones, track_manager)
         if objetivo is None:
             return
 
+        # Navegación: SIEMPRE con la posición VERDADERA del objetivo, una
+        # vez resuelto — el buscador propio del misil (no el radar de
+        # tierra) es lo que lo guía en vuelo, con o sin track_manager. Solo
+        # la ADQUISICIÓN de arriba (_resolver_objetivo) consulta el track.
         los_angle = target_angle_from_origin(self.x, self.y, objetivo.x, objetivo.y)
 
         if self._prev_los_angle is None:

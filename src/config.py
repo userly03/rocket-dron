@@ -535,6 +535,60 @@ RADAR_NOISE_FLOOR_W: float = float(os.getenv("RADAR_NOISE_FLOOR_W", "1e-13"))
 RADAR_SNR_THRESHOLD_DB: float = float(os.getenv("RADAR_SNR_THRESHOLD_DB", "10"))
 RADAR_SIGMOID_STEEPNESS: float = float(os.getenv("RADAR_SIGMOID_STEEPNESS", "0.35"))
 
+# --- Radar dinámico: barrido + filtro α-β-γ (P2-G) ---
+# El radar de arriba decide instantáneamente, cada tick, si un blanco "se
+# conoce" — omnisciente por construcción: la decisión usa la posición VERDADERA
+# del dron, y drone.detectado es un booleano sin memoria ni incertidumbre. Un
+# radar real de barrido revisita el campo periódicamente y mantiene un TRACK
+# (posición y velocidad ESTIMADAS, no la real) entre revisitas — ver
+# ``radar_engine.TrackManager``. Auditoría §3.3: sin esto, un filtro α-β-γ
+# sobre un booleano sería decorativo, porque HPMissile._resolver_objetivo y
+# HPMissileSystem.lanzar apuntaban usando la posición REAL de cualquier dron
+# "detectado", no una estimación con error.
+#
+# ⚠ ESTO MUEVE NÚMEROS CALIBRADOS (documentado, no un descuido): con barrido
+# periódico, la detección de un dron recién aparecido ya no es instantánea
+# (espera hasta la próxima revisita, como máximo RADAR_REVISITA_S segundos de
+# retraso) y el punto de auto-apuntado del misil usa la posición ESTIMADA del
+# centroide, no la real — puede diferir en algunos metros. El rango de
+# detección en estado ESTACIONARIO (una vez adquirido el track y revisitado
+# con regularidad) no cambia: sigue gobernado por evaluar_deteccion(), la
+# misma ecuación de radar de arriba.
+#
+# Periodo de revisita: 1 s. Del orden de un radar de vigilancia de corto
+# alcance/contra-UAS de barrido rápido (rotación de 1-4 s es común en esa
+# clase de sistemas) — no una medición de ningún radar real, decisión de
+# ingeniería declarada como tal.
+RADAR_REVISITA_S: float = float(os.getenv("RADAR_REVISITA_S", "1.0"))
+
+# Ganancias del filtro α-β-γ (posición, velocidad, aceleración). Valores de
+# amortiguamiento moderado, tomados de la práctica estándar de filtros de
+# seguimiento de ganancia fija (no ajustados contra ningún radar real,
+# decisión de ingeniería) — verificados EMPÍRICAMENTE en
+# tests/test_radar_dinamico.py: convergen sin oscilar sobre una trayectoria
+# de velocidad constante y sobre una de aceleración constante, y no divergen
+# ante una revisita de dato faltante.
+RADAR_FILTRO_ALPHA: float = float(os.getenv("RADAR_FILTRO_ALPHA", "0.6"))
+RADAR_FILTRO_BETA: float = float(os.getenv("RADAR_FILTRO_BETA", "0.3"))
+RADAR_FILTRO_GAMMA: float = float(os.getenv("RADAR_FILTRO_GAMMA", "0.05"))
+
+# Umbral de residual (m) entre la posición PREDICHA por el filtro y la
+# posición MEDIDA en la revisita, más allá del cual el track se declara
+# perdido (maniobra demasiado abrupta para que el modelo de aceleración
+# constante la explique) — en vez de "corregir" el filtro hacia un salto que
+# no es ruido de medición sino un cambio real de comportamiento. Un dron en
+# vuelo recto a velocidad típica (10-30 m/s, ver VELOCIDAD_MIN/MAX) se
+# desplaza 10-30 m por revisita de 1 s, bien explicado por el término de
+# velocidad del filtro; el umbral se fija muy por encima de eso para no
+# perder tracks en vuelo normal, y por debajo del desplazamiento que produce
+# un giro boids al máximo (BOIDS_MAX_TURN_RATE_DEG_S) combinado con la
+# velocidad máxima. Verificado empíricamente en
+# tests/test_radar_dinamico.py: vuelo recto NO pierde el track, una maniobra
+# evasiva fuerte SÍ.
+RADAR_PERDIDA_TRACK_RESIDUAL_M: float = float(
+    os.getenv("RADAR_PERDIDA_TRACK_RESIDUAL_M", "120.0")
+)
+
 # --- Jamming de comunicaciones ---
 # Arma continua (no un pulso único como el cañón/misil): mientras está
 # activa, se reevalúa cada tick qué drones quedan sin enlace de control.

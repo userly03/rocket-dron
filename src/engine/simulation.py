@@ -364,6 +364,7 @@ class SimulationEngine:
                 drones=self.swarm.drones,
                 guiado=guiado,
                 duty_cycle=duty_cycle,
+                track_manager=self.swarm.track_manager,
             )
 
         if result.get("success"):
@@ -631,7 +632,7 @@ class SimulationEngine:
             self.swarm.actualizar(dt)
             eventos_jamming = self.jammer.actualizar(self.swarm.drones)
         eventos_misil = self.missile_system.actualizar_misiles(
-            self.swarm.drones, dt
+            self.swarm.drones, dt, track_manager=self.swarm.track_manager
         )
         self.tiempo += dt
         self.tick += 1

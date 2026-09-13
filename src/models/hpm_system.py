@@ -55,6 +55,7 @@ class HPMissileSystem:
         drones: list[Drone] | None = None,
         guiado: bool = True,
         duty_cycle: float | None = None,
+        track_manager=None,
     ) -> dict:
         """
         Crea y lanza un misil HPM hacia el enjambre.
@@ -66,6 +67,17 @@ class HPMissileSystem:
         ("lock-on") el dron detectado más cercano al centroide como objetivo
         y corrige su rumbo en vuelo (ver ``HPMissile._aplicar_guiado``); si es
         False, vuela balístico con el ángulo inicial fijo.
+
+        ``track_manager`` (P2-G, Paso 2): con él, el centroide de auto-
+        apuntado y la elección del objetivo de lock-on inicial usan la
+        posición ESTIMADA de cada track, no la verdadera — es lo que el
+        radar de tierra realmente sabe en el instante del lanzamiento. Sin
+        él (``None``, default), usa la posición verdadera — comportamiento
+        idéntico al de antes de P2-G. ⚠ Esto MUEVE el punto de auto-
+        apuntado (puede diferir del centroide real en algunos metros) y,
+        ocasionalmente, cuál dron queda fijado como objetivo inicial —
+        documentado como parte del alcance de P2-G, no un efecto colateral
+        no declarado.
         """
         if self.municion_restante <= 0:
             return {"success": False, "message": "Sin munición disponible"}
@@ -75,17 +87,24 @@ class HPMissileSystem:
         activos = [d for d in (drones or []) if d.estado != DroneEstado.NEUTRALIZADO]
         detectados = [d for d in activos if d.detectado]
 
+        def _posicion(d: Drone) -> tuple[float, float]:
+            if track_manager is not None:
+                tx, ty, _tz = track_manager.posicion_para(d)
+                return tx, ty
+            return d.x, d.y
+
         if angulo is None:
             if detectados:
-                cx = sum(d.x for d in detectados) / len(detectados)
-                cy = sum(d.y for d in detectados) / len(detectados)
+                posiciones = [_posicion(d) for d in detectados]
+                cx = sum(p[0] for p in posiciones) / len(posiciones)
+                cy = sum(p[1] for p in posiciones) / len(posiciones)
                 angulo = target_angle_from_origin(x, y, cx, cy)
             else:
                 angulo = 0.0
 
         target_id = None
         if detectados:
-            objetivo = min(detectados, key=lambda d: distance(x, y, d.x, d.y))
+            objetivo = min(detectados, key=lambda d: distance(x, y, *_posicion(d)))
             target_id = objetivo.id
 
         dist_objetivo = self._estimar_distancia_objetivo(x, y, angulo, drones or [])
@@ -118,7 +137,7 @@ class HPMissileSystem:
         }
 
     def actualizar_misiles(
-        self, drones: list[Drone], dt: float
+        self, drones: list[Drone], dt: float, track_manager=None
     ) -> list[dict]:
         """
         Actualiza posición de misiles activos y procesa detonaciones.
@@ -139,7 +158,7 @@ class HPMissileSystem:
             if misil.estado == MissileEstado.DESTRUIDO:
                 continue
 
-            misil.mover(dt, drones)
+            misil.mover(dt, drones, track_manager)
 
             if self._fuera_de_campo(misil):
                 misil.estado = MissileEstado.DESTRUIDO

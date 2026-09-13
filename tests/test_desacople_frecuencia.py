@@ -55,9 +55,24 @@ class TestEvaluarDeteccionDependeDeFrecuencia:
 
 class TestSwarmUsaFrecuenciaDeRadar:
     def _contar_detectados(self, seed: int = 42) -> int:
+        """
+        MODIFICADO en P2-G: el radar ya no decide instantáneamente cada
+        tick — hace falta que se cumpla al menos un ciclo de revisita
+        (``RADAR_REVISITA_S``) para que el ``TrackManager`` tome la primera
+        medición. Antes, ``dt=0.0`` alcanzaba porque la detección era
+        instantánea; con barrido, ``dt=0.0`` nunca dispara un barrido y este
+        helper habría devuelto 0 SIEMPRE, dejando los dos tests que lo usan
+        pasando de forma vacía (0 == 0) en vez de comparar conteos reales —
+        se detectó exactamente así al migrar (ver CHECKLIST_MEJORAS.md P2-G).
+        Se fuerza el reloj de barrido al umbral para obtener una medición
+        inmediata sin mover a los drones (dt=0.0 en el resto del pipeline).
+        """
+        from src.config import RADAR_REVISITA_S
+
         seed_simulacion(seed)
         swarm = Swarm(formacion=FormacionTipo.CIRCULAR)
         swarm.inicializar_formacion(FormacionTipo.CIRCULAR.value, 30)
+        swarm.track_manager._reloj_barrido_s = RADAR_REVISITA_S
         swarm.actualizar(dt=0.0)
         return sum(1 for d in swarm.drones if d.detectado)
 

@@ -1018,6 +1018,84 @@ tocar el valor configurado (487.4). El chequeo no es decorativo.
 
 Disponible en `GET /api/dosis-respuesta`.
 
+### 3.12 Radar dinámico: barrido + filtro α-β-γ (P2-G)
+
+**Categoría: aproximación de ingeniería**, en dos partes: la ecuación de
+radar y la sigmoide de detección son las mismas de §3.3 (sin cambios); lo
+nuevo es CUÁNDO se consultan y CÓMO se recuerda el resultado entre consultas.
+
+**Único ítem del checklist explícitamente NO ADITIVO** — mueve comportamiento
+transitorio y el punto de auto-apuntado del misil, declarado como tal desde
+el diseño, no descubierto después.
+
+#### El problema que resuelve
+
+Antes de P2-G, el radar era omnisciente por construcción:
+`evaluar_deteccion()` se llamaba una vez por dron, CADA TICK, sobre la
+posición VERDADERA, y el resultado (`drone.detectado`) era un booleano sin
+memoria. `HPMissile._resolver_objetivo` y `HPMissileSystem.lanzar` leían
+`d.x, d.y` reales de cualquier dron "detectado" — un filtro de seguimiento
+sobre ese booleano habría sido decorativo, porque el arma ya sabía dónde
+estaba el blanco con exactitud perfecta.
+
+#### Paso 1: `TrackManager`, sin cambiar el comportamiento
+
+`Swarm.actualizar` delega la detección a un `TrackManager` con un `Track`
+por dron (posición/velocidad/aceleración ESTIMADAS, edad, revisitas
+confirmadas) en vez de escribir un booleano inline. **Regresión verificada**:
+en régimen ESTACIONARIO (drones detenidos, muchas revisitas), el conteo de
+detectados coincide EXACTO con `evaluar_deteccion()` aplicada directamente a
+cada posición — la ecuación no cambió, solo dónde vive el resultado.
+
+#### Paso 2: barrido periódico + filtro α-β-γ
+
+- **Barrido**: un solo ciclo de revisita (`RADAR_REVISITA_S = 1.0 s`, del
+  orden de un radar de vigilancia de corto alcance de barrido rápido — no
+  una medición de hardware real, decisión de ingeniería declarada) para TODO
+  el enjambre, no una evaluación aislada por dron. Entre revisitas, los
+  tracks vivos se propagan por **dead-reckoning** (modelo de aceleración
+  constante) — el track "camina solo" hasta la próxima medición.
+- **Filtro α-β-γ**: en cada revisita, la posición predicha se corrige con la
+  medición real:
+  ```
+  x_est = x_pred + α·residual
+  v_est = v_pred + (β/T_revisita)·residual
+  a_est = a_pred + (2γ/T_revisita²)·residual
+  ```
+  Ganancias `α=0.6, β=0.3, γ=0.05` — valores de amortiguamiento moderado de
+  la práctica estándar de filtros de ganancia fija, **no ajustados contra
+  ningún radar real**. Validados EMPÍRICAMENTE (no solo declarados): sobre
+  una trayectoria de velocidad constante (20 s de simulación), el error de
+  posición converge a < 5 m y la velocidad estimada converge a la real
+  dentro de un 15 %; el error no diverge entre 10 s y 40 s de seguimiento.
+- **Pérdida de track por maniobra**: si el residual (medición − predicción)
+  supera `RADAR_PERDIDA_TRACK_RESIDUAL_M = 120 m`, el track se declara
+  perdido — el modelo de aceleración constante no explica un salto así, es
+  un cambio real de comportamiento, no ruido de medición. Calibrado para
+  distinguir vuelo normal de una maniobra real: verificado que **10 s de
+  giro boids al máximo** (`BOIDS_MAX_TURN_RATE_DEG_S`, a 30 m/s) NO pierde el
+  track, mientras que un salto de 3× el umbral sí lo pierde siempre.
+
+#### Migración de consumidores: qué cambia y qué no
+
+`HPMissile._resolver_objetivo` y `HPMissileSystem.lanzar` migran a la
+posición ESTIMADA del track **solo para decidir A QUIÉN adquirir** —un
+blanco nuevo, o el centroide de auto-apuntado al lanzar—. La NAVEGACIÓN,
+una vez fijado el objetivo (`target_id`), sigue usando la posición VERDADERA
+sin cambios: el buscador propio del misil se asume perfecto una vez
+adquirido, el mismo supuesto documentado antes de P2-G ("el seguimiento de
+un blanco ya fijado no requiere detección continua del radar de tierra").
+Verificado con un caso donde la posición real y la del track apuntan a
+blancos opuestos: la ADQUISICIÓN sigue al track, la NAVEGACIÓN sigue a la
+posición real.
+
+**Impacto medido en la calibración de intercepción** (el ~99 % de casos
+documentado en `MISSILE_MAX_TURN_RATE_DEG_S`): sobre 30 lanzamientos con
+semillas distintas, **30/30 detonaron** (0 destruidos sin detonar) — la
+migración es lo bastante quirúrgica (solo cambia a quién se apunta, no cómo
+se dirige el vuelo) como para no degradar la tasa de intercepción ya
+calibrada.
+
 ## 4. Limitaciones conocidas (honestidad ante todo)
 
 Esto es lo que el modelo **no** captura, a propósito o por simplificación:
