@@ -945,6 +945,79 @@ un disparo real y sin forzar nada más que el hazard de maduración: un dron a
 fallo latente con `shot_history` reflejando `neutralizados: 1,
 bajas_diferidas: 1` en la entrada ORIGINAL.
 
+### 3.11 Curva dosis-respuesta por máxima verosimilitud (P2-B)
+
+**Categoría: método, no física** (igual que §3.8) — cierra el lazo entre lo
+que el simulador dice que hace y lo que hace de verdad.
+
+#### La idea
+
+En vez de confiar en que `Drone.recibir_daño` implementa la sigmoide que
+`src/config.py` declara, se generan datos binarios (kill/no-kill) **con el
+motor real** a varias distancias, se ajusta la curva que esos datos
+**implican**, y se compara contra los parámetros configurados. Si un cambio
+futuro en la cadena física (acoplamiento, blindaje, duty cycle) desplazara
+silenciosamente la curva efectiva sin tocar `HPM_LOGLOGISTIC_E50_V_M`, esto lo
+detectaría — a diferencia de `tests/test_calibracion.py`, que verifica el
+modelo **teórico** en dos puntos aislados, no el motor completo encadenado.
+
+#### El optimizador: por qué Newton-Raphson y no scipy
+
+La log-verosimilitud de una regresión logística es **cóncava**, así que
+Newton-Raphson (IRLS) converge al óptimo global sin necesitar un optimizador
+genérico. Validado ANTES de aplicarlo al modelo de daño, contra datos
+sintéticos con parámetros conocidos:
+
+| Parámetro real | Recuperado | n |
+|---|---|---|
+| `β₀=-3.0, β₁=0.05` | `-3.0 ± 0.15`, `0.05 ± 0.01` | 4000 |
+| `E₅₀=300, b=4.0` (log-logística) | `300 ± 5%`, `4.0 ± 8%` | 5000 |
+| `E₀=20, k=0.6` (logística) | `20 ± 1.5`, `0.6 ± 10%` | 4000 |
+
+Y converge rápido: con solo 8 iteraciones da el mismo resultado (a 1e-6) que
+con 200, sobre 2000 puntos.
+
+**La reparametrización que conecta el ajuste con las dos familias de enlace:**
+
+```
+log-logística (P = 1/(1+(E₅₀/E)^b)):   logística en x = ln(E),  b=β₁,  E₅₀=exp(-β₀/β₁)
+logística     (P = 1/(1+exp(-k(E-E₀)))): logística en x = E,     k=β₁,  E₀=-β₀/β₁
+```
+
+#### Adaptativo a `HPM_LINK_FUNCTION`
+
+El ítem original (escrito antes de P1-F) pedía "E₅₀ y σ_E", el lenguaje de la
+logística. Ajustar esa familia sobre un motor que corre con log-logística
+habría estado recuperando el modelo EQUIVOCADO. El ajustador detecta
+`HPM_LINK_FUNCTION` y usa la parametrización activa; reporta además un
+"σ_E equivalente" (`E₅₀/b`, la misma conversión de P1-F) para no romper la
+letra del ítem original.
+
+#### Resultado sobre el motor real
+
+Huella de susceptibilidad **fijada** (cable resonante, polarización óptima —
+mismo criterio que el caso de verdad conocida de P1-A): aísla la varianza de
+la sigmoide de la varianza del acoplamiento de P2-04.
+
+Corriendo `experimento_dosis_respuesta()` (10 distancias de 10 a 80 m, 400
+observaciones cada una, 600 remuestreos bootstrap):
+
+| | Configurado | Recuperado | IC 95% |
+|---|---|---|---|
+| `E₅₀` | 487.389 V/m | 496.70 V/m | [480.5, 513.1] |
+| `b` | 2.8106 | 2.8187 | [2.66, 3.02] |
+
+**`recupera_la_calibracion = True`.** El motor completo —con blindaje, duty
+cycle, y toda la cadena Friis— produce exactamente la curva que su
+configuración declara.
+
+**Control negativo, para confirmar que la comparación puede fallar de
+verdad**: datos generados con `E₅₀=700, b=3.5` (deliberadamente distintos)
+dan `recupera_la_calibracion = False`, con el IC de `E₅₀` ([696.9, 747.9]) sin
+tocar el valor configurado (487.4). El chequeo no es decorativo.
+
+Disponible en `GET /api/dosis-respuesta`.
+
 ## 4. Limitaciones conocidas (honestidad ante todo)
 
 Esto es lo que el modelo **no** captura, a propósito o por simplificación:

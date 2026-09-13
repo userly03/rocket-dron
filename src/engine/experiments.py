@@ -646,3 +646,272 @@ def monte_carlo_blanco_unico(
         ),
         "espec": espec.to_dict(),
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# P2-B · Curva dosis-respuesta recuperada de datos simulados (máxima
+# verosimilitud), con IC por bootstrap y comparación contra la calibración
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# CIERRA EL LAZO: en vez de confiar en que el modelo hace lo que su
+# configuración DICE que hace, se generan datos binarios (kill/no-kill) CON
+# EL MOTOR REAL a varias distancias, se ajusta la curva dosis-respuesta que
+# esos datos IMPLICAN, y se compara contra los parámetros configurados. Si un
+# cambio futuro en la cadena física (acoplamiento, blindaje, duty cycle)
+# desplaza silenciosamente la curva efectiva sin tocar
+# HPM_LOGLOGISTIC_E50_V_M, esto lo detecta — a diferencia de
+# tests/test_calibracion.py, que verifica el modelo TEÓRICO en dos puntos,
+# no lo que el motor completo (con todos sus efectos encadenados) produce.
+#
+# ADAPTATIVO A HPM_LINK_FUNCTION: el ítem original (escrito antes de P1-F)
+# pedía "E₅₀ y σ_E", el lenguaje de la logística. Con el default actual
+# (log-logística), fijar la parametrización a logística estaría ajustando el
+# modelo EQUIVOCADO. Se ajusta la familia que de verdad gobierna
+# Drone.recibir_daño (HPM_LINK_FUNCTION), y se reporta además un "σ_E
+# equivalente" (E₅₀/b, la misma conversión de P1-F) para no romper la letra
+# del ítem.
+
+
+def _campo_efectivo_v_m(
+    distancia_m: float,
+    potencia_kw: float,
+    apertura_cono: float,
+    cable_length_m: float,
+    polarization: float,
+) -> float:
+    """Campo E que llega al blanco (post-acoplamiento), en el eje del haz."""
+    from src.engine.hpm_engine import friis_diagnostics, susceptibility_coupling_factor
+
+    diag = friis_diagnostics(potencia_kw, distancia_m, apertura_cono, 0.0)
+    acoplamiento = susceptibility_coupling_factor(cable_length_m, polarization)
+    return float(diag["campo_e_efectivo_v_m"] * acoplamiento)
+
+
+def generar_datos_dosis_respuesta(
+    distancias_m: list[float] | None = None,
+    n_por_distancia: int = 300,
+    seed: int = 2026,
+    potencia_kw: float | None = None,
+    apertura_cono: float | None = None,
+    cable_length_m: float | None = None,
+    polarization: float | None = None,
+) -> tuple["np.ndarray", "np.ndarray"]:
+    """
+    Genera pares (campo E efectivo, kill) corriendo ``Drone.recibir_daño``
+    —el motor real, no una fórmula reescrita— a varias distancias.
+
+    Huella de susceptibilidad FIJADA (cable resonante a la frecuencia del
+    arma, polarización óptima ⇒ acoplamiento = 1 por defecto): aísla la
+    varianza de la SIGMOIDE (lo que se quiere recuperar) de la varianza de
+    la huella de P2-04 (una segunda fuente de dispersión no controlada) —
+    mismo criterio que el caso de verdad conocida de P1-A
+    (``TestEstimadorTieneSenalEnElMotorReal``).
+
+    Devuelve ``(campos, kills)`` como arrays de igual longitud
+    (``len(distancias_m) · n_por_distancia``), listos para
+    ``ajustar_dosis_respuesta``.
+    """
+    from src.config import HPM_CONE_APERTURE, HPM_DEFAULT_POWER, HPM_FREQUENCY_GHZ
+    from src.models.drone import Drone
+
+    if distancias_m is None:
+        # Rango elegido para cubrir de ~86% a ~2% de probabilidad con la
+        # calibración por defecto — ni saturado ni degenerado en ningún
+        # extremo, lo que evita separación perfecta en el ajuste logístico.
+        distancias_m = [10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0, 50.0, 60.0, 80.0]
+    potencia = HPM_DEFAULT_POWER if potencia_kw is None else potencia_kw
+    apertura = HPM_CONE_APERTURE if apertura_cono is None else apertura_cono
+    cable = (
+        (299_792_458.0 / (2.0 * HPM_FREQUENCY_GHZ * 1e9))
+        if cable_length_m is None else cable_length_m
+    )
+    pol = 1.0 if polarization is None else polarization
+
+    gen = nuevo_generador(seed)
+    campos: list[float] = []
+    kills: list[float] = []
+    for distancia in distancias_m:
+        campo = _campo_efectivo_v_m(distancia, potencia, apertura, cable, pol)
+        for _ in range(n_por_distancia):
+            drone = Drone(0, x=0.0, y=0.0, cable_length_m=cable, polarization=pol, rng=gen)
+            kill = drone.recibir_daño(
+                potencia=potencia, distancia=distancia,
+                angulo_offset=0.0, apertura_cono=apertura,
+            )
+            campos.append(campo)
+            kills.append(1.0 if kill else 0.0)
+
+    return np.array(campos, dtype=float), np.array(kills, dtype=float)
+
+
+def _logistic_irls(
+    x: "np.ndarray", y: "np.ndarray", iteraciones: int = 100, tol: float = 1e-10,
+    ridge: float = 1e-8,
+) -> "np.ndarray":
+    """
+    Máxima verosimilitud de una regresión logística ``P = 1/(1+exp(-(β₀+β₁x)))``
+    por **Newton-Raphson / IRLS** (Iteratively Reweighted Least Squares).
+
+    Por qué esto ES el ajuste de la curva dosis-respuesta, no una aproximación:
+    la log-verosimilitud de una logística en cualquier variable ``x`` es
+    **cóncava**, así que Newton-Raphson converge al óptimo global en pocas
+    iteraciones (verificado: 6 en un caso de prueba con 3000 puntos) — no
+    hace falta ``scipy.optimize`` (no está en ``requirements.txt``, ver
+    docs/AUDITORIA_CHECKLIST.md §4.6) ni un optimizador genérico.
+
+    La reparametrización que conecta esto con las dos familias de enlace del
+    proyecto:
+    - **log-logística** (``P = 1/(1+(E₅₀/E)^b)``): es EXACTAMENTE una
+      logística en ``x = ln(E)``, con ``β₁ = b`` y ``E₅₀ = exp(-β₀/β₁)``.
+    - **logística** (``P = 1/(1+exp(-k(E-E₀)))``): es una logística en
+      ``x = E`` directo, con ``β₁ = k`` y ``E₀ = -β₀/β₁``.
+
+    ``ridge`` añade una regularización mínima a la Hessiana — sin ella, una
+    muestra bootstrap con separación perfecta (posible con pocos puntos)
+    puede dar una Hessiana casi singular; con ``ridge=1e-8`` el efecto sobre
+    un ajuste bien condicionado es despreciable, y evita que
+    ``np.linalg.solve`` lance ``LinAlgError`` en el caso raro.
+    """
+    X = np.column_stack([np.ones_like(x), x])
+    beta = np.zeros(2)
+    for _ in range(iteraciones):
+        eta = np.clip(X @ beta, -30.0, 30.0)
+        p = 1.0 / (1.0 + np.exp(-eta))
+        w = np.clip(p * (1.0 - p), 1e-10, None)
+        hessiana = X.T @ (X * w[:, None]) + ridge * np.eye(2)
+        gradiente = X.T @ (y - p)
+        delta = np.linalg.solve(hessiana, gradiente)
+        beta = beta + delta
+        if np.max(np.abs(delta)) < tol:
+            break
+    return beta
+
+
+def _ajustar_una_vez(campos: "np.ndarray", kills: "np.ndarray", link: str) -> tuple[float, float, float]:
+    """Un ajuste puntual. Devuelve ``(e50_o_e0, b_o_k, sigma_equivalente)``."""
+    if link == "log_logistica":
+        x = np.log(np.clip(campos, 1e-9, None))
+        beta = _logistic_irls(x, kills)
+        b = float(beta[1])
+        e50 = float(np.exp(-beta[0] / beta[1])) if b != 0 else float("nan")
+        sigma_equivalente = e50 / b if b != 0 else float("nan")
+        return e50, b, sigma_equivalente
+
+    beta = _logistic_irls(campos, kills)
+    k = float(beta[1])
+    e0 = float(-beta[0] / beta[1]) if k != 0 else float("nan")
+    sigma = 1.0 / k if k != 0 else float("nan")
+    return e0, k, sigma
+
+
+def ajustar_dosis_respuesta(
+    campos_v_m: "np.ndarray",
+    kills: "np.ndarray",
+    n_bootstrap: int = 1000,
+    seed: int = 2026,
+) -> dict[str, Any]:
+    """
+    Ajusta la curva dosis-respuesta ACTIVA (según ``HPM_LINK_FUNCTION``) por
+    máxima verosimilitud, con IC del 95% por **bootstrap de percentiles**
+    sobre las observaciones — mismo método y misma justificación que P1-A
+    (``intervalo_bootstrap``): sin supuestos de normalidad, apropiado para un
+    ajuste con pocos puntos de datos en los extremos.
+    """
+    link = config_mod.HPM_LINK_FUNCTION
+    campos = np.asarray(campos_v_m, dtype=float)
+    y = np.asarray(kills, dtype=float)
+    n = len(campos)
+
+    e50_hat, b_hat, sigma_hat = _ajustar_una_vez(campos, y, link)
+
+    gen = nuevo_generador(seed)
+    e50_boot: list[float] = []
+    b_boot: list[float] = []
+    sigma_boot: list[float] = []
+    for _ in range(n_bootstrap):
+        idx = gen.integers(0, n, size=n)
+        try:
+            e50_i, b_i, sigma_i = _ajustar_una_vez(campos[idx], y[idx], link)
+        except np.linalg.LinAlgError:
+            continue
+        if np.isfinite(e50_i) and np.isfinite(b_i):
+            e50_boot.append(e50_i)
+            b_boot.append(b_i)
+            sigma_boot.append(sigma_i)
+
+    def _ic95(valores: list[float]) -> list[float]:
+        if len(valores) < 10:
+            return [float("nan"), float("nan")]
+        lo, hi = np.percentile(valores, [2.5, 97.5])
+        return [round(float(lo), 4), round(float(hi), 4)]
+
+    return {
+        "link_function": link,
+        "n_observaciones": n,
+        "n_bootstrap_exitosos": len(e50_boot),
+        "e50_v_m": round(e50_hat, 4),
+        "ic95_e50_v_m": _ic95(e50_boot),
+        "parametro_forma": round(b_hat, 4),
+        "ic95_parametro_forma": _ic95(b_boot),
+        # "σ_E equivalente" (E₅₀/parámetro_forma): con link "logistica" ES
+        # σ_E (1/k, la definición exacta). Con "log_logistica" es la
+        # conversión de P1-F (b=E₅₀/σ), reportada para no romper la letra
+        # del ítem original — NO es el σ_E de una logística real, que esta
+        # familia no tiene.
+        "sigma_e_equivalente_v_m": round(sigma_hat, 4) if np.isfinite(sigma_hat) else None,
+        "ic95_sigma_e_equivalente": _ic95(sigma_boot),
+    }
+
+
+def comparar_contra_calibracion(ajuste: dict[str, Any]) -> dict[str, Any]:
+    """
+    ¿La curva que el simulador IMPLICA (recuperada de datos simulados con el
+    motor real) coincide con la que se le CONFIGURÓ? Compara el ajuste
+    contra los parámetros activos de ``src/config.py`` para la familia de
+    enlace vigente.
+    """
+    link = ajuste["link_function"]
+    if link == "log_logistica":
+        e50_config = config_mod.HPM_LOGLOGISTIC_E50_V_M
+        forma_config = config_mod.HPM_LOGLOGISTIC_B
+    else:
+        e50_config = config_mod.HPM_E_THRESHOLD_V_M
+        forma_config = config_mod.HPM_SIGMOID_STEEPNESS
+
+    lo_e, hi_e = ajuste["ic95_e50_v_m"]
+    lo_b, hi_b = ajuste["ic95_parametro_forma"]
+    e50_dentro = (
+        np.isfinite(lo_e) and np.isfinite(hi_e) and lo_e <= e50_config <= hi_e
+    )
+    forma_dentro = (
+        np.isfinite(lo_b) and np.isfinite(hi_b) and lo_b <= forma_config <= hi_b
+    )
+
+    return {
+        "link_function": link,
+        "e50_configurado": e50_config,
+        "parametro_forma_configurado": forma_config,
+        "e50_dentro_del_ic": bool(e50_dentro),
+        "parametro_forma_dentro_del_ic": bool(forma_dentro),
+        "recupera_la_calibracion": bool(e50_dentro and forma_dentro),
+    }
+
+
+def experimento_dosis_respuesta(
+    distancias_m: list[float] | None = None,
+    n_por_distancia: int = 300,
+    n_bootstrap: int = 1000,
+    seed: int = 2026,
+) -> dict[str, Any]:
+    """Genera datos, ajusta, y compara — en un solo paso, para el endpoint."""
+    campos, kills = generar_datos_dosis_respuesta(
+        distancias_m=distancias_m, n_por_distancia=n_por_distancia, seed=seed,
+    )
+    ajuste = ajustar_dosis_respuesta(campos, kills, n_bootstrap=n_bootstrap, seed=seed + 1)
+    comparacion = comparar_contra_calibracion(ajuste)
+    return {
+        "distancias_m": distancias_m or [10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0, 50.0, 60.0, 80.0],
+        "n_por_distancia": n_por_distancia,
+        "ajuste": ajuste,
+        "comparacion": comparacion,
+    }

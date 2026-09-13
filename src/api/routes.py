@@ -12,7 +12,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
-from src.engine.experiments import ExperimentConfig, WeaponPolicy, experiment_manager
+from src.engine.experiments import (
+    ExperimentConfig,
+    WeaponPolicy,
+    experiment_manager,
+    experimento_dosis_respuesta,
+)
 from src.engine.simulation import SimulationEngine
 from src.engine.sensitivity import informe_sensibilidad
 from src.engine.validation import verificar_calibracion
@@ -379,6 +384,34 @@ def get_sensibilidad(
         raise HTTPException(status_code=400, detail="distancia_m fuera de rango")
     return informe_sensibilidad(
         distancia_m=distancia_m, n_base=n_base, r_morris=r_morris
+    )
+
+
+@router.get("/dosis-respuesta")
+def get_dosis_respuesta(
+    n_por_distancia: int = 300,
+    n_bootstrap: int = 1000,
+    seed: int = 2026,
+) -> dict:
+    """
+    Curva dosis-respuesta recuperada de datos simulados con el motor real
+    (P2-B): ajuste por máxima verosimilitud (Newton-Raphson/IRLS, sin
+    scipy) de la familia de enlace ACTIVA (``HPM_LINK_FUNCTION``), con IC
+    del 95 % por bootstrap, y comparación automática contra los parámetros
+    configurados.
+
+    Cierra el lazo: en vez de confiar en que el modelo hace lo que su
+    configuración dice, se recupera la curva que el motor completo (con
+    huella de susceptibilidad, blindaje, duty cycle) IMPLICA, y se contrasta
+    con la que se le metió. ``comparacion.recupera_la_calibracion`` es el
+    campo que hay que leer primero.
+    """
+    if not (20 <= n_por_distancia <= 5000):
+        raise HTTPException(status_code=400, detail="n_por_distancia debe estar entre 20 y 5000")
+    if not (100 <= n_bootstrap <= 5000):
+        raise HTTPException(status_code=400, detail="n_bootstrap debe estar entre 100 y 5000")
+    return experimento_dosis_respuesta(
+        n_por_distancia=n_por_distancia, n_bootstrap=n_bootstrap, seed=seed
     )
 
 

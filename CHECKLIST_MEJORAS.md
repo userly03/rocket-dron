@@ -379,7 +379,7 @@
         espacio a propósito, con un test que falla si alguien lo conecta.
       **Y encontró el defecto P1-F** (piso de la sigmoide), que no estaba buscado.
 
-- [ ] **P2-B · Curva dosis-respuesta por máxima verosimilitud**
+- [x] **P2-B · Curva dosis-respuesta por máxima verosimilitud**
       qué: ajuste ML de `P(kill)` vs `E` desde las réplicas, con IC por bootstrap, y
       comparación automática contra los puntos de calibración. Cierra el lazo: se recupera
       la curva que el simulador **implica** y se contrasta con la que se le metió.
@@ -387,6 +387,21 @@
       deps: P1-A.
       done: el endpoint devuelve `E₅₀` y `σ_E` ajustados con IC; un test verifica que
       recuperan los valores de entrada dentro del IC al correr contra el propio modelo.
+      **CERRADO (2026-09-12).** `GET /api/dosis-respuesta` + 17 tests. Ajuste por
+      máxima verosimilitud vía **Newton-Raphson/IRLS** (log-verosimilitud logística
+      cóncava, sin scipy), validado ANTES de usarlo contra datos sintéticos con
+      parámetros conocidos (recupera `E₅₀`/`b` dentro de ±5-8% en 3 casos de prueba;
+      converge en 8 iteraciones, igual resultado que con 200).
+      **Adaptativo a `HPM_LINK_FUNCTION`** (log-logística por defecto desde P1-F): el
+      ítem original pedía "E₅₀/σ_E" en lenguaje de logística — ajustar esa familia sobre
+      un motor que corre en log-logística habría recuperado el modelo equivocado. Se
+      ajusta la familia ACTIVA, con un "σ_E equivalente" (`E₅₀/b`) reportado aparte.
+      **Sobre el motor real, huella de susceptibilidad fijada** (mismo criterio que la
+      verdad conocida de P1-A): recupera `E₅₀=496.70` (configurado 487.39) y `b=2.8187`
+      (configurado 2.8106), **ambos dentro del IC95%** — `recupera_la_calibracion=True`.
+      **Control negativo, para confirmar que el chequeo no es decorativo:** datos con
+      `E₅₀=700` (deliberadamente distinto) dan `recupera_la_calibracion=False` con el IC
+      sin tocar el valor real configurado.
 
 - [x] **P2-C · ⭐ Dos rayos (reflexión en tierra) + patrón de antena real**
       *(reemplaza P3-08, cortado)*
