@@ -29,6 +29,7 @@ const COLOR = {
   activo: 0x00ff41,
   activoBlindado: 0x00c8ff,
   riesgoLatente: 0xffb000,
+  track: 0x6699bb,
   danado: 0xffd000,
   neutralizado: 0x992222,
   neutralizadoBlink: 0xff3333,
@@ -132,6 +133,10 @@ const Render3D = (() => {
   let hpmConeMesh = null;
   let hpmOriginMesh = null;
   let radarRingMesh = null;
+  let radarPingMesh = null;
+  let trackLinesMesh = null;
+  let trackGhostMesh = null;
+  let showTracks = false;
   let heatmapPlane = null;
   let heatmapCanvas = null;
   let heatmapCtx = null;
@@ -254,6 +259,47 @@ const Render3D = (() => {
     radarRingMesh.rotation.x = -Math.PI / 2;
     radarRingMesh.position.y = 0.5;
     scene.add(radarRingMesh);
+
+    // "Ping" de barrido (P2-G): el radar de este proyecto revisita TODO el
+    // enjambre a la vez cada RADAR_REVISITA_S segundos (no un haz rotando
+    // que barre en bearing) — un anillo giratorio sería más lindo pero
+    // mentiría sobre el modelo. En cambio, un anillo que se EXPANDE desde
+    // el origen y se desvanece durante cada ciclo comunica lo que
+    // realmente pasa: qué tan viejo es el dato (recién refrescado = chico
+    // y brillante; a punto de refrescar de nuevo = llega al borde y
+    // desaparece). Geometría placeholder, real en updateRadarPing().
+    const pingGeo = new THREE.RingGeometry(0.1, 0.2, 48);
+    const pingMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.5,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    radarPingMesh = new THREE.Mesh(pingGeo, pingMat);
+    radarPingMesh.rotation.x = -Math.PI / 2;
+    radarPingMesh.position.y = 0.55;
+    scene.add(radarPingMesh);
+
+    // Tracks del radar (P2-G): línea entre la posición REAL de un dron
+    // detectado y la posición ESTIMADA por el filtro (con la que apunta el
+    // misil) — solo visible cuando se activa el toggle "Mostrar tracks", y
+    // solo para drones donde la diferencia es apreciable.
+    const trackGeo = new THREE.BufferGeometry();
+    trackGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(0), 3));
+    const trackMat = new THREE.LineBasicMaterial({
+      color: COLOR.track, transparent: true, opacity: 0.7,
+    });
+    trackLinesMesh = new THREE.LineSegments(trackGeo, trackMat);
+    trackLinesMesh.visible = false;
+    scene.add(trackLinesMesh);
+
+    const ghostGeo = new THREE.BufferGeometry();
+    ghostGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(0), 3));
+    const ghostMat = new THREE.PointsMaterial({ color: COLOR.track, size: 5, transparent: true, opacity: 0.9 });
+    trackGhostMesh = new THREE.Points(ghostGeo, ghostMat);
+    trackGhostMesh.visible = false;
+    scene.add(trackGhostMesh);
   }
 
   function updateHpmCone(hpm) {
@@ -280,6 +326,62 @@ const Render3D = (() => {
     hpmConeMesh.geometry.setAttribute("position", new THREE.BufferAttribute(flat, 3));
     hpmConeMesh.geometry.computeVertexNormals();
     hpmConeMesh.position.set(origin.x, 0.8, origin.z);
+  }
+
+  function updateRadarPing(radar) {
+    if (!radar || !radarPingMesh) return;
+    const origin = worldToThree(field, radar.origen_x ?? 0, radar.origen_y ?? 0, 0.55);
+    radarPingMesh.position.set(origin.x, 0.55, origin.z);
+    const fase = Math.max(0, Math.min(1, radar.fase_barrido ?? 0));
+    const outer = Math.max(2, RADAR_RANGE_M * fase);
+    const inner = Math.max(0.5, outer - 4);
+    radarPingMesh.geometry.dispose();
+    radarPingMesh.geometry = new THREE.RingGeometry(inner, outer, 48);
+    // Se desvanece rápido (curva cuadrática, no lineal) para que se lea
+    // como un pulso que muere, no como un anillo que se confunde con el
+    // límite de alcance estático (mismo radio máximo, otro color/opacidad).
+    radarPingMesh.material.opacity = 0.7 * Math.pow(1 - fase, 1.6);
+  }
+
+  const _trackA = new THREE.Vector3();
+  const _trackB = new THREE.Vector3();
+  const TRACK_ERROR_MIN_M = 2.0;
+
+  function updateTracks(drones) {
+    if (!trackLinesMesh || !trackGhostMesh) return;
+    if (!showTracks || !drones) {
+      trackLinesMesh.visible = false;
+      trackGhostMesh.visible = false;
+      return;
+    }
+    const linePositions = [];
+    const ghostPositions = [];
+    for (const d of drones) {
+      if (d.track_x == null || d.estado === "neutralizado" || d.detectado === false) continue;
+      const dx = d.track_x - d.x;
+      const dy = d.track_y - d.y;
+      if (Math.hypot(dx, dy) < TRACK_ERROR_MIN_M) continue;
+      _trackA.copy(worldToThree(field, d.x, d.y, (d.z ?? FALLBACK_DRONE_ALTITUDE)));
+      _trackB.copy(worldToThree(field, d.track_x, d.track_y, (d.track_z ?? d.z ?? FALLBACK_DRONE_ALTITUDE)));
+      linePositions.push(_trackA.x, _trackA.y, _trackA.z, _trackB.x, _trackB.y, _trackB.z);
+      ghostPositions.push(_trackB.x, _trackB.y, _trackB.z);
+    }
+    trackLinesMesh.geometry.dispose();
+    trackLinesMesh.geometry = new THREE.BufferGeometry();
+    trackLinesMesh.geometry.setAttribute("position", new THREE.Float32BufferAttribute(linePositions, 3));
+    trackGhostMesh.geometry.dispose();
+    trackGhostMesh.geometry = new THREE.BufferGeometry();
+    trackGhostMesh.geometry.setAttribute("position", new THREE.Float32BufferAttribute(ghostPositions, 3));
+    trackLinesMesh.visible = linePositions.length > 0;
+    trackGhostMesh.visible = ghostPositions.length > 0;
+  }
+
+  function setShowTracks(value) {
+    showTracks = !!value;
+    if (!showTracks) {
+      trackLinesMesh.visible = false;
+      trackGhostMesh.visible = false;
+    }
   }
 
   function ensureDroneCapacity(n) {
@@ -724,8 +826,10 @@ const Render3D = (() => {
     }
     const now = performance.now();
     if (snap.drones) updateDrones(snap.drones, now);
+    if (snap.drones) updateTracks(snap.drones);
     if (snap.missiles) updateMissiles(snap.missiles.misiles);
     if (snap.hpm) updateHpmCone(snap.hpm);
+    if (snap.radar) updateRadarPing(snap.radar);
     if (viewMode === "physical" && snap.analytics?.heatmap) updateHeatmap(snap.analytics.heatmap);
   }
 
@@ -782,7 +886,7 @@ const Render3D = (() => {
     renderer.render(scene, camera);
   }
 
-  return { init, updateSnapshot, setViewMode, resetCamera, resize, triggerCannonPulse, flashHits };
+  return { init, updateSnapshot, setViewMode, resetCamera, resize, triggerCannonPulse, flashHits, setShowTracks };
 })();
 
 window.Render3D = Render3D;

@@ -182,6 +182,15 @@ class TrackManager:
     def get_track(self, drone_id: int) -> Track | None:
         return self.tracks.get(drone_id)
 
+    def fase_barrido(self) -> float:
+        """Fracción [0,1) transcurrida del ciclo de revisita actual — 0 justo
+        después de un barrido, cerca de 1 justo antes del próximo. Puramente
+        informativo (ej. animar el "ping" de refresco en el frontend); no
+        gobierna ninguna decisión del motor."""
+        if self.revisita_s <= 0:
+            return 0.0
+        return min(1.0, self._reloj_barrido_s / self.revisita_s)
+
     def tracks_activos(self) -> list[Track]:
         return list(self.tracks.values())
 

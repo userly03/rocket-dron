@@ -37,6 +37,7 @@
     logList: document.getElementById("log-list"),
     mapTitle: document.getElementById("map-title"),
     btnCameraTop: document.getElementById("btn-camera-top"),
+    toggleTracks: document.getElementById("toggle-tracks"),
     powerSlider: document.getElementById("power-slider"),
     powerValue: document.getElementById("power-value"),
     directionSlider: document.getElementById("direction-slider"),
@@ -349,6 +350,7 @@
     ui.viewButtons.forEach((btn) => btn.addEventListener("click", () => setViewMode(btn.dataset.view)));
 
     ui.btnCameraTop.addEventListener("click", () => window.Render3D?.resetCamera());
+    ui.toggleTracks.addEventListener("change", () => window.Render3D?.setShowTracks(ui.toggleTracks.checked));
 
     ui.speedButtons.forEach((btn) => {
       btn.addEventListener("click", async () => {

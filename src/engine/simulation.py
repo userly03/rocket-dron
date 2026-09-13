@@ -141,8 +141,17 @@ class SimulationEngine:
                 "fps": self.fps,
                 "time_scale": self.time_scale,
                 "field": {"width": FIELD_WIDTH, "height": FIELD_HEIGHT},
-                "drones": [drone_to_dict(d) for d in self.swarm.drones],
+                "drones": [
+                    drone_to_dict(d, track_manager=self.swarm.track_manager)
+                    for d in self.swarm.drones
+                ],
                 "conteo_estados": self.swarm.contar_por_estado(),
+                "radar": {
+                    "origen_x": HPM_ORIGIN_X,
+                    "origen_y": HPM_ORIGIN_Y,
+                    "revisita_s": self.swarm.track_manager.revisita_s,
+                    "fase_barrido": round(self.swarm.track_manager.fase_barrido(), 4),
+                },
                 "hpm": self.hpm.to_dict(),
                 "missiles": self.missile_system.get_status(),
                 "jammer": self.jammer.to_dict(),
@@ -572,7 +581,10 @@ class SimulationEngine:
 
     def get_drones(self) -> list[dict]:
         with self._lock:
-            return [drone_to_dict(d) for d in self.swarm.drones]
+            return [
+                drone_to_dict(d, track_manager=self.swarm.track_manager)
+                for d in self.swarm.drones
+            ]
 
     def _tick(self, dt: float, mover_enjambre: bool = True) -> tuple[list[dict], list[dict]]:
         """Avanza la simulación un paso, de forma síncrona y sin hilo.

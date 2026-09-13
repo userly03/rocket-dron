@@ -49,7 +49,8 @@ def clamp(value: float, minimum: float, maximum: float) -> float:
     return float(np.clip(value, minimum, maximum))
 
 
-def drone_to_dict(drone: Drone) -> dict:
+def drone_to_dict(drone: Drone, track_manager=None) -> dict:
+    track = track_manager.get_track(drone.id) if track_manager is not None else None
     return {
         "id": drone.id,
         "x": round(drone.x, 2),
@@ -76,4 +77,11 @@ def drone_to_dict(drone: Drone) -> dict:
             if drone.riesgo_latente_por_s > 0.0 else 0.0
         ),
         "subsistema_en_riesgo": drone.subsistema_en_riesgo,
+        # Radar dinámico (P2-G): posición ESTIMADA por el track, si existe
+        # (con la que apunta el misil — ver TrackManager.posicion_para),
+        # distinta de x/y/z (la posición REAL) de arriba. None si no hay
+        # track vivo para este dron (nunca se lo llamó, o se perdió).
+        "track_x": round(track.x, 2) if track is not None else None,
+        "track_y": round(track.y, 2) if track is not None else None,
+        "track_z": round(track.z, 2) if track is not None else None,
     }

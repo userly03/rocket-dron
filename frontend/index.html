@@ -70,8 +70,12 @@
               <span class="legend-item"><span class="dot dot-neutralized"></span> Neutralizado</span>
               <span class="legend-item"><span class="dot dot-undetected"></span> No detectado</span>
               <span class="legend-item"><span class="dot dot-missile"></span> Misil HPM</span>
+              <span class="legend-item" title="Con 'Mostrar tracks' activo: línea a la posición estimada por el radar"><span class="dot dot-track"></span> Track (estimado)</span>
             </div>
             <button type="button" id="btn-camera-top" class="btn-camera" title="Restablece la cámara a vista superior (podés arrastrar para rotar libremente)">🎥 Vista superior</button>
+            <label class="checkbox-label checkbox-track-toggle" title="Dibuja una línea entre la posición REAL de cada dron detectado y la posición ESTIMADA por el radar (con la que apunta el misil) — solo se muestra cuando la diferencia es apreciable">
+              <input type="checkbox" id="toggle-tracks"> 📡 Mostrar tracks
+            </label>
           </div>
           <div class="canvas-wrapper">
             <canvas id="tactical-map-3d" width="800" height="600" aria-label="Mapa 3D de drones"></canvas>

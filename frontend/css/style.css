@@ -493,6 +493,13 @@ body.view-spectrum .chart-box-spectrum { display: block !important; }
 .dot-neutralized { background: var(--accent-red); box-shadow: 0 0 6px var(--accent-red); }
 .dot-undetected { background: #2a4a2a; box-shadow: none; }
 .dot-missile { background: var(--accent-cyan); box-shadow: 0 0 6px var(--accent-cyan); }
+.dot-track { background: #6699bb; box-shadow: 0 0 6px #6699bb; }
+.checkbox-track-toggle {
+  margin-left: 12px;
+  font-size: 0.72rem;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
 .dot-riesgo {
   background: var(--accent-amber);
   box-shadow: 0 0 6px var(--accent-amber);
