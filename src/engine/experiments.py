@@ -269,7 +269,20 @@ def run_replica(cfg: ExperimentConfig, replica_idx: int) -> dict[str, Any]:
                 )
             disparado = True
 
-        sim._tick(cfg.dt)
+        eventos_jamming, eventos_misil = sim._tick(cfg.dt)
+        # Deuda técnica cerrada: antes se descartaba el retorno de ``_tick``,
+        # así que una detonación de misil durante una réplica Monte Carlo
+        # nunca llegaba a ``analytics.record_missile_detonation`` — las bajas
+        # SÍ se contaban (HPMissile.detonar toca el estado del dron
+        # directamente), pero el experimento quedaba sin diagnóstico por
+        # disparo ni entrada en la curva de efectividad. Se procesan acá con
+        # los mismos métodos que usa el bucle interactivo, para que un
+        # experimento y una corrida en vivo dejen el mismo rastro en
+        # ``analytics``.
+        if eventos_misil:
+            sim._process_missile_events(eventos_misil)
+        if eventos_jamming:
+            sim._process_jamming_events(eventos_jamming)
 
         conteo = sim.swarm.contar_por_estado()
         if conteo["neutralizado"] >= len(sim.swarm.drones):

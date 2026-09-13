@@ -564,3 +564,59 @@ class TestEstimadorTieneSenalEnElMotorReal:
         assert lo <= p_teorica <= hi, (
             f"IC=[{lo}, {hi}] no contiene la p teórica del motor ({p_teorica})"
         )
+
+
+class TestRunReplicaRegistraEventosDeMisil:
+    """Deuda técnica cerrada: `run_replica` descartaba el retorno de `_tick`,
+    así que una detonación de misil durante Monte Carlo nunca llegaba a
+    `analytics.record_missile_detonation` — las bajas se contaban igual, pero
+    sin diagnóstico por disparo ni curva de efectividad.
+    """
+
+    def test_detonacion_de_misil_queda_en_shot_history(self):
+        gen = nuevo_generador(555)
+        sim = SimulationEngine(swarm_size=20, rng=gen)
+        sim.configure_swarm("circular", 20)
+
+        sim.launch_missile(x=sim.hpm.origen_x, y=sim.hpm.origen_y)
+
+        detonado = False
+        for _ in range(2000):
+            eventos_jamming, eventos_misil = sim._tick(1 / 30)
+            if eventos_misil:
+                sim._process_missile_events(eventos_misil)
+            if any(e["tipo"] == "misil_detonado" for e in eventos_misil):
+                detonado = True
+                break
+
+        assert detonado, "el misil no detonó en la ventana de simulación"
+        assert len(sim.analytics.shot_history) >= 1
+        assert any(s["tipo"] == "misil" for s in sim.analytics.shot_history)
+
+    def test_efectividad_registra_intentos_tras_detonacion_en_replica(self):
+        """La curva de efectividad (distance_stats) recibe entradas cuando
+        una réplica termina con un misil detonado, no solo cuando se dispara
+        el cañón manualmente vía `sim.fire`.
+        """
+        cfg = ExperimentConfig(
+            replicas=1, cantidad=20, t_max_s=25.0,
+            arma=WeaponPolicy(tipo="misil", delay_s=0.5),
+        )
+        gen = nuevo_generador(cfg.semilla)
+        sim = SimulationEngine(swarm_size=cfg.cantidad, rng=gen)
+        sim.configure_swarm(cfg.formacion, cfg.cantidad)
+
+        disparado = False
+        while sim.tiempo < cfg.t_max_s:
+            if not disparado and sim.tiempo >= cfg.arma.delay_s:
+                sim.launch_missile(x=sim.hpm.origen_x, y=sim.hpm.origen_y)
+                disparado = True
+            eventos_jamming, eventos_misil = sim._tick(cfg.dt)
+            if eventos_misil:
+                sim._process_missile_events(eventos_misil)
+            conteo = sim.swarm.contar_por_estado()
+            if conteo["neutralizado"] >= len(sim.swarm.drones):
+                break
+
+        total_intentos = sum(v["intentos"] for v in sim.analytics.distance_stats.values())
+        assert total_intentos > 0, "la curva de efectividad quedó sin entradas"

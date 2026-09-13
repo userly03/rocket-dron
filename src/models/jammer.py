@@ -12,7 +12,11 @@ from src.config import (
     JAMMING_E_THRESHOLD_V_M,
     JAMMING_SIGMOID_STEEPNESS,
 )
-from src.engine.hpm_engine import compute_target_parameters, friis_diagnostics
+from src.engine.hpm_engine import (
+    compute_target_parameters,
+    friis_diagnostics,
+    susceptibility_coupling_factor,
+)
 from src.models.drone import Drone, EstadoEnlace, EstadoSalud
 
 
@@ -73,7 +77,28 @@ class Jammer:
             return False
 
         diag = friis_diagnostics(self.potencia, distancia, self.apertura_cono, angulo_offset)
-        exponent = -JAMMING_SIGMOID_STEEPNESS * (diag["campo_e_v_m"] - JAMMING_E_THRESHOLD_V_M)
+
+        # Mismatch de polarización SÍ aplica (deuda técnica cerrada, ver
+        # CHECKLIST_MEJORAS.md): la orientación relativa entre la antena del
+        # jammer y la del receptor de enlace atenúa la señal recibida sea cual
+        # sea el diseño de esa antena — es un efecto de la GEOMETRÍA de la
+        # onda, no de a qué está conectada.
+        #
+        # La resonancia de cableado NO aplica, y esto es deliberado, no un
+        # descuido: `frequency_coupling` modela el acoplamiento INCIDENTAL de
+        # un pulso HPM a un arnés interno no apantallado que no fue diseñado
+        # como antena (de ahí que dependa de una longitud de cable aleatoria).
+        # El enlace de control, en cambio, SÍ tiene una antena receptora
+        # deliberada, sintonizada a su propia banda — no está sujeta al mismo
+        # desajuste de resonancia aleatorio que un cable de alimentación
+        # cualquiera. Pasar `cable_length_m=None` deja ese factor en 1 (ver
+        # `susceptibility_coupling_factor`) y solo aplica polarización.
+        acoplamiento = susceptibility_coupling_factor(
+            cable_length_m=None, polarization=drone.polarization
+        )
+        campo_recibido = diag["campo_e_v_m"] * acoplamiento
+
+        exponent = -JAMMING_SIGMOID_STEEPNESS * (campo_recibido - JAMMING_E_THRESHOLD_V_M)
         probabilidad = 1.0 / (1.0 + np.exp(exponent))
         return bool(probabilidad >= 0.5)
 

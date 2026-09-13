@@ -593,14 +593,31 @@
 
 ## Deuda técnica menor (sin fase asignada)
 
-- [ ] `run_replica` descarta los eventos de `_tick()`: nunca llama
-      `_process_missile_events`, así que el MC no tiene diagnóstico por disparo ni curva
-      de efectividad. Las bajas sí se cuentan.
-- [ ] El jammer es el único arma inmune a la huella de susceptibilidad
-      (`_en_zona_de_efecto` usa `campo_e_v_m` y no pasa `cable_length_m`/`polarization`).
-      Defendible para CW, pero hay que documentarlo o corregirlo.
-- [ ] `requirements.txt` no declara `scipy 1.18.0` ni `pandas 3.0.3`, instalados en el
-      venv. El entorno no es reproducible desde requirements.
+- [x] `run_replica` descarta los eventos de `_tick()`. ✅ **CERRADO (2026-09-12).**
+      Ahora procesa `eventos_misil`/`eventos_jamming` con los mismos métodos que usa el
+      bucle interactivo (`_process_missile_events`/`_process_jamming_events`), así que
+      una detonación de misil durante Monte Carlo deja el mismo rastro en `analytics`
+      (shot_history, curva de efectividad) que una detonación en vivo. Verificado: un
+      misil lanzado en una réplica sintética termina en `shot_history` con
+      `tipo="misil"`, y una réplica completa con arma "misil" deja entradas en
+      `distance_stats`.
+- [x] El jammer es el único arma inmune a la huella de susceptibilidad. ✅ **CERRADO
+      (2026-09-12).** Corregido de forma parcial y deliberada: `_en_zona_de_efecto` ahora
+      aplica `susceptibility_coupling_factor(cable_length_m=None, polarization=...)`, o
+      sea que el **mismatch de polarización SÍ afecta** al jammer (verificado: a r=700 m
+      un dron con polarización óptima queda interferido y uno con polarización pobre no),
+      pero la **resonancia de cableado NO** (verificado: dos drones con la misma
+      polarización y cableado muy distinto dan la misma decisión). Argumento: la
+      resonancia de cableado modela acoplamiento incidental a un arnés no apantallado que
+      no fue diseñado como antena; el enlace de control sí tiene una antena receptora
+      deliberada, sintonizada a su banda, sin ese desajuste aleatorio.
+- [x] `requirements.txt` no declara `scipy`/`pandas`. ✅ **VERIFICADO, sin acción
+      necesaria (2026-09-12).** `grep -rln "import scipy\|import pandas" src/ tests/`
+      no devuelve nada: ninguno de los dos se usa en el proyecto. Son ruido preexistente
+      del venv (probablemente de otra herramienta instalada en el mismo entorno), no una
+      dependencia real — de hecho `experiments.py` y `sensitivity.py` documentan
+      explícitamente que evitan `scipy` a propósito para que `requirements.txt` siga
+      siendo la fuente de verdad del entorno. Añadirlos declararía una dependencia falsa.
 - [x] **`check_shot_invariants` da falsos positivos desde P2-04.** ✅ **CERRADO
       (2026-09-12).** Los eventos de `HPMWeapon.disparar` y `HPMissile.detonar` ahora
       llevan `factor_acoplamiento`; el chequeo exige offset angular **y** acoplamiento
