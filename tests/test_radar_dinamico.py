@@ -405,6 +405,13 @@ class TestEscenarioEndToEnd:
 
         resultado = sim.launch_missile(x=sim.hpm.origen_x, y=sim.hpm.origen_y)
         assert resultado["success"] is True
+        # launch_missile() arranca el hilo de fondo real de la simulación
+        # (_ensure_thread_running); este test avanza el reloj A MANO con
+        # sim._tick(), así que competiría sin protección contra ese hilo
+        # por el mismo estado — bug de concurrencia encontrado en
+        # tests/test_experiments.py (mismo patrón). shutdown() lo detiene
+        # antes de tomar control manual del reloj.
+        sim.shutdown()
 
         detonado = False
         for _ in range(2000):

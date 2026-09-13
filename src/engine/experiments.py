@@ -221,6 +221,12 @@ class WeaponPolicy:
     direccion: float | None = None
     misil_potencia: float | None = None
     misil_radio: float | None = None
+    # Apertura del cono y duty cycle del CAÑÓN (P3-B: son parte del genoma
+    # evolutivo del arma en la coevolución). None conserva los defaults del
+    # arma, como el resto de los campos — no cambia el comportamiento de
+    # ningún experimento existente que no los use.
+    apertura_cono: float | None = None
+    duty_cycle: float | None = None
 
 
 @dataclass
@@ -258,6 +264,8 @@ def run_replica(cfg: ExperimentConfig, replica_idx: int) -> dict[str, Any]:
                 sim.fire(
                     potencia=cfg.arma.potencia,
                     direccion=cfg.arma.direccion,
+                    apertura_cono=cfg.arma.apertura_cono,
+                    duty_cycle=cfg.arma.duty_cycle,
                 )
             else:
                 sim.launch_missile(

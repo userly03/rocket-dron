@@ -579,6 +579,17 @@ class TestRunReplicaRegistraEventosDeMisil:
         sim.configure_swarm("circular", 20)
 
         sim.launch_missile(x=sim.hpm.origen_x, y=sim.hpm.origen_y)
+        # Bug de concurrencia encontrado al escribir P3-B (flakeaba ~1 de
+        # cada 4 corridas de la suite completa, siempre verde en aislamiento):
+        # launch_missile() dispara _ensure_thread_running(), que arranca el
+        # hilo de fondo REAL de la simulación (_run_loop) — este test AVANZA
+        # el reloj a mano con sim._tick() SIN el lock, así que competía sin
+        # protección contra ese hilo de fondo (que sí toma el lock) por el
+        # mismo estado (self.tiempo, posición del misil). Bajo carga (la
+        # suite completa, no una corrida aislada) la interleaving no
+        # determinista a veces dejaba al misil sin detonar en la ventana.
+        # shutdown() detiene el hilo de fondo antes de avanzar a mano.
+        sim.shutdown()
 
         detonado = False
         for _ in range(2000):
@@ -610,6 +621,7 @@ class TestRunReplicaRegistraEventosDeMisil:
         while sim.tiempo < cfg.t_max_s:
             if not disparado and sim.tiempo >= cfg.arma.delay_s:
                 sim.launch_missile(x=sim.hpm.origen_x, y=sim.hpm.origen_y)
+                sim.shutdown()  # ver el comentario del mismo bug en el test anterior
                 disparado = True
             eventos_jamming, eventos_misil = sim._tick(cfg.dt)
             if eventos_misil:
