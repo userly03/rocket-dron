@@ -35,6 +35,8 @@ Se revisó cada fórmula del proyecto contra literatura real (ver
 | 8 | `PhysicsAnalytics.get_physics_panel` publicaba `probabilidad_referencia`, `formula` y `coupling_k` derivados de `gaussian_neutralization_prob` (`P = 1 - exp(-k·P·exp(-r²/2σ²))`) — un TERCER modelo que ni `friis` ni `legacy` usan para decidir bajas (`Drone.recibir_daño`/`HPMissile.calcular_daño` nunca lo llaman), pintado en el frontend (`charts.js`, `index.html`) como si fuera la física gobernante. Exactamente el defecto que esta misma tabla dice haber corregido en otros hallazgos. | **Alta** (número físico en pantalla que no gobierna nada) | **Corregido** (P0-C): `get_physics_panel` ya no publica `probabilidad_referencia` ni `coupling_k`; `formula` refleja siempre el modelo activo (`legacy`: `P = 1 - exp(-k·potencia/d²)` con `HPM_K_CONSTANT`, la k que ese modelo sí usa; `friis`: la cadena Friis→E→sigmoide ya correcta). `gaussian_neutralization_prob` se conserva, documentada como modelo de visualización exclusivo de `get_heatmap`. Frontend actualizado para no mostrar `coupling_k`. Auditoría §4.1. |
 | 9 | **La sigmoide de daño es logística en `E`, que tiene soporte en todo ℝ, pero el campo eléctrico es positivo — de ahí que `P(E=0) = 2.30%` (modelo agregado) y `3.30%` (OR-gate de 5 subsistemas).** Más allá de ~97 m más de la mitad de la probabilidad reportada es ese piso, y a 700 m —el rango de combate por defecto, con el enjambre circular a 500-900 m— el **90.7%** del número es artefacto. Afecta retroactivamente la lectura de la métrica de P1-A. Encontrado por el análisis de sensibilidad ([§3.8](#38-análisis-de-sensibilidad-global-morris--sobol)), no buscado. | **Alta** (todo el rango de combate por defecto está en zona de artefacto) | ✅ **CORREGIDO (P1-F)**: la log-logística `P = 1/(1+(E₅₀/E)^b)` da `P(0)=0` exacto y ajusta los dos puntos publicados con residuo **0.0000 pp** (contra −1.92 pp del modelo actual) con los mismos 2 parámetros. `HPM_LINK_FUNCTION = "log_logistica"` es el default; la logística queda seleccionable. La calibración se movió a 0.4677/0.1113 (más CERCA del paper a 20 m: −4.63 pp contra −7.84 pp). A 700 m la probabilidad cayó un factor 630. Ver [§3.7](#37--el-piso-de-la-sigmoide-pe0--0---corregido-p1-f). |
 | 10 | **Los tres números publicados del paper son mutuamente inconsistentes.** 51.4 % @ 20 m y 13.1 % @ 40 m fijan un parámetro de forma `b = 2.81`; el alcance de 90 % de baja de ~18 m exige `b = 20.32` — un factor **7.2**. Entre 497 y 552 V/m (+11 % de campo) la probabilidad tendría que saltar de 51.4 % a 90 %. Ocurre bajo cualquier ajuste de dos parámetros, logística incluida. | Media (afecta qué se puede exigir al simulador, no al simulador en sí) | **Diagnosticado, no corregible desde acá**: es un problema de la referencia. Explicación más probable (inferencia): los 18 m salen de su curva **determinista**, no de la Monte Carlo contra la que el simulador calibra — los puntos deterministas dan `b ≈ 4.3-5.8`, mismo orden. Consecuencia: el criterio de aceptación de P1-E (18 m/88 m) **nunca fue alcanzable**, lo que explica retroactivamente por qué la brecha no cerraba. Fijado como aritmética verificable en `tests/test_duty_cycle.py`. Ver [§3.7.1](#371--los-tres-números-publicados-del-paper-son-mutuamente-inconsistentes). |
+| 11 | **El taper angular `cos²` no es el patrón de ninguna antena real**: sin lóbulos laterales, forma independiente de `D` y `λ`, y **exactamente cero fuera del cono nominal**. Contra el patrón de Airy (apertura circular, física establecida) la discrepancia es de +7.2 dB a 6° y **+28.9 dB a 7.4°**, y Airy integra **3.2× más potencia** sobre el ángulo sólido. O sea que el modelo **subestima la letalidad fuera de eje**: con `cos²` un enjambre justo fuera del haz es perfectamente seguro, con un patrón real recibe ~30 % del campo del eje y el primer nulo no llega hasta 14.4°. | Media (afecta blancos fuera de eje, no la calibración en eje) | **Implementado como opt-in** (`PROPAGATION_ANTENNA_PATTERN="airy"`), no activado por defecto porque mueve la calibración de §3.4. Validado contra las posiciones y niveles analíticos de Airy (HPBW 12.05°, nulo a 14.40°, lóbulo a −17.57 dB exacto). Ver [§3.9.1](#391-el-taper-cos-no-es-el-patrón-de-ninguna-antena). |
+| 12 | **Mi propia justificación de P2-C era falsa a 2.45 GHz.** El roadmap afirmaba que la reflexión en tierra *"convierte la altitud en variable táctica: un enjambre puede volar en un nulo"*. Las franjas miden **0.76 m a 100 m y 5.35 m a 700 m**, con 22–157 ciclos en la banda de vuelo (40–160 m), y el dron oscila ±4 m: cruza varias franjas por oscilación. Es el mismo error de escala que motivó cortar P3-08, cometido en su reemplazo. | Media (invalida una conclusión del roadmap, no el código) | **Corregido en el diseño**: el efecto se implementa pero su uso correcto es **estadístico** — `⟨|F|²⟩ = 2` exacto, o sea que el espacio libre **subestima la potencia media sobre tierra en 3.01 dB** (verificado en 6 combinaciones de frecuencia y rango), más una dispersión p5–p95 de −16 a +6 dB que entra como varianza. La altitud sí es táctica por debajo de ~0.5 GHz, y `franja_resoluble()` lo dice. Ver [§3.9.2](#392--la-altitud-no-es-variable-táctica-a-245-ghz). |
 
 **Lo que SÍ ya estaba bien** (verificado, no solo asumido):
 - `S = P·G/(4πr²)` — el término `4πr²` es literalmente el área de una esfera; la propagación ya era 3D en el cálculo (no en el render, ver hallazgo 5).
@@ -624,15 +626,30 @@ un coste de cómputo, no un sesgo.
 
 13 parámetros. Índices a 30 m (`n_base = 2048`, 30 720 evaluaciones):
 
-| Parámetro | `S₁` | `S_T` | Interacción | ¿Calibrado? |
-|---|---|---|---|---|
-| **ángulo de polarización** | **0.571** | **0.647** | 0.076 | sí |
-| **eficiencia de acoplamiento** | **0.190** | **0.272** | 0.082 | **NO** |
-| **duración de pulso** | **0.084** | **0.159** | 0.076 | **NO** |
-| error de apuntado | 0.010 | 0.016 | 0.006 | sí |
-| `E₅₀` GPS/GNSS LNA | 0.007 | 0.012 | 0.004 | sí |
-| potencia | 0.002 | 0.006 | 0.005 | sí |
-| (los otros 7) | ≈0 | < 0.003 | ≈0 | sí |
+**Re-corrido tras P1-F** (el piso de la sigmoide comprimía la varianza a rango
+largo). Valores vigentes, a 30 m:
+
+| Parámetro | `S₁` | `S_T` | ¿Calibrado? |
+|---|---|---|---|
+| **ángulo de polarización** | **0.567** | **0.667** | sí |
+| **eficiencia de acoplamiento** | **0.195** | **0.281** | **NO** |
+| **duración de pulso** | **0.089** | **0.167** | **NO** |
+| error de apuntado | 0.010 | 0.017 | sí |
+| `E₅₀` GPS/GNSS LNA | 0.006 | 0.011 | sí |
+| potencia | 0.001 | 0.007 | sí |
+| (los otros 7) | ≈0 | < 0.005 | sí |
+
+Y la suma de `S_T` de los parámetros **no calibrados**, por distancia:
+
+| Distancia | Σ`S_T` no calibrados | Antes de P1-F |
+|---|---|---|
+| 20 m | **0.505** | 0.506 |
+| 30 m | **0.448** | 0.431 |
+| 60 m | **0.691** | 0.594 |
+
+**El hallazgo se agravó con P1-F**: a 60 m, el **69 %** de la varianza viene de
+dos parámetros sin validar. Morris y Sobol siguen coincidiendo 3/3 en los
+dominantes a las tres distancias.
 
 Lecturas, en orden de importancia:
 
@@ -645,8 +662,8 @@ Lecturas, en orden de importancia:
 2. **⚠ Los dos parámetros que siguen NO están calibrados.**
    `coupling_field_efficiency` es el parámetro **provisional** de §3.6 (P1-C
    bloqueado) y `pulse_duration_ns` gobierna la extensión Wunsch-Bell de §3.5,
-   que no viene del paper. **Juntos aportan entre el 43 % y el 59 % de la
-   varianza** según la distancia. En términos operativos: cualquier conclusión
+   que no viene del paper. **Juntos aportan entre el 45 % y el 69 % de la
+   varianza** según la distancia, y la proporción **empeora con el rango**. En términos operativos: cualquier conclusión
    del modelo de subsistemas lleva dentro una contribución de varianza mayoritaria
    de dos parámetros sin validar. Eso hay que decirlo **antes** de publicar, no
    después.
@@ -672,6 +689,120 @@ Lecturas, en orden de importancia:
 
 Disponible en `GET /api/sensibilidad`. El campo `amenazas_a_la_validez` es el
 que hay que leer primero.
+
+### 3.9 Propagación sobre tierra y patrón de antena (P2-C)
+
+**Sustituye al ítem cortado P3-08** (solver FDTD 2D de campo cercano), que iba a
+corregir el régimen `r < 2D²/λ ≈ 5.9 m` en un campo de 1000×1000 m con el
+enjambre a 500–900 m. Estos dos efectos sí operan donde el simulador vive.
+
+**Ambos son opt-in** (`PROPAGATION_GROUND_REFLECTION`,
+`PROPAGATION_ANTENNA_PATTERN`), por el mismo motivo que `HPM_ANTENNA_MODEL`:
+mueven la calibración de §3.4, que está hecha contra el paper, y el paper
+modela espacio libre sin tierra.
+
+#### 3.9.1 El taper `cos²` no es el patrón de ninguna antena
+
+**Categoría: física establecida** (el patrón de Airy lo es; el `cos²` no).
+
+El motor aplicaba `cos²(normalizado·π/2)` a la densidad de potencia. Eso no
+tiene lóbulos laterales, su forma no depende de `D` ni de `λ`, y **vale
+exactamente cero fuera del cono nominal**.
+
+El patrón real de una apertura circular uniformemente iluminada es el de Airy —
+la transformada de Fourier de la apertura:
+
+```
+F(θ) = | 2·J₁(u) / u |        u = π·D·sin θ / λ
+```
+
+Validado contra sus posiciones y niveles analíticos (D = 0.60 m, 2.45 GHz):
+
+| Propiedad | Analítico | Medido |
+|---|---|---|
+| HPBW (`u = 1.6163`) | 11.91° (`58.4λ/D`) | **12.05°** |
+| Primer nulo (`u = 3.8317`) | 14.40° | **14.40°**, a −118 dB |
+| Primer lóbulo lateral (`u = 5.136`) | −17.57 dB | **−17.57 dB** |
+
+`J₁` se implementa con la aproximación polinómica de Abramowitz & Stegun §9.4
+(exacta a ~1e-7 contra valores tabulados), porque `scipy` no está en
+`requirements.txt`.
+
+**La discrepancia es grande y va en una dirección sola:**
+
+| `θ` | `cos²` | Airy | Diferencia |
+|---|---|---|---|
+| 4° | −3.5 dB | −1.3 dB | +2.2 dB |
+| 6° | −10.2 dB | −3.0 dB | **+7.2 dB** |
+| 7.4° (justo dentro del semicono) | −33.6 dB | −4.7 dB | **+28.9 dB** |
+| 7.6° (justo fuera) | **−∞** | −5.0 dB | — |
+| 19.5° (primer lóbulo) | **−∞** | −17.6 dB | — |
+
+Integrado sobre el ángulo sólido, Airy ve **3.2× más potencia** que `cos²`.
+
+**Consecuencia operativa: el modelo actual subestima la letalidad fuera de
+eje.** Con `cos²`, un enjambre justo fuera del haz nominal es perfectamente
+seguro; con un patrón real recibe del orden del 30 % del campo del eje, y el
+primer nulo no llega hasta 14.4°. Nótese también que el HPBW de Airy (12.05°) es
+más estrecho que los 14.28° de `dish_beamwidth_deg` (`70λ/D`): las dos son
+correctas para su arquetipo — `70λ/D` describe un plato con taper de
+alimentador, Airy el de iluminación uniforme, que es el peor caso en lóbulos
+laterales.
+
+#### 3.9.2 🔴 La altitud NO es variable táctica a 2.45 GHz
+
+**Hallazgo que cambió el diseño de este ítem, y corrige mi propia
+justificación.** El roadmap decía que la reflexión en tierra *"convierte la
+altitud en variable táctica: un enjambre puede volar en un nulo de
+interferencia"*. Es falso a esta frecuencia.
+
+La separación entre franjas en altitud es `Δh ≈ λ·r/(2·h_tx)`, con
+`h_tx = HPM_ORIGIN_Z = 8 m`:
+
+| Rango | Separación entre nulos | Ciclos en la banda 40–160 m |
+|---|---|---|
+| 100 m | **0.76 m** | 157 |
+| 300 m | **2.29 m** | 52 |
+| 700 m | **5.35 m** | 22 |
+
+Un dron oscila ±4 m (`DRONE_BOB_AMPLITUDE_M`) y el espaciado del enjambre es de
+30 m: **cruza varias franjas por oscilación**. No se puede estacionar un dron en
+un nulo de 0.76 m. El patrón existe y es real, pero no es explotable ni
+controlable.
+
+Es el mismo tipo de error de escala que motivó cortar P3-08, cometido en su
+reemplazo. Queda fijado en
+`tests/test_propagacion.py::TestFranjasNoSonResolubles`, que falla si alguien
+cambia la frecuencia, la altura del emisor o la amplitud de oscilación — porque
+entonces la conclusión cambia.
+
+#### 3.9.3 El uso correcto del efecto es estadístico
+
+Promediado sobre las franjas, el término en coseno de
+`|1 + Γe^{jφ}|² = 1 + |Γ|² + 2|Γ|cos(φ + arg Γ)` se anula, y con `|Γ| = 1`:
+
+```
+⟨|F|²⟩ = 2      →      +3.01 dB
+```
+
+Verificado numéricamente (8 001 alturas en 40–160 m) a 0.5 y 2.45 GHz y a 100,
+300 y 700 m: da +3.0 dB en los seis casos, **independiente de la frecuencia y
+del rango**.
+
+**El resultado que importa: el modelo de espacio libre subestima la potencia
+media recibida sobre tierra en 3 dB.** Y la dispersión que el efecto introduce
+(p5–p95 de −16 a +6 dB) es **varianza real** — P2-A demostró que la varianza
+domina las conclusiones de este modelo, así que entra como tal y no como un
+lóbulo determinista.
+
+El +6 dB de los máximos no viola conservación de energía: es redistribución
+angular, y la energía que falta está en los nulos.
+
+**Cuándo sí vale el modelo determinista:** por debajo de ~0.5 GHz. La franja a
+700 m mide 13 m a 1 GHz, 26 m a 0.5 GHz y 131 m a 0.1 GHz. Como
+`HPM_FREQUENCY_GHZ` es un parámetro barrible, el modelo determinista se conserva
+y es el correcto en ese régimen — pero hay que consultar
+`propagation.franja_resoluble()`, no asumirlo.
 
 ## 4. Limitaciones conocidas (honestidad ante todo)
 
@@ -752,6 +883,10 @@ No es "otro simulador de drones" — la combinación específica es poco común:
   el día de esta auditoría; existe, es del dominio correcto (HPM
   counter-UAS), y su metodología (Friis + campo E + sigmoide calibrado
   contra latchup CMOS + Monte Carlo) es la que inspira el modelo `friis`.
+- **Abramowitz, M. & Stegun, I. (1964)** — *Handbook of Mathematical Functions*,
+  §9.4. Aproximación polinómica de `J₁` usada en
+  `src/engine/propagation.py::_bessel_j1` (exacta a ~1e-7), porque `scipy` no
+  está declarado en `requirements.txt`.
 - **Saltelli, A. et al. (2010)** — *"Variance based sensitivity analysis of model
   output. Design and estimator for the total sensitivity index"*, Computer Physics
   Communications 181(2):259-270. Estimadores de `S₁` y `S_T` usados en

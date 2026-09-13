@@ -310,8 +310,9 @@
       `0.0056` de P1-A era íntegramente piso. Un estimador que nunca dice cero no sirve
       para decidir nada: los tests de P1-A se reorganizaron para validar con el misil
       (que sí engancha) más un test nuevo que verifica que el cañón reporta cero.
-      **Pendiente:** re-correr el informe de sensibilidad y actualizar §3.8 — los
-      índices cambian porque el piso comprimía la varianza a rango largo.
+      **Sensibilidad re-corrida (hecho):** los índices se movieron y el hallazgo central
+      **se agravó** — la suma de `S_T` de los parámetros no calibrados pasó de 0.43-0.59
+      a **0.45-0.69**, y a 60 m es el **69 %** de la varianza. §3.8 actualizada.
 
 - [x] **P1-G · 🔴 Los tres números del paper son mutuamente inconsistentes**
       *(hallazgo derivado de P1-F, no es trabajo de código)*
@@ -387,7 +388,7 @@
       done: el endpoint devuelve `E₅₀` y `σ_E` ajustados con IC; un test verifica que
       recuperan los valores de entrada dentro del IC al correr contra el propio modelo.
 
-- [ ] **P2-C · ⭐ Dos rayos (reflexión en tierra) + patrón de antena real**
+- [x] **P2-C · ⭐ Dos rayos (reflexión en tierra) + patrón de antena real**
       *(reemplaza P3-08, cortado)*
       qué: interferencia directo/reflejado sobre tierra y patrón de antena con taper y
       lóbulos laterales, en lugar del hack `cos²` (que además es incoherente: `cos²` sobre
@@ -401,6 +402,34 @@
       done: el campo E vs altitud a rango fijo muestra el patrón de lobes/nulos esperado
       para emisor a `z=8 m`; un test verifica la posición del primer nulo contra el
       cálculo analítico de diferencia de camino; sin impacto en el bucle de 60 FPS.
+      **CERRADO (2026-09-12).** `src/engine/propagation.py` + 31 tests. Ambos efectos
+      **opt-in** (`PROPAGATION_GROUND_REFLECTION`, `PROPAGATION_ANTENNA_PATTERN`) porque
+      mueven la calibración de §3.4. Documentado en §3.9.
+      **Patrón de Airy validado contra sus valores analíticos:** HPBW 12.05° (vs 11.91°
+      de `58.4λ/D`), primer nulo a 14.40° con −118 dB, **primer lóbulo lateral a −17.57 dB
+      exacto**. `J₁` con la aproximación de Abramowitz-Stegun §9.4 (error < 1e-7 contra
+      valores tabulados), porque `scipy` no está en `requirements.txt`.
+      **Hallazgo: el `cos²` subestima brutalmente el borde del haz.** +7.2 dB de
+      discrepancia a 6°, **+28.9 dB a 7.4°**, y fuera del cono nominal `cos²` da
+      exactamente cero mientras Airy da −5 dB (el primer nulo no llega hasta 14.4°).
+      Integrado sobre el ángulo sólido, Airy ve **3.2× más potencia**. O sea: el modelo
+      **subestima la letalidad fuera de eje** — con `cos²` un enjambre justo fuera del
+      haz es perfectamente seguro.
+      ⚠ **MI PROPIA JUSTIFICACIÓN DE ESTE ÍTEM ERA FALSA.** El roadmap decía que la
+      reflexión en tierra "convierte la altitud en variable táctica: un enjambre puede
+      volar en un nulo". A 2.45 GHz las franjas miden **0.76 m a 100 m y 5.35 m a 700 m**,
+      con **22–157 ciclos** en la banda de vuelo (40–160 m), y el dron oscila ±4 m:
+      cruza varias franjas por oscilación. **Es el mismo error de escala que motivó
+      cortar P3-08, cometido en su reemplazo.**
+      **El uso correcto es estadístico:** `⟨|F|²⟩ = 2` exacto ⇒ el espacio libre
+      **subestima la potencia media sobre tierra en 3.01 dB**, verificado en 6
+      combinaciones de frecuencia (0.5/2.45 GHz) y rango (100/300/700 m). Más una
+      dispersión p5–p95 de **−16 a +6 dB** que entra como varianza (y P2-A demostró que
+      la varianza domina). La altitud **sí** es táctica por debajo de ~0.5 GHz (franja de
+      26 m a 700 m), y `franja_resoluble()` lo dice en vez de dejarlo asumido.
+      Fijado en `TestFranjasNoSonResolubles`, que falla si cambia la frecuencia, la
+      altura del emisor o la amplitud de oscilación — porque entonces la conclusión
+      cambia.
 
 - [ ] **P2-D · ⭐ Upset vs damage + fallo latente**
       *(reemplaza la premisa de P3-09; conserva su maquinaria)*

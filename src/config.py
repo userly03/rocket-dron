@@ -409,6 +409,57 @@ HPM_CAPACIDAD_TERMICA_KJ_C: float = float(os.getenv("HPM_CAPACIDAD_TERMICA_KJ_C"
 # una decisión táctica real (P3-A/WTA la explota), no un detalle cosmético.
 HPM_DISIPACION_KW_C: float = float(os.getenv("HPM_DISIPACION_KW_C", "0.02"))
 
+# --- Propagación sobre tierra y patrón de antena (P2-C) ---
+# Sustituyen al ítem cortado P3-08 (FDTD de campo cercano), que corregía el
+# régimen r < 2D²/λ ≈ 5.9 m en un campo de 1000×1000 m. Estos dos efectos sí
+# operan en el rango donde el simulador vive. Ver src/engine/propagation.py.
+#
+# AMBOS SON OPT-IN, y el motivo es el mismo que con HPM_ANTENNA_MODEL: los dos
+# MUEVEN LA CALIBRACIÓN de docs/FISICA_Y_MATEMATICA.md §3.4, que está hecha
+# contra el paper — y el paper modela espacio libre, sin tierra. Activarlos por
+# defecto sería recalibrar de refilón.
+#
+# ⚠ HALLAZGO que cambió el diseño de este ítem: la justificación original decía
+# que la reflexión en tierra "convierte la altitud en variable táctica, un
+# enjambre puede volar en un nulo". **Es falso a 2.45 GHz.** La separación entre
+# franjas en altitud es λ·r/(2·h_tx): 0.76 m a 100 m, 2.29 m a 300 m y 5.35 m a
+# 700 m, con 22 a 157 ciclos completos dentro de la banda de vuelo (40-160 m).
+# Un dron oscila ±4 m (DRONE_BOB_AMPLITUDE_M) y el espaciado del enjambre es de
+# 30 m: cruza varias franjas por oscilación. El patrón existe pero no es
+# explotable ni controlable a esta frecuencia.
+#
+# Por eso el uso correcto del efecto es ESTADÍSTICO: promediado sobre las
+# franjas, ⟨|F|²⟩ = 2 exactamente, o sea **+3.01 dB** — el modelo de espacio
+# libre SUBESTIMA la potencia media recibida sobre tierra en 3 dB (verificado
+# numéricamente a 0.1/0.5/2.45 GHz y a 100/300/700 m: da 3.0 dB en los nueve
+# casos). Y la dispersión que introduce (p5-p95: −16 a +6 dB) es varianza real,
+# que P2-A demostró que domina las conclusiones de este modelo.
+#
+# La altitud SÍ sería variable táctica por debajo de ~0.5 GHz (franja de 26 m a
+# 700 m). Como HPM_FREQUENCY_GHZ es barrible, el modelo determinista se
+# conserva y es el correcto en ese régimen — consultar
+# propagation.franja_resoluble() antes de interpretar un valor puntual.
+PROPAGATION_GROUND_REFLECTION: bool = os.getenv(
+    "PROPAGATION_GROUND_REFLECTION", "false"
+).lower() in ("true", "1", "yes")
+
+# Coeficiente de reflexión del suelo. −1 = incidencia rasante sobre suelo
+# conductor: la reflexión invierte la fase. Es el caso límite estándar y el más
+# desfavorable (nulos profundos). Un suelo real con pérdidas da |Γ| < 1, que
+# atenúa tanto los máximos como los nulos.
+GROUND_REFLECTION_COEFF: float = float(os.getenv("GROUND_REFLECTION_COEFF", "-1.0"))
+
+# Patrón de antena: "cos2" (el taper actual, default) o "airy" (apertura
+# circular uniformemente iluminada, F = |2J₁(u)/u|).
+#   - "cos2" NO es el patrón de ninguna antena real: no tiene lóbulos
+#     laterales, y su forma no depende ni de D ni de λ. Dice que fuera del cono
+#     nominal no llega NADA.
+#   - "airy" es física establecida (transformada de Fourier de una apertura
+#     circular) y tiene lóbulos laterales reales: el primero a −17.6 dB en
+#     potencia. Un enjambre justo fuera del haz nominal recibe del orden del 2%
+#     de la potencia del eje, no cero.
+PROPAGATION_ANTENNA_PATTERN: str = os.getenv("PROPAGATION_ANTENNA_PATTERN", "cos2")
+
 # --- Blindaje heterogéneo del enjambre ---
 # Fracción de drones "blindados" (umbral de susceptibilidad más alto) al
 # generar una formación — un enjambre real no es homogéneo, algunas

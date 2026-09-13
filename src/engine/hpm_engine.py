@@ -47,6 +47,7 @@ from src.config import (
     HPM_SUBSISTEMAS,
     HPM_SUBSISTEMAS_LOGLOGISTIC_B,
 )
+from src import config as config_mod
 from src.engine.radar_engine import SPEED_OF_LIGHT_M_S
 from src.utils.helpers import angle_difference, distance, distance3d
 
@@ -370,6 +371,8 @@ def friis_diagnostics(
     angulo_offset: float = 0.0,
     duty_cycle: float = 1.0,
     pulse_duration_ns: float | None = None,
+    rango_horizontal_m: float | None = None,
+    altura_rx_m: float | None = None,
 ) -> dict:
     """Calcula ganancia, densidad de potencia y campo E para reporte/validación.
 
@@ -387,8 +390,27 @@ def friis_diagnostics(
 
     half_cone = apertura_cono / 2.0
     if 0 < apertura_cono < 360 and half_cone > 0:
-        normalized_offset = min(abs(angulo_offset) / half_cone, 1.0)
-        densidad *= float(np.cos(normalized_offset * (np.pi / 2.0)) ** 2)
+        # Patrón de antena (P2-C). Por defecto el taper cos² histórico; con
+        # PROPAGATION_ANTENNA_PATTERN="airy" el patrón real de apertura
+        # circular, que tiene lóbulos laterales. El factor de propagation es
+        # de AMPLITUD, así que se eleva al cuadrado para la densidad de
+        # potencia. Import local para no crear un ciclo de módulos.
+        from src.engine.propagation import factor_patron_antena
+
+        densidad *= factor_patron_antena(angulo_offset, apertura_cono) ** 2
+
+    # Reflexión en tierra (P2-C, opt-in). Requiere la geometría vertical, que
+    # friis_diagnostics no recibe: sin ella el efecto no se puede calcular, así
+    # que se omite en silencio. Los llamadores que sí tienen la geometría
+    # (HPMWeapon.disparar, que conoce origen_z y drone.z) la pasan explícita.
+    if (
+        config_mod.PROPAGATION_GROUND_REFLECTION
+        and rango_horizontal_m is not None
+        and altura_rx_m is not None
+    ):
+        from src.engine.propagation import factor_dos_rayos
+
+        densidad *= factor_dos_rayos(rango_horizontal_m, altura_rx_m) ** 2
 
     campo_e = efield_from_power_density(densidad)
     acoplamiento = pulse_coupling_factor(pulse_duration_ns)
