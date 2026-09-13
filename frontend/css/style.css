@@ -157,6 +157,11 @@ body {
   animation: demo-pulse 1.5s ease-in-out infinite;
 }
 
+/* Utilidad genérica — antes solo existían reglas .hidden por elemento
+   específico (.demo-banner.hidden, .chart-box.hidden); nuevos elementos
+   (panel WTA) la necesitan sin acoplarse a una clase de contenedor. */
+.hidden { display: none !important; }
+
 .demo-banner.hidden { display: none; }
 
 @keyframes demo-pulse {
@@ -642,6 +647,33 @@ body.view-spectrum .chart-box-spectrum { display: block !important; }
 
 #metric-munition.munition-low { color: var(--accent-yellow); }
 #metric-munition.munition-empty { color: var(--accent-red); }
+
+.wta-hint {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin: 0 0 8px;
+}
+
+.wta-summary {
+  font-size: 0.78rem;
+  color: var(--text-primary);
+  padding: 6px 10px;
+  margin: 8px 0;
+  background: var(--bg-panel-alt);
+  border: 1px solid var(--border-color);
+  border-radius: var(--panel-radius);
+}
+
+.wta-summary strong { color: var(--accent-orange); }
+
+.wta-list {
+  max-height: 140px;
+  margin: 4px 0 0;
+}
+
+.wta-list li.wta-canion { color: var(--accent-orange); }
+.wta-list li.wta-misil { color: var(--accent-cyan); }
 
 .checkbox-label {
   display: flex !important;

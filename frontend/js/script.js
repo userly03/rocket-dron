@@ -65,6 +65,11 @@
     btnFire: document.getElementById("btn-fire"),
     btnLaunchMissile: document.getElementById("btn-launch-missile"),
     btnReloadMissile: document.getElementById("btn-reload-missile"),
+    btnWtaPlan: document.getElementById("btn-wta-plan"),
+    btnWtaExecute: document.getElementById("btn-wta-execute"),
+    wtaSummary: document.getElementById("wta-summary"),
+    wtaTotal: document.getElementById("wta-total"),
+    wtaList: document.getElementById("wta-list"),
     btnStart: document.getElementById("btn-start"),
     btnStop: document.getElementById("btn-stop"),
     btnReset: document.getElementById("btn-reset"),
@@ -91,6 +96,7 @@
     processedLogKeys: new Set(),
     userAdjustingHpm: false,
     demoRunning: false,
+    wtaPlan: null,
   };
 
   let wsClient = null;
@@ -161,6 +167,57 @@
       const pct = Math.round((d.riesgo_latente_severidad ?? 0) * 100);
       return `<li>#${d.id} — ${sub} — ${pct}%</li>`;
     }).join("");
+  }
+
+  // Plan óptimo arma-blanco (P3-A, WTA): agrupa lo que el RADAR detecta
+  // (tracks, no la posición real — ver P2-G) y sugiere qué disparo
+  // conviene a cuál grupo. Es una sugerencia para confirmar, no un
+  // disparo automático — el usuario decide si ejecutarla.
+  function bearingHaciaCentroide(cx, cy) {
+    const dx = cx - state.hpm.origen_x;
+    const dy = cy - state.hpm.origen_y;
+    return ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
+  }
+
+  function renderWtaPlan(plan) {
+    state.wtaPlan = plan;
+    const asign = plan.asignacion || [];
+    if (asign.length === 0) {
+      ui.wtaSummary.classList.add("hidden");
+      ui.btnWtaExecute.classList.add("hidden");
+      ui.wtaList.innerHTML = '<li class="shot-empty">Sin blancos detectados o sin disparos disponibles</li>';
+      window.Render3D?.setWtaPlan(null);
+      return;
+    }
+    ui.wtaTotal.textContent = plan.bajas_esperadas_total.toFixed(2);
+    ui.wtaSummary.classList.remove("hidden");
+    ui.btnWtaExecute.classList.remove("hidden");
+    // Agrupado por (cluster, arma): con pocos clusters y mucho presupuesto
+    // disponible, la asignación óptima suele apilar varios disparos del
+    // mismo tipo sobre el mismo grupo — listar cada uno por separado sería
+    // repetitivo sin agregar información.
+    const grupos = new Map();
+    for (const a of asign) {
+      const key = `${a.cluster_id}:${a.tipo}`;
+      const g = grupos.get(key) ?? { ...a, n: 0, bajas_suma: 0 };
+      g.n += 1;
+      g.bajas_suma += a.bajas_esperadas_aisladas;
+      grupos.set(key, g);
+    }
+    ui.wtaList.innerHTML = [...grupos.values()].map((g) => {
+      const arma = g.tipo === "canion" ? "🔥 Cañón" : "🚀 Misil";
+      const cuenta = g.n > 1 ? `${g.n}× ` : "";
+      return `<li class="wta-${g.tipo}">${cuenta}${arma} → cluster ${g.cluster_id} (${g.cluster_tamano} drones), ~${g.bajas_suma.toFixed(2)} bajas esp.</li>`;
+    }).join("");
+    window.Render3D?.setWtaPlan(plan);
+  }
+
+  function clearWtaPlan() {
+    state.wtaPlan = null;
+    ui.wtaSummary.classList.add("hidden");
+    ui.btnWtaExecute.classList.add("hidden");
+    ui.wtaList.innerHTML = "";
+    window.Render3D?.setWtaPlan(null);
   }
 
   function updateMetrics(snapshot) {
@@ -459,6 +516,77 @@
         updateMunitionUI();
         addLog(r.message, "info");
       } catch (e) { addLog(e.message, "error"); }
+    });
+
+    ui.btnWtaPlan.addEventListener("click", async () => {
+      ui.btnWtaPlan.disabled = true;
+      const textoOriginal = ui.btnWtaPlan.textContent;
+      // El cálculo es Monte Carlo real (no una heurística instantánea): con
+      // muchas opciones de disparo disponibles puede tardar varios
+      // segundos — se avisa explícitamente para que no parezca colgado.
+      // n_muestras más bajo que el default del backend (200) es un
+      // trade-off deliberado acá: más rápido para una sugerencia
+      // interactiva, a costa de algo más de ruido en la estimación — la
+      // ejecución del plan no depende de esta precisión.
+      ui.btnWtaPlan.textContent = "⏳ CALCULANDO...";
+      try {
+        const plan = await api("/api/targeting/plan?n_muestras=40");
+        renderWtaPlan(plan);
+        addLog(
+          plan.asignacion.length
+            ? `Plan óptimo: ${plan.asignacion.length} disparo(s), ~${plan.bajas_esperadas_total.toFixed(2)} bajas esperadas`
+            : "Plan óptimo: sin blancos detectados o sin disparos disponibles",
+          "info",
+        );
+      } catch (e) { addLog(`Error calculando plan: ${e.message}`, "error"); }
+      finally { ui.btnWtaPlan.disabled = false; ui.btnWtaPlan.textContent = textoOriginal; }
+    });
+
+    ui.btnWtaExecute.addEventListener("click", async () => {
+      const plan = state.wtaPlan;
+      if (!plan || !plan.asignacion?.length) return;
+      ui.btnWtaExecute.disabled = true;
+      // El plan se calculó con el presupuesto disponible AL MOMENTO de
+      // pedirlo (energía del cañón, munición de misiles) — ejecutarlo
+      // dispara en orden, pero cada disparo real puede rechazarse si el
+      // presupuesto ya se agotó mientras tanto (ej. otro disparo manual
+      // entre medio, o el cañón sin tiempo de recargar entre tiros de este
+      // mismo plan). El backend no lanza error en ese caso — devuelve un
+      // mensaje de rechazo con 200 OK — así que hay que revisarlo a mano.
+      let disparados = 0, rechazados = 0, fallidos = 0;
+      for (const a of plan.asignacion) {
+        const [cx, cy] = a.cluster_centroide;
+        const direccion = bearingHaciaCentroide(cx, cy);
+        try {
+          if (a.tipo === "canion") {
+            const r = await api("/api/fire", { method: "POST", body: JSON.stringify({ potencia: state.hpm.potencia, direccion }) });
+            if (r.message?.startsWith("Disparo rechazado")) {
+              rechazados += 1;
+            } else {
+              disparados += 1;
+              state.lastFireWallTime = Date.now();
+              window.Render3D?.triggerCannonPulse(state.hpm.origen_x, state.hpm.origen_y);
+            }
+          } else {
+            const r = await api("/api/missile/launch", {
+              method: "POST",
+              body: JSON.stringify({ x: state.hpm.origen_x, y: state.hpm.origen_y, angulo: direccion, guiado: true }),
+            });
+            state.munition.restante = r.municion_restante;
+            updateMunitionUI();
+            disparados += 1;
+          }
+        } catch (e) { fallidos += 1; }
+      }
+      addLog(
+        `Plan ejecutado: ${disparados} disparo(s) realizado(s)` +
+        (rechazados ? `, ${rechazados} rechazado(s) por presupuesto` : "") +
+        (fallidos ? `, ${fallidos} con error` : ""),
+        rechazados || fallidos ? "error" : "fire",
+      );
+      wsClient?.requestStatus();
+      clearWtaPlan();
+      ui.btnWtaExecute.disabled = false;
     });
 
     ui.btnJamStart.addEventListener("click", async () => {

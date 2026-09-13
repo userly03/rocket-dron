@@ -162,6 +162,20 @@
             <button type="button" id="btn-reload-missile" class="btn btn-reload" title="Recarga 5 misiles HPM">🔄 RECARGAR</button>
           </div>
         </div>
+        <div class="control-section" id="wta-section">
+          <h2 class="panel-title">🎯 Plan Óptimo <span class="panel-tag">WTA</span></h2>
+          <p class="wta-hint">Agrupa los blancos detectados por el radar (tracks, no la posición real) y calcula qué disparo conviene a cuál grupo, dado el presupuesto real de energía y munición. Es Monte Carlo real, no una heurística instantánea — con muchas opciones disponibles puede tardar varios segundos.</p>
+          <div class="button-group">
+            <button type="button" id="btn-wta-plan" class="btn btn-reset" title="Calcula la asignación óptima arma-blanco (greedy + búsqueda local, validado contra fuerza bruta)">🎯 SUGERIR PLAN ÓPTIMO</button>
+          </div>
+          <div id="wta-summary" class="wta-summary hidden">
+            <span>Bajas esperadas totales: <strong id="wta-total">—</strong></span>
+          </div>
+          <ul id="wta-list" class="shot-history-list wta-list"></ul>
+          <div class="button-group">
+            <button type="button" id="btn-wta-execute" class="btn btn-fire hidden" title="Ejecuta cada disparo del plan en orden (cañón espera recarga si hace falta)">⚡ EJECUTAR PLAN</button>
+          </div>
+        </div>
         <div class="control-section">
           <h2 class="panel-title">📡 Jamming <span class="panel-tag">Continuo</span></h2>
           <div class="control-group">

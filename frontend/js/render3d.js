@@ -137,6 +137,7 @@ const Render3D = (() => {
   let trackLinesMesh = null;
   let trackGhostMesh = null;
   let showTracks = false;
+  let wtaMarkersGroup = null;
   let heatmapPlane = null;
   let heatmapCanvas = null;
   let heatmapCtx = null;
@@ -374,6 +375,51 @@ const Render3D = (() => {
     trackGhostMesh.geometry.setAttribute("position", new THREE.Float32BufferAttribute(ghostPositions, 3));
     trackLinesMesh.visible = linePositions.length > 0;
     trackGhostMesh.visible = ghostPositions.length > 0;
+  }
+
+  // Plan óptimo (P3-A, WTA): un anillo por cluster asignado, coloreado
+  // según el arma sugerida — cañón (naranja, mismo tono que su cono de
+  // efecto) o misil (cian, mismo tono que su marcador). Puramente
+  // informativo hasta que el usuario confirma "Ejecutar plan" desde la UI.
+  function setWtaPlan(plan) {
+    if (wtaMarkersGroup) {
+      scene.remove(wtaMarkersGroup);
+      wtaMarkersGroup.traverse((obj) => { obj.geometry?.dispose?.(); obj.material?.dispose?.(); });
+      wtaMarkersGroup = null;
+    }
+    if (!plan || !plan.asignacion?.length) return;
+    wtaMarkersGroup = new THREE.Group();
+    // Un anillo por (cluster, arma) — con presupuesto abundante y pocos
+    // clusters, la asignación puede apilar muchos disparos del mismo tipo
+    // sobre el mismo grupo; dibujarlos todos superpuestos no agrega nada.
+    const dibujados = new Set();
+    const anillosPorCluster = new Map();
+    for (const a of plan.asignacion) {
+      const key = `${a.cluster_id}:${a.tipo}`;
+      if (dibujados.has(key)) continue;
+      dibujados.add(key);
+      const ringIdx = anillosPorCluster.get(a.cluster_id) ?? 0;
+      anillosPorCluster.set(a.cluster_id, ringIdx + 1);
+      const [cx, cy] = a.cluster_centroide;
+      const pos = worldToThree(field, cx, cy, 1.2);
+      const radioBase = Math.min(60, 16 + a.cluster_tamano * 4);
+      // Si hay dos armas sobre el mismo cluster, el segundo anillo va un
+      // poco más afuera para que ambos se vean (no uno tapando al otro).
+      const radio = radioBase + ringIdx * 10;
+      // COLOR.missile (el color del PROYECTIL en vuelo) es rojo-anaranjado,
+      // casi idéntico a COLOR.hpmCone — inútil para distinguir en este
+      // anillo. Se usa el cian de la leyenda ("Misil HPM" = activoBlindado)
+      // en su lugar, que sí contrasta.
+      const color = a.tipo === "canion" ? COLOR.hpmCone : COLOR.activoBlindado;
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(radio - 2, radio, 32),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false }),
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(pos.x, 1.2, pos.z);
+      wtaMarkersGroup.add(ring);
+    }
+    scene.add(wtaMarkersGroup);
   }
 
   function setShowTracks(value) {
@@ -886,7 +932,7 @@ const Render3D = (() => {
     renderer.render(scene, camera);
   }
 
-  return { init, updateSnapshot, setViewMode, resetCamera, resize, triggerCannonPulse, flashHits, setShowTracks };
+  return { init, updateSnapshot, setViewMode, resetCamera, resize, triggerCannonPulse, flashHits, setShowTracks, setWtaPlan };
 })();
 
 window.Render3D = Render3D;
