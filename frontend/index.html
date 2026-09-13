@@ -45,6 +45,7 @@
         <div class="metric-card" title="Cantidad total de drones en el enjambre actual"><span class="metric-label">Drones totales</span><span class="metric-value" id="metric-total">0</span></div>
         <div class="metric-card" title="Drones activos o dañados, todavía en vuelo"><span class="metric-label">Drones activos</span><span class="metric-value metric-active" id="metric-active">0</span></div>
         <div class="metric-card" title="Drones neutralizados por el HPM"><span class="metric-label">Neutralizados</span><span class="metric-value metric-neutralized" id="metric-neutralized">0</span></div>
+        <div class="metric-card" title="Drones impactados que todavía pueden recuperarse o fallar (ventana de riesgo latente)"><span class="metric-label">En riesgo latente</span><span class="metric-value metric-riesgo" id="metric-riesgo">0</span></div>
         <div class="metric-card" title="Porcentaje de drones neutralizados sobre el total"><span class="metric-label">Tasa de éxito</span><span class="metric-value" id="metric-success">0%</span></div>
         <div class="metric-card" title="Tiempo simulado transcurrido (se acelera con el control de velocidad)"><span class="metric-label">Tiempo simulación</span><span class="metric-value" id="metric-time">0 s</span></div>
         <div class="metric-card" title="Tiempo real desde el último disparo de cañón"><span class="metric-label">Último disparo</span><span class="metric-value" id="metric-last-fire">—</span></div>
@@ -64,6 +65,7 @@
               <span class="legend-item"><span class="dot dot-active"></span> Activo</span>
               <span class="legend-item"><span class="dot dot-hardened"></span> Blindado</span>
               <span class="legend-item"><span class="dot dot-damaged"></span> Dañado</span>
+              <span class="legend-item" title="Impacto reciente: puede recuperarse o fallar más tarde (más rápido el parpadeo, más grave)"><span class="dot dot-riesgo"></span> En riesgo</span>
               <span class="legend-item"><span class="dot dot-jammed"></span> Interferido</span>
               <span class="legend-item"><span class="dot dot-neutralized"></span> Neutralizado</span>
               <span class="legend-item"><span class="dot dot-undetected"></span> No detectado</span>
@@ -109,6 +111,12 @@
               <div class="chart-box chart-box-shots">
                 <h3>Historial de disparos</h3>
                 <ul id="shot-history-list" class="shot-history-list"></ul>
+              </div>
+              <div class="chart-box chart-box-risk">
+                <h3>⚠ En riesgo latente <span class="control-value"><span id="risk-count">0</span></span></h3>
+                <ul id="risk-list" class="shot-history-list risk-list">
+                  <li class="shot-empty">Ningún dron en ventana de riesgo</li>
+                </ul>
               </div>
             </div>
           </details>

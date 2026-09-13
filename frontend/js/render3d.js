@@ -28,6 +28,7 @@ const RADAR_RANGE_M = 600;
 const COLOR = {
   activo: 0x00ff41,
   activoBlindado: 0x00c8ff,
+  riesgoLatente: 0xffb000,
   danado: 0xffd000,
   neutralizado: 0x992222,
   neutralizadoBlink: 0xff3333,
@@ -299,6 +300,7 @@ const Render3D = (() => {
   const _scale = new THREE.Vector3(1, 1, 1);
   const _pos = new THREE.Vector3();
   const _color = new THREE.Color();
+  const _riesgoColor = new THREE.Color(COLOR.riesgoLatente);
   const _missileQuatYaw = new THREE.Quaternion();
   const _missileQuatPitch = new THREE.Quaternion();
   const _yAxis = new THREE.Vector3(0, 1, 0);
@@ -332,6 +334,8 @@ const Render3D = (() => {
       rec.estado = d.estado;
       rec.blindaje = d.blindaje;
       rec.detectado = d.detectado !== false;
+      rec.riesgoSeveridad = d.riesgo_latente_severidad ?? 0;
+      rec.subsistemaEnRiesgo = d.subsistema_en_riesgo ?? null;
       rec.target = { x: d.x, y: d.y, z: d.z ?? FALLBACK_DRONE_ALTITUDE, angulo: d.angulo };
       if (rec._smoothX === undefined) {
         rec._smoothX = d.x;
@@ -382,6 +386,22 @@ const Render3D = (() => {
       droneMesh.setMatrixAt(i, _matrix);
 
       _color.setHex(colorHex);
+      // Riesgo latente (P2-D): el dron impactado entró en una ventana de
+      // vulnerabilidad transitoria — puede recuperarse o fallar más tarde.
+      // Se comunica con un parpadeo ámbar superpuesto al color normal (no lo
+      // reemplaza) cuya frecuencia escala con la severidad, en vez de un
+      // estado discreto más — la muerte diferida deja de verse instantánea
+      // e inexplicable. No se aplica mientras cae/ya cayó (ya tiene su
+      // propio efecto) ni si está "no detectado" (ese color ya domina).
+      if (
+        rec.riesgoSeveridad > 0 &&
+        rec.fx.state !== "falling" && rec.fx.state !== "settled" &&
+        rec.detectado !== false
+      ) {
+        const periodMs = lerp(1600, 400, rec.riesgoSeveridad);
+        const wave = (Math.sin((now % periodMs) / periodMs * Math.PI * 2) + 1) / 2;
+        _color.lerp(_riesgoColor, 0.15 + 0.55 * wave);
+      }
       droneMesh.setColorAt(i, _color);
       i += 1;
     }

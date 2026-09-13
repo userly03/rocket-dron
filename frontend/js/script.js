@@ -22,6 +22,9 @@
     metricTotal: document.getElementById("metric-total"),
     metricActive: document.getElementById("metric-active"),
     metricNeutralized: document.getElementById("metric-neutralized"),
+    metricRiesgo: document.getElementById("metric-riesgo"),
+    riskList: document.getElementById("risk-list"),
+    riskCount: document.getElementById("risk-count"),
     metricSuccess: document.getElementById("metric-success"),
     metricTime: document.getElementById("metric-time"),
     metricLastFire: document.getElementById("metric-last-fire"),
@@ -130,6 +133,35 @@
     }
   }
 
+  const SUBSISTEMA_LABEL = {
+    gps_gnss_lna: "GPS/GNSS (LNA)",
+    flight_controller: "Controlador de vuelo",
+    esc_gate_oxide: "ESC (gate oxide)",
+    camara_cmos: "Cámara (CMOS)",
+    bms_mosfet: "BMS (MOSFET)",
+  };
+
+  // Riesgo latente (P2-D): drones que recibieron un impacto que no los
+  // neutralizó de inmediato pero los deja en una ventana de vulnerabilidad
+  // — pueden recuperarse o fallar más tarde. Ver drone.riesgo_latente_por_s
+  // en el motor; acá solo se lista lo que ya viene calculado.
+  function updateRiesgoLatente(drones) {
+    if (!drones) return;
+    const enRiesgo = drones.filter((d) => (d.riesgo_latente_severidad ?? 0) > 0);
+    ui.metricRiesgo.textContent = enRiesgo.length;
+    ui.riskCount.textContent = enRiesgo.length;
+    if (enRiesgo.length === 0) {
+      ui.riskList.innerHTML = '<li class="shot-empty">Ningún dron en ventana de riesgo</li>';
+      return;
+    }
+    enRiesgo.sort((a, b) => (b.riesgo_latente_severidad ?? 0) - (a.riesgo_latente_severidad ?? 0));
+    ui.riskList.innerHTML = enRiesgo.slice(0, 12).map((d) => {
+      const sub = SUBSISTEMA_LABEL[d.subsistema_en_riesgo] ?? d.subsistema_en_riesgo ?? "desconocido";
+      const pct = Math.round((d.riesgo_latente_severidad ?? 0) * 100);
+      return `<li>#${d.id} — ${sub} — ${pct}%</li>`;
+    }).join("");
+  }
+
   function updateMetrics(snapshot) {
     const c = snapshot.conteo_estados || state.conteoEstados;
     const total = Object.values(c).reduce((a, b) => a + b, 0) || 0;
@@ -211,6 +243,7 @@
     if (snap.analytics) updateAnalyticsUI(snap.analytics);
     window.Render3D?.updateSnapshot(snap);
     updateMetrics(snap);
+    updateRiesgoLatente(snap.drones);
     snap.logs_recientes?.forEach((e) => { const f = formatBackendLog(e); if (f) addLog(f.msg, f.type); });
   }
 

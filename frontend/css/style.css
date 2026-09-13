@@ -15,6 +15,7 @@
   --accent-orange: #ff6600;
   --accent-cyan: #00d4ff;
   --accent-purple: #aa66ff;
+  --accent-amber: #ffb000;
   --font-mono: "Courier New", "Lucida Console", "Consolas", monospace;
   --panel-radius: 4px;
   --shadow-inset: inset 0 0 20px rgba(0, 255, 65, 0.03);
@@ -270,6 +271,7 @@ body {
 
 .metric-active { color: var(--accent-green); }
 .metric-neutralized { color: var(--accent-red); }
+.metric-riesgo { color: var(--accent-amber); }
 
 /* Main layout */
 .main-content {
@@ -417,6 +419,8 @@ body {
 
 .shot-empty { color: var(--text-muted); font-style: italic; }
 
+.risk-list li { color: var(--accent-amber); }
+
 body.view-spectrum #spectrum-box { display: block !important; }
 body.view-spectrum .chart-box-spectrum { display: block !important; }
 
@@ -489,6 +493,16 @@ body.view-spectrum .chart-box-spectrum { display: block !important; }
 .dot-neutralized { background: var(--accent-red); box-shadow: 0 0 6px var(--accent-red); }
 .dot-undetected { background: #2a4a2a; box-shadow: none; }
 .dot-missile { background: var(--accent-cyan); box-shadow: 0 0 6px var(--accent-cyan); }
+.dot-riesgo {
+  background: var(--accent-amber);
+  box-shadow: 0 0 6px var(--accent-amber);
+  animation: pulse-riesgo 0.9s ease-in-out infinite;
+}
+
+@keyframes pulse-riesgo {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
 
 .metric-missile { color: var(--accent-cyan); }
 

@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from src.config import DRONE_RIESGO_LATENTE_MAX_POR_S
+
 if TYPE_CHECKING:
     from src.models.drone import Drone
 
@@ -63,4 +65,15 @@ def drone_to_dict(drone: Drone) -> dict:
         "f_res_ghz": round(drone.frecuencia_resonancia_ghz(), 4),
         "polarization": round(drone.polarization, 4),
         "acoplamiento": round(drone.factor_acoplamiento(), 4),
+        # Riesgo latente (P2-D): ventana de vulnerabilidad transitoria tras un
+        # impacto de "upset" — el dron puede recuperarse o caer más tarde.
+        # "severidad" normaliza a [0,1] igual que Drone.actualizar_riesgo_latente
+        # (fraccion_riesgo), para que el frontend pueda escalar un efecto visual
+        # (ej. velocidad de pulso) sin reimplementar la fórmula del motor.
+        "riesgo_latente_por_s": round(drone.riesgo_latente_por_s, 4),
+        "riesgo_latente_severidad": (
+            round(min(1.0, drone.riesgo_latente_por_s / DRONE_RIESGO_LATENTE_MAX_POR_S), 4)
+            if drone.riesgo_latente_por_s > 0.0 else 0.0
+        ),
+        "subsistema_en_riesgo": drone.subsistema_en_riesgo,
     }
