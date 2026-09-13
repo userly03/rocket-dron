@@ -227,6 +227,21 @@ class WeaponPolicy:
     # ningún experimento existente que no los use.
     apertura_cono: float | None = None
     duty_cycle: float | None = None
+    # Override del emplazamiento del arma (P3-B). El emplazamiento por
+    # defecto (``HPM_ORIGIN_X/Y`` = origen del campo) pone al enjambre a
+    # ~707 m del cañón con la geometría por defecto del proyecto — MUY por
+    # fuera del alcance de 90% de baja que el propio paper de referencia
+    # documenta (≈18 m en CW, ≈88 m en pulsado al 1% duty cycle, ver
+    # docs/REFERENCIA_PAPER_2602.08477.md §5). A 707 m la probabilidad por
+    # disparo es del orden de 1e-4 incluso al tope de potencia que el
+    # presupuesto energético permite (medido en el diseño de este ítem): el
+    # fitness de un GA de coevolución quedaría idénticamente 0, sin
+    # gradiente. ``None`` conserva el comportamiento de todo experimento
+    # existente (arma en el origen del campo); la coevolución (P3-B) es la
+    # primera política que necesita reubicar el arma para operar dentro del
+    # régimen de alcance realista del arma.
+    origen_x: float | None = None
+    origen_y: float | None = None
 
 
 @dataclass
@@ -252,6 +267,10 @@ def run_replica(cfg: ExperimentConfig, replica_idx: int) -> dict[str, Any]:
 
     sim = SimulationEngine(swarm_size=cfg.cantidad, rng=gen)
     sim.configure_swarm(cfg.formacion, cfg.cantidad)
+    if cfg.arma.origen_x is not None:
+        sim.hpm.origen_x = cfg.arma.origen_x
+    if cfg.arma.origen_y is not None:
+        sim.hpm.origen_y = cfg.arma.origen_y
 
     disparado = False
     while sim.tiempo < cfg.t_max_s:

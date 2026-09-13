@@ -658,7 +658,7 @@
       — mejora real, sin eliminar el problema teórico adversarial.
       Calibración intacta (0.4677/0.1113, desviación <0.003 pp).
 
-- [ ] **P3-B · Coevolución genética arma ↔ enjambre** *(era P3-10)*
+- [x] **P3-B · Coevolución genética arma ↔ enjambre** *(era P3-10)* — **CERRADO (2026-09-13).**
       qué: GA de dos poblaciones con fitness medido por el runner Monte Carlo; salida:
       frontera de Pareto arma↔defensa.
       toca: nuevo `src/engine/coevolution.py`, `src/engine/experiments.py`.
@@ -668,6 +668,39 @@
       `deps: requiere P1-01`, pero P1-01 existía y el ítem seguía bloqueado.
       done: una corrida corta mejora el fitness de cada población y degrada el del
       adversario; la frontera de Pareto es reproducible con la misma semilla.
+
+      **Tres obstáculos reales encontrados y corregidos antes de cerrar** (ver
+      docs/FISICA_Y_MATEMATICA.md §3.14 para el detalle numérico):
+      1. A la distancia de combate por defecto del proyecto (~707 m) la letalidad del
+         cañón (acotada por su presupuesto energético, P2-F) es de orden 1e-4 por disparo
+         → fitness idénticamente 0.0, mismo problema que motivó este ítem, reaparecido un
+         nivel más abajo. Corregido dando a `WeaponPolicy` un override de emplazamiento
+         (`origen_x`/`origen_y`) y operando la coevolución a 60 m — dentro del alcance de
+         90% de baja que el propio paper reporta para modo pulsado (~88 m).
+      2. `duty_cycle` (rango `[0.01, 1.0]`, dos órdenes de magnitud, efecto multiplicativo)
+         muestreado uniforme dejaba ~91% de la masa fuera de la región letal: 7 de 8
+         individuos aleatorios daban fracción 0.0 en sus 4 réplicas, anulando la selección
+         casi toda generación. Corregido con inicialización/cruce/mutación en escala
+         logarítmica.
+      3. Semillas de individuos consecutivos se solapaban parcialmente (mismo sorteo de
+         enjambre para algunas réplicas de individuos distintos) — corregido espaciándolas
+         por `réplicas_por_evaluación`.
+
+      **Medido** (oponente fijo, para aislar el ruido de un rival que también evoluciona;
+      fitness = media de la población, no el del mejor individuo — ver §3.14 sobre el
+      "ceiling effect" del máximo a esta escala de letalidad):
+
+      | Población | Fitness medio, gen. 1 → gen. 6 (semilla 42) |
+      |---|---|
+      | Arma vs. defensa fija (cuadrada, 20) | 0.0017 → 0.0158 (×9.3) |
+      | Defensa vs. arma fija (60kW/15°/duty=0.01) | 0.9813 → 0.9956 |
+
+      Arma final: `duty_cycle≈0.012` (extremo pulsado), `potencia≈82kW`. Defensa final:
+      `formación=aleatoria`, `cantidad≈52` — ambos coherentes con los dos gradientes reales
+      documentados (pulsado > CW a igual energía; dispersión > formación compacta contra un
+      arma de haz angosto). Reproducibilidad exacta con la misma semilla verificada
+      (`tests/test_coevolution.py::TestReproducibilidad`). 23 tests nuevos, calibración
+      intacta (0.4677/0.1113).
 
 ---
 

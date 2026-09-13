@@ -1165,6 +1165,152 @@ ricos.
 
 Disponible en `GET /api/targeting/plan`.
 
+### 3.14 Coevolución genética arma↔enjambre (P3-B)
+
+**Categoría: método de decisión / diseño de experimento**, no física nueva —
+un GA de dos poblaciones que usa el runner Monte Carlo real (P1-A,
+`run_replica`) como función de fitness. Último ítem del roadmap.
+
+#### Por qué el estimador de v1 lo bloqueaba (y P1-A no)
+
+La v1 del checklist declaraba `deps: requiere P1-01`, pero el runner ya
+existía cuando el ítem seguía bloqueado. La dependencia real no era la
+EXISTENCIA del runner sino que su métrica primaria tuviera señal:
+`P(aniquilación total)` vale 0 en casi todo el espacio de operación (1 baja
+en 240 exposiciones con la config por defecto, ver
+`docs/AUDITORIA_CHECKLIST.md` §1.2) — un fitness constante no tiene
+gradiente, y ningún GA evoluciona nada contra eso, sea cual sea su
+implementación. `fraccion_media` (P1-A) sí varía de forma continua.
+
+#### El primer obstáculo real: la escala de combate por defecto es un régimen de "cero"
+
+Con el emplazamiento por defecto del proyecto (arma en el origen del campo,
+enjambre en su centro), la distancia es **~707 m**. Medido directamente
+durante el diseño de este ítem: a esa distancia, incluso al tope de potencia
+que el presupuesto energético del cañón permite entregar en una ráfaga
+(500 kJ / 0.5 s ≈ 1 MW, P2-F), la probabilidad de baja por disparo es del
+orden de `1e-4`. Con ~30 drones y un puñado de réplicas por generación, el
+fitness del arma quedaba **idénticamente 0.0 en las primeras corridas de
+prueba** — el mismo problema de v1, reaparecido un nivel más abajo.
+
+Solución: `WeaponPolicy` ganó dos campos (`origen_x`/`origen_y`, en
+`src/engine/experiments.py`) para que una política de arma pueda reubicar
+el cañón sin tocar `src/config.py` — evita el "monkeypatch trap" que ya
+mordió a este proyecto en P1-D/P1-F (un valor importado por nombre a un
+módulo consumidor no se mueve parcheando el módulo de origen). La
+coevolución reubica el arma a `DISTANCIA_COMBATE_M = 60 m` sobre el mismo
+azimut, elegido porque:
+
+- Cae dentro del alcance de 90% de baja que el propio paper de referencia
+  reporta para el modo **pulsado** (~88 m, arXiv:2602.08477 §5), y cerca de
+  uno de sus dos puntos de calibración exactos (40 m → 13.1% CW).
+- A esa distancia aparecen **dos gradientes reales**, ninguno forzado a
+  mano (medidos con `sim.fire()` directo antes de tocar el GA):
+  1. **`duty_cycle` del arma**: a igual potencia PROMEDIO — y por lo tanto
+     igual costo energético, porque `_energia_por_disparo_kj` solo depende
+     de la potencia promedio, no del duty cycle — bajar el duty cycle de
+     1.0 (CW) a 0.01 (1% pulsado) multiplica la fracción neutralizada
+     varias veces (60 kW: 0.000→0.050, 15 réplicas). Reproduce la
+     comparación CW-vs-pulsado de la §5 del paper: el pulsado alcanza mucho
+     más lejos a la misma energía media porque el daño depende del campo
+     PICO, no del promedio.
+  2. **Dispersión de la defensa**: formaciones compactas (cuadrada, v)
+     concentran drones dentro del cono estrecho del arma; formaciones
+     dispersas (circular, línea, aleatoria) y una `cantidad` mayor (que
+     agranda la huella física) sacan una fracción creciente de drones FUERA
+     del cono — medido: cuadrada n=10→4.8% de baja, cuadrada n=55→2.3%;
+     circular ≈0.0-0.2% en todo el rango de cantidad. Resultado con sentido
+     táctico real (dispersión como contramedida contra un arma direccional
+     de haz angosto), no un artefacto del ajuste de parámetros.
+
+#### El segundo obstáculo: muestreo uniforme de `duty_cycle` deja el 99% del rango útil sin explorar
+
+`duty_cycle ∈ [0.01, 1.0]` cubre **dos órdenes de magnitud**, y su efecto es
+multiplicativo (campo pico ∝ 1/duty_cycle). Con inicialización y mutación
+uniformes en escala lineal, midiendo 8 individuos aleatorios contra una
+defensa fija: **7 de 8 dieron fracción 0.0 en sus 4 réplicas** porque su
+`duty_cycle` cayó por encima de 0.1 — la región letal (`duty_cycle < 0.1`)
+tiene solo ~9% de masa bajo un uniforme en `[0.01, 1.0]`. El efecto
+compuesto: con una población de 8, casi todas las generaciones empatan en
+fitness 0.0 para TODA la población, lo que anula la selección (torneo/argmax
+sobre una lista de ceros no tiene señal) — el GA dejaba de tener presión de
+selección la mayoría de las generaciones, no solo la primera.
+
+**Corregido**: `duty_cycle` se inicializa, cruza y muta en **escala
+logarítmica** (`10**uniform(log10(0.01), log10(1.0))`; mutación como paso
+gaussiano en `log10`, σ=0.5 décadas). Es la práctica estándar para un
+parámetro cuyo efecto es multiplicativo y que abarca décadas — el mismo
+criterio que ya usa la literatura de diseño de experimentos para variables
+de este tipo, no una decisión ad-hoc de este proyecto.
+
+#### El tercer obstáculo (menor, corregido): solapamiento de semillas entre individuos
+
+La primera versión asignaba a cada individuo `i` de una generación la
+semilla base `semilla_generación + i`, y cada réplica interna suma
+`0..replicas-1` a esa base — dos individuos consecutivos con
+`replicas_por_evaluación ≥ 2` terminaban evaluando ALGUNAS de sus réplicas
+sobre exactamente el mismo sorteo de enjambre (mismos factores de
+acoplamiento cable/polarización por dron), reduciendo la diversidad efectiva
+de la muestra entre individuos sin que ninguna prueba lo detectara (cada
+individuo seguía siendo internamente reproducible). Corregido espaciando las
+semillas por `i · replicas_por_evaluación`, de forma que los bloques de
+semillas de cada individuo no se solapan.
+
+#### Validación: motor genético primero, física real después (misma disciplina que Sobol/Ishigami y WTA/fuerza bruta)
+
+Antes de confiar el GA a la física ruidosa, se validó contra un fitness
+SINTÉTICO y conocido (`fitness = potencia_kw`, sin simulación): sobre 20
+individuos y 15 generaciones, la potencia media de la población pasa de un
+sorteo uniforme en `[10, 100]` a **>70% del límite superior** — selección,
+cruce, mutación y elitismo funcionan como se espera antes de tocar el motor
+de simulación (`tests/test_coevolution.py::TestMotorGeneticoSintetico`).
+
+Con la física real, y usando un OPONENTE FIJO (no el campeón móvil de la
+coevolución completa, para que "generación 5 mejor que generación 1" no
+esté contaminado por un rival que también cambió) y el fitness **medio de
+la población** (no el del mejor individuo — con esta escala de letalidad,
+el máximo de la población satura en el techo exacto (0.0 o 1.0) la mayoría
+de las generaciones por pura casualidad estadística, un "ceiling effect"
+medido directamente: con población de 6-8 y pocas réplicas, la media de la
+población es un estimador mucho menos ruidoso que el máximo):
+
+| Población | Config (semilla 42) | Fitness medio, gen. 1 → gen. 6 |
+|---|---|---|
+| Arma vs. defensa fija (cuadrada, 20) | pop=10, réplicas=6, t=6s | 0.0017 → **0.0158** (×9.3) |
+| Defensa vs. arma fija (60kW, 15°, duty=0.01) | pop=10, réplicas=6, t=6s | 0.9813 → **0.9956** |
+
+El arma final evolucionó a `duty_cycle≈0.012` (extremo pulsado) y
+`potencia≈82 kW`; la defensa final evolucionó a `formación=aleatoria`,
+`cantidad≈52` — ambos resultados coherentes con los dos gradientes
+documentados arriba (pulsado gana, dispersión gana).
+
+**Honestidad declarada sobre la corrida coevolutiva completa** (ambas
+poblaciones evolucionando simultáneamente contra el campeón móvil de la
+otra, `coevolucionar()`): con solo 5-6 generaciones y población pequeña, la
+serie de fitness DEL CAMPEÓN por generación es mucho más ruidosa que contra
+un oponente fijo — es el comportamiento esperado de una carrera
+armamentista de corto plazo (en cuanto la defensa encuentra una formación
+dispersa razonable, el arma campeona de la siguiente generación se enfrenta
+a un rival mucho más difícil que el de la generación anterior, así que su
+fitness cae aunque el arma en sí no haya empeorado). El criterio de
+aceptación del ítem ("mejora el fitness de cada población") se verifica con
+el protocolo de oponente fijo de arriba, que aísla esa fuente de ruido; la
+corrida conjunta es la que produce la frontera de Pareto reportada.
+
+#### Reproducibilidad
+
+Un único `numpy.random.Generator` (`nuevo_generador(seed)`) gobierna
+inicialización, selección, cruce y mutación de ambas poblaciones. Misma
+semilla ⇒ misma frontera de Pareto y mismas series de fitness, byte a byte
+(`tests/test_coevolution.py::TestReproducibilidad`); semillas distintas dan
+resultados distintos (ninguna prueba pasaría por casualidad con un generador
+que no estuviera gobernando nada).
+
+Disponible como `src.engine.coevolution.coevolucionar()` /
+`resumen_json()`; no se agregó endpoint HTTP (el ítem no lo pide y una
+corrida tarda 1-4 minutos, incompatible con un request-response síncrono
+sin trabajo en segundo plano, que está fuera de alcance de este ítem).
+
 ## 4. Limitaciones conocidas (honestidad ante todo)
 
 Esto es lo que el modelo **no** captura, a propósito o por simplificación:
