@@ -20,6 +20,7 @@ from src.engine.experiments import (
 )
 from src.engine.simulation import SimulationEngine
 from src.engine.sensitivity import informe_sensibilidad
+from src.engine.targeting import planificar_asignacion
 from src.engine.validation import verificar_calibracion
 from src.utils.reproducibilidad import build_manifest
 
@@ -412,6 +413,34 @@ def get_dosis_respuesta(
         raise HTTPException(status_code=400, detail="n_bootstrap debe estar entre 100 y 5000")
     return experimento_dosis_respuesta(
         n_por_distancia=n_por_distancia, n_bootstrap=n_bootstrap, seed=seed
+    )
+
+
+@router.get("/targeting/plan")
+def get_targeting_plan(
+    sim: SimulationDep,
+    radio_cluster_m: float = 100.0,
+    n_muestras: int = 200,
+    seed: int = 2026,
+) -> dict:
+    """
+    Asignación arma-blanco optimizada (WTA, P3-A): agrupa los TRACKS
+    detectados (P2-G, no la posición omnisciente) en clusters, y calcula
+    qué disparo de cañón o misil disponible (según el presupuesto real de
+    energía/munición, P2-F) apunta a cuál cluster para maximizar las bajas
+    esperadas totales.
+
+    Greedy + búsqueda local, validado contra fuerza bruta exacta en
+    instancias pequeñas (ver tests/test_targeting.py) — no contra el propio
+    greedy, que sería un criterio tautológico.
+    """
+    if not (10.0 <= radio_cluster_m <= 2000.0):
+        raise HTTPException(status_code=400, detail="radio_cluster_m fuera de rango")
+    if not (10 <= n_muestras <= 5000):
+        raise HTTPException(status_code=400, detail="n_muestras debe estar entre 10 y 5000")
+    return planificar_asignacion(
+        sim.swarm, sim.hpm, sim.missile_system,
+        radio_cluster_m=radio_cluster_m, n_muestras=n_muestras, seed=seed,
     )
 
 

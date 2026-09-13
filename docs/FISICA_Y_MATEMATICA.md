@@ -1096,6 +1096,75 @@ migración es lo bastante quirúrgica (solo cambia a quién se apunta, no cómo
 se dirige el vuelo) como para no degradar la tasa de intercepción ya
 calibrada.
 
+### 3.13 Asignación arma-blanco optimizada (WTA, P3-A)
+
+**Categoría: método de decisión**, no física — combina las piezas físicas ya
+existentes (Friis, sigmoide de daño, huella de susceptibilidad) en un
+problema de optimización combinatoria. Primer ítem del roadmap que produce
+una DECISIÓN, no una predicción ni un diagnóstico.
+
+#### Por qué recién ahora
+
+Depende de dos ítems previos que le dan contenido real al problema:
+- **P2-F**: sin presupuesto energético, el cañón dispara infinito y gratis
+  — la asignación óptima siempre sería "disparale a todo", nada que
+  optimizar.
+- **P2-G, Paso 1**: opera sobre TRACKS (posición estimada), no sobre
+  "cualquier dron con `detectado=True`" — de lo contrario seguiría siendo
+  omnisciente.
+
+#### El sesgo de Jensen, medido
+
+La huella de susceptibilidad de un blanco (cable, polarización) no es
+observable por radar. Estimar bajas esperadas con el acoplamiento MEDIO
+subestima el resultado, porque la sigmoide es cóncava en el rango relevante:
+
+```
+bajas esperadas (Monte Carlo sobre la distribución):  0.0278
+P(acoplamiento promedio):                             0.0167
+diferencia:                                           +66 %
+```
+
+La corrección: integrar (Monte Carlo, 200+ muestras) sobre la distribución
+real de `cable_length_m`/`polarization` por blanco, promediando
+PROBABILIDADES, no parámetros de entrada.
+
+#### La formulación y su validación
+
+```
+valor(A) = Σ_j tamaño_j · (1 − Π_{i→j} (1 − f[i][j]))
+```
+
+El producto de supervivencias por cluster es lo que hace el problema
+combinatorio real (rendimientos decrecientes: dos disparos al mismo cluster
+no se suman linealmente, un dron solo muere una vez).
+
+**Validado contra fuerza bruta exacta** (no contra el propio greedy, que es
+tautológico por construcción):
+
+| Instancias | Resultado |
+|---|---|
+| 20 matrices de valor ALEATORIAS (sin estructura física), ≤6×6 | 17/20 exactas; gap medio 0.24 %, máximo 2.30 % — dentro del límite declarado (<15%) |
+| 15 instancias REALISTAS (generadas por el modelo físico real) | **15/15 exactas** |
+
+La brecha en instancias adversariales es un resultado TEÓRICO esperado (WTA
+es NP-difícil, greedy+búsqueda local no tiene garantía de aproximación en
+el caso general) — se declara, no se oculta. Sobre las instancias que el
+módulo realmente produce en uso (caída suave de probabilidad con la
+distancia, no valores arbitrarios), alcanza el óptimo exacto de forma
+consistente.
+
+**La búsqueda local necesitó DOS vecindarios**, no uno: reasignación de un
+elemento (mover una opción a otro cluster) e INTERCAMBIO de pares (dos
+opciones ya asignadas cambian sus clusters). Con solo el primero, el
+heurístico no igualaba la fuerza bruta en 4 de 20 instancias aleatorias;
+con el intercambio de pares añadido, en 3 de 20 — la mejora es real pero no
+elimina el problema teórico en el caso adversarial, consistente con que WTA
+sigue siendo NP-difícil incluso con vecindarios de búsqueda local más
+ricos.
+
+Disponible en `GET /api/targeting/plan`.
+
 ## 4. Limitaciones conocidas (honestidad ante todo)
 
 Esto es lo que el modelo **no** captura, a propósito o por simplificación:

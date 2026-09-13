@@ -93,6 +93,26 @@ class HPMWeapon:
             >= self._energia_por_disparo_kj() - _EPS_PRESUPUESTO
         )
 
+    def disparos_disponibles(self) -> int:
+        """
+        Cuántos disparos MÁS puede dar el banco de energía actual, sin
+        contar la recarga futura (P3-A: es el presupuesto que le da
+        contenido real a la asignación arma-blanco — sin esto, "disparale a
+        todo" siempre sería la solución óptima).
+
+        No considera el límite térmico más allá del primer disparo (que sí
+        chequea ``listo_para_disparar``): estimar cuántos disparos entran
+        antes de sobrecalentarse exigiría simular el enfriamiento entre
+        disparos, que depende de CUÁNDO se disparan, no solo de cuántos —
+        fuera del alcance de una foto instantánea del presupuesto.
+        """
+        if self.temperatura_c >= HPM_TEMP_MAX_C - _EPS_PRESUPUESTO:
+            return 0
+        energia_por_disparo = self._energia_por_disparo_kj()
+        if energia_por_disparo <= 0:
+            return 0
+        return int(self.energia_actual_kj / energia_por_disparo)
+
     def disparar(self, drones: list[Drone]) -> list[dict]:
         """
         Aplica daño HPM a todos los drones dentro del cono de efecto.

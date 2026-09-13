@@ -625,7 +625,7 @@
 
 ## P3 — Frontera (una vez que el instrumento mide)
 
-- [ ] **P3-A · Asignación arma-blanco optimizada (WTA)** *(era P3-07)*
+- [x] **P3-A · Asignación arma-blanco optimizada (WTA)** *(era P3-07)*
       qué: capa de decisión que, dados tracks detectados y presupuesto de munición/
       energía, calcula la asignación arma↔cluster que maximiza bajas esperadas
       (greedy + búsqueda local).
@@ -638,6 +638,25 @@
       puede ser peor por construcción. La esperanza de bajas por cluster se agrega sobre
       la **distribución** de acoplamiento, no sobre su media (sesgo de Jensen: la sigmoide
       es no lineal).
+      **CERRADO (2026-09-13).** `src/engine/targeting.py` + `GET /api/targeting/plan`.
+      40 tests nuevos en `tests/test_targeting.py`.
+      **Sesgo de Jensen medido, no solo evitado**: bajas esperadas por Monte Carlo sobre
+      la distribución de acoplamiento dan **0.0278**, contra **0.0167** usando el
+      acoplamiento promedio — **+66%** de subestimación si se hubiera usado la media
+      (la sigmoide es cóncava en el rango relevante).
+      **Validado contra fuerza bruta EXACTA** (no contra el propio greedy, que es
+      tautológico por construcción — la búsqueda local arranca desde ahí):
+      · 20 matrices de valor ALEATORIAS (sin estructura física), ≤6×6: **17/20 exactas**,
+        gap medio 0.24%, máximo 2.30%.
+      · 15 instancias REALISTAS (generadas por el modelo físico real, el caso de uso
+        genuino): **15/15 exactas** — el óptimo, siempre.
+      La brecha en instancias adversariales es un resultado TEÓRICO esperado (WTA es
+      NP-difícil) y se declara, no se oculta.
+      **La búsqueda local necesitó dos vecindarios, no uno**: con solo reasignación de un
+      elemento, 4/20 instancias aleatorias no igualaban la fuerza bruta; añadiendo
+      intercambio de pares (dos opciones ya asignadas cambian sus clusters), bajó a 3/20
+      — mejora real, sin eliminar el problema teórico adversarial.
+      Calibración intacta (0.4677/0.1113, desviación <0.003 pp).
 
 - [ ] **P3-B · Coevolución genética arma ↔ enjambre** *(era P3-10)*
       qué: GA de dos poblaciones con fitness medido por el runner Monte Carlo; salida:
