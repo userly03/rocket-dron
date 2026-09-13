@@ -630,6 +630,15 @@ def monte_carlo_blanco_unico(
 
     probabilidades = np.empty(n, dtype=float)
     campos_incidentes = np.empty(n, dtype=float)
+    # Campo CON pérdidas de apuntado y polarización, SIN el factor de
+    # acoplamiento adicional (eficiencia_campo=1.0 aquí, siempre — no el
+    # configurado). Es la cantidad que la Tabla 3 del paper reporta como
+    # `Ē[V/m]` (confirmado 2026-09-13 leyendo el PDF completo, ver
+    # docs/FISICA_Y_MATEMATICA.md §3.6.1): el simulador la reproduce casi
+    # exacta en las 5 distancias publicadas, que es la validación real del
+    # "CV≈39%" — un estadístico del CAMPO, no de la probabilidad de baja
+    # (con la que se había estado comparando antes, por error).
+    campos_publicables = np.empty(n, dtype=float)
 
     for i, m in enumerate(muestras):
         ganancia = antenna_gain_from_dish(
@@ -642,6 +651,7 @@ def monte_carlo_blanco_unico(
         densidad = (potencia_pico_w * ganancia) / (4.0 * np.pi * r**2) * taper**2
         e_inc = float(np.sqrt(max(densidad, 0.0) * VACUUM_IMPEDANCE_OHM)) * g_tau
         campos_incidentes[i] = e_inc
+        campos_publicables[i] = e_inc * float(f_pol[i])
 
         if modelo_dano == "subsistemas":
             e_acop = campo_acoplado_v_m(e_inc) * float(f_pol[i])
@@ -674,14 +684,22 @@ def monte_carlo_blanco_unico(
         "probabilidad_media": round(media, 6),
         "ic95_bootstrap": [round(lo, 6), round(hi, 6)],
         "desviacion_estandar": round(desv, 6),
-        # CV de la probabilidad de baja entre tiradas. Contraste contra el
-        # CV ≈ 39% @ 30 m que reporta el paper.
+        # CV de la PROBABILIDAD de baja entre tiradas — NO es lo que el
+        # paper reporta como "CV≈39%" (ver "campo_publicable_cv" abajo).
         "cv": round(desv / media, 6) if media > 0 else None,
         "percentiles": {"p5": round(p5, 6), "p50": round(p50, 6), "p95": round(p95, 6)},
         "campo_incidente_medio_v_m": round(float(campos_incidentes.mean()), 4),
         "campo_incidente_cv": (
             round(float(campos_incidentes.std(ddof=1) / campos_incidentes.mean()), 6)
             if n > 1 and campos_incidentes.mean() > 0 else None
+        ),
+        # Campo CON apuntado+polarización, SIN acoplamiento adicional — la
+        # cantidad que la Tabla 3 del paper llama `Ē` (2026-09-13, ver
+        # docstring arriba). El "CV≈39% @ 30m" del paper es el CV de ESTO.
+        "campo_publicable_medio_v_m": round(float(campos_publicables.mean()), 4),
+        "campo_publicable_cv": (
+            round(float(campos_publicables.std(ddof=1) / campos_publicables.mean()), 6)
+            if n > 1 and campos_publicables.mean() > 0 else None
         ),
         "espec": espec.to_dict(),
     }

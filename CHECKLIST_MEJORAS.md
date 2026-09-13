@@ -166,64 +166,65 @@
       declarado, **sin ajustar ningún umbral a esos puntos**; el umbral agregado viejo
       queda documentado como aproximación histórica.
       **⚠ BLOQUEADO (2026-09-12, reintentado y actualizado 2026-09-13 con el PDF
-      real del paper).** Implementado bajo `HPM_DAMAGE_MODEL = "subsistemas"`
-      (default sigue `"agregado"`, nada por defecto depende de él), pero **NO
-      valida**. Diagnóstico completo en `docs/FISICA_Y_MATEMATICA.md` §3.6/§3.6.1.
-      El argumento metodológico se sostiene: agregado = 2 params / 2 puntos = **0 gl,
-      no falsable**; subsistemas = 1 param / 2 puntos = **1 gl, falsable**. Pero falla.
+      real y completo del paper — 17 páginas).** Implementado bajo `HPM_DAMAGE_MODEL
+      = "subsistemas"` (default sigue `"agregado"`, nada por defecto depende de él),
+      pero **NO valida dentro del margen que el paper declara**. Diagnóstico completo
+      en `docs/FISICA_Y_MATEMATICA.md` §3.6/§3.6.1.
 
-      **2026-09-13 — el usuario consiguió el PDF real (antes solo HTML de arXiv).**
-      Trae el código fuente del modelo (Listados 1-2, "abreviado"). Confirmó dos cosas
-      y refutó una hipótesis:
-      · **Confirmado:** el piso de polarización va sobre `η_pol=cos²φ` (potencia), no
-        sobre `√η_pol` — exactamente lo que `parametros.py` (P1-B) ya implementaba.
-        Pero **el motor PRINCIPAL (`Drone`) seguía con el modelo viejo** (`Uniforme
-        [0.3,1.0]` plano) — nunca se había conectado la corrección de P1-B al motor
-        real. Corregido ahora en `Drone`/`targeting.py` (ver hallazgo 14 en
-        FISICA_Y_MATEMATICA.md).
-      · **Confirmado:** el modelo de error de apuntado es gaussiano en potencia
-        (`G_point=exp(-2.76·θ_norm²)`), no el `cos²` de cono que se reutilizaba.
-        Corregido en `_factor_taper_haz`/`sensitivity.py`.
-      · **Refutado:** "no hace falta acoplamiento adicional" (el código mostrado
-        compara el campo incidente directo contra E₅₀, sin voltios). Probado
-        literalmente (`k=1.0`): sobrestima +40pp a 20m. Descartado.
-      · **Reajustado** el único parámetro libre con el modelo YA corregido: `k=0.44`
-        (antes 0.3693). Con ese `k`:
-        - **Señal 1:** residuos **+2.25 pp** (20 m) y **−4.44 pp** (40 m), márgenes
-          ±1.0/±0.7. Signos opuestos (antes ambos negativos) ⇒ sigue sin cerrar, con
-          una firma distinta.
-        - **Señal 2:** sigue igual (MC por encima de su determinista, dirección
-          opuesta al paper).
-        - **Señal 3:** CV = **1.02** a 30 m contra ≈0.39 del paper — **empeoró**
-          (antes 0.63). Descarta que "falta variabilidad" (ej. `F(θ_wire)`) sea el
-          problema: ya hay demasiada, agregar más lo empeoraría.
-        - **Atribución de varianza:** apagar polarización baja el CV a ≈0.29 (antes
-          quedaba en 0.43, por encima del paper; ahora por debajo otra vez) — "la
-          verdad está en medio" se sostiene, con números nuevos.
-      **Lo que sigue bloqueando, ahora más preciso:** (1) la cadena de voltios
-      (Ec. 4-5 del paper) probablemente SÍ es parte del código real — el Listado 2
-      abreviado no la muestra, pero que `k=1.0` sobrestime tan fuerte lo hace más
-      probable, no menos; (2) `F(θ_wire)` sigue sin implementar, pero ya no parece
-      la pieza que falta (ver señal 3); (3) la sección donde probablemente está el
-      CV≈39% citado (§4.3+, resultados/discusión) no está en ningún PDF que arXiv
-      sirva para este paper.
-      **VERIFICADO (2026-09-13): esto NO se resuelve consiguiendo mejor material.**
-      Se buscó una v2 en arXiv — no existe, solo hay v1. Se volvió a descargar el
-      PDF directo de `arxiv.org/pdf/2602.08477` y salió byte a byte idéntico (mismo
-      MD5) al archivo de 6 páginas ya disponible, pese a que el campo "Comments" de
-      arXiv declara "17 pages, 15 figures". El propio arXiv aloja un PDF incompleto
-      para esta submission — un defecto real del paper, no un problema de descarga.
-      **P1-C queda bloqueado por una limitación de la fuente**, agotadas las vías
-      disponibles (HTML, PDF, búsqueda de versiones); reabrirlo requeriría que los
-      autores publiquen una v2 completa o contactarlos directamente.
+      **2026-09-13 — el usuario consiguió el PDF y se leyó completo.** *(Nota: una
+      primera pasada usó el comando `file` para contar páginas, que reportó
+      incorrectamente "6 page(s)" — corregido con `pdfinfo`, que confirma 17 páginas
+      completas, coincidiendo con el "17 pages" que arXiv ya declaraba. No hay v2 ni
+      hacía falta: el v1 ya estaba completo, solo faltaba leerlo bien.)* Trae el
+      código fuente del modelo (Listados 1-2) y, clave, la **Tabla 3** (página 9) con
+      los resultados completos en 5 distancias (20-40m), no solo los 2 puntos de
+      calibración ya conocidos — incluida la media y desviación del CAMPO en cada una.
+      Esto permitió:
+      · **Confirmar** el piso de polarización sobre `η_pol=cos²φ` (potencia) y el
+        modelo de apuntado gaussiano (`G_point=exp(-2.76·θ_norm²)`) — ya corregidos en
+        el motor principal (`Drone`/`targeting.py`/`sensitivity.py`, ver hallazgo 14).
+      · **Descubrir que "CV≈39%" es el CV del CAMPO (V/m), no de la probabilidad de
+        baja** — dos estadísticos distintos que se venían comparando como si fueran
+        el mismo. Medido correctamente: **el simulador reproduce la Tabla 3 del campo
+        con precisión** en las 5 distancias (media dentro de 2-3%, CV=0.394 contra
+        ≈0.39 del paper) — nuevo test que PASA:
+        `tests/test_parametros.py::TestCampoReproduceLaTabla3`.
+      · **El hallazgo grande**: aplicando el modelo de 5 subsistemas del propio paper
+        (Tabla 1 + Ec. 7) DIRECTAMENTE sobre ese campo (que ya coincide), la
+        probabilidad sale ≈100% en las 5 distancias, no 51.4%-13.1% — verificado con
+        la sigmoide EXACTA del paper (Ec. 6), no la log-logística del proyecto, así
+        que no es un artefacto de P1-F. **La Tabla 1 y la Tabla 3 del propio paper no
+        son algebraicamente consistentes entre sí** vía las ecuaciones que el paper
+        mismo declara.
+      · **Descartada** la hipótesis de que la cadena de voltios (Ec. 4-5, §4.5 del
+        paper) alimenta este resultado: esa sección la presenta como análisis
+        mecanístico separado sobre el ESC (voltios contra umbral de ruptura MOSFET,
+        no V/m contra E₅₀) — la Tabla 3 reporta explícitamente el campo en V/m, la
+        misma unidad que la Tabla 1, sin pasar por voltios. No hay inconsistencia
+        dimensional que resolver.
+      **Reajustado** el único parámetro libre con los 5 puntos de la Tabla 3 (antes
+      solo 2): `k=0.44` (sin cambios respecto al ajuste anterior — confirma que ya
+      estaba bien encontrado). Con los 5 puntos, el residuo es **pequeño y suave**
+      (+2.1pp a 20m → −4.2pp a 40m, decreciendo monótonamente — nada parecido al
+      patrón caótico que sugería el ajuste con solo 2 puntos), y el `k` exacto que
+      cierra cada distancia por separado varía suave entre 0.425 y 0.490. Sigue sin
+      cumplir el criterio declarado (±1.0/±0.7pp en los 2 puntos de calibración, sin
+      ajustar ningún umbral — `k` es exactamente el ajuste que el criterio prohíbe),
+      así que el ítem sigue sin poder cerrarse, pero la brecha real es de una escala
+      completamente distinta a la reportada horas antes en esta misma sesión (+40pp,
+      "sin patrón claro").
+      **P1-C queda bloqueado por una inconsistencia real dentro del propio paper**
+      (Tabla 1 vs Tabla 3), no por falta de material — el PDF ya está completo y no
+      hay más que leer ahí. Reabrirlo de verdad requeriría contactar a los autores.
       **Efecto colateral positivo:** al corregir la polarización en el motor
       principal, el sesgo de Jensen medido en P3-A pasó de +66% a **+83%** (más
       pronunciado, no menos — mayor varianza real de acoplamiento). Calibración
       (P1-D) intacta. Suite completa 450/450 tras el cambio.
-      Las señales siguen fijadas en `tests/test_parametros.py::
+      Las señales de la probabilidad siguen fijadas en `tests/test_parametros.py::
       TestModeloSubsistemasBloqueado`, actualizadas con los números de arriba, con la
-      lógica invertida: verifican que el modelo **no** cierra. Si alguien lo arregla,
-      fallan.
+      lógica invertida: verifican que el modelo **no** cierra dentro del margen. Si
+      alguien lo arregla, fallan. La validación del campo (positiva) está en
+      `TestCampoReproduceLaTabla3`, en el mismo archivo.
 
 - [x] **P1-D · Test de regresión de la calibración**
       qué: un test que re-deriva los dos puntos publicados desde la configuración actual

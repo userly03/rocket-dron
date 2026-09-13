@@ -4,34 +4,31 @@
 > (`https://arxiv.org/html/2602.08477`) mediante **dos fetches independientes con
 > prompts distintos**, que coincidieron exactamente en los cinco bloques de abajo.
 >
-> **2026-09-13 — actualización:** el usuario consiguió y se leyó el PDF real
-> (`2602.08477v1.pdf`, descargado de arXiv). **Confirma exactamente las Tablas 1 y 2
-> de abajo** (coinciden número a número con la extracción del HTML) y trae algo que
-> el HTML no dio nunca: el código fuente del modelo determinista y del núcleo Monte
-> Carlo (ver `docs/FISICA_Y_MATEMATICA.md` §3.6.1 para el detalle). **Pero el archivo
-> tiene solo 6 páginas** y corta a mitad de la §4.2, antes de Resultados completos
-> (§4.3+), Discusión (§5), Conclusión (§6) y bibliografía — aunque el propio campo
-> "Comments" de arXiv dice "17 pages, 15 figures".
+> **2026-09-13 — el usuario consiguió y se leyó el PDF completo** (17 páginas —
+> `2602.08477v1.pdf`, descargado de arXiv). **Corrección de una lectura previa en
+> esta misma sesión**: un primer intento de leer el PDF usó el comando `file` para
+> chequear el número de páginas, que reportó "6 page(s)" — poco confiable para PDF
+> 1.7 con streams de objetos comprimidos (formato común en salidas de `pikepdf`,
+> como esta). Verificado con `pdfinfo` (poppler, la herramienta correcta): el
+> archivo tiene **17 páginas completas**, coincidiendo con el campo "Comments" de
+> arXiv ("17 pages, 15 figures") y con la Sección 6 "Conclusions" y la bibliografía
+> presentes. No hace falta buscar una v2 — el PDF disponible ya está completo.
 >
-> **Verificado el mismo día que NO es un problema de la descarga**: se buscó en
-> arXiv si existe una v2 del paper — **no existe, solo hay v1** (confirmado contra
-> `arxiv.org/abs/2602.08477`, "Submission history: [v1] 9 Feb 2026, 192 KB", sin
-> más versiones). Se volvió a descargar el PDF directamente desde
-> `arxiv.org/pdf/2602.08477` y salió **byte a byte idéntico** (mismo MD5) al archivo
-> de 6 páginas que ya se tenía. Conclusión: **el propio arXiv aloja un PDF
-> incompleto/truncado para esta submission** — es una inconsistencia real del
-> paper (del mismo tipo que el hallazgo 10 de `docs/FISICA_Y_MATEMATICA.md`, los
-> tres números publicados mutuamente inconsistentes), no algo que se pueda resolver
-> consiguiendo "una mejor copia". La cita de "CV≈39% a 30m" de la sección 2 de abajo
-> sigue viniendo solo del HTML, y **no hay forma disponible de confirmarla contra el
-> texto del paper** — la sección donde probablemente está esa discusión no existe en
-> ningún PDF que arXiv sirva para este trabajo.
+> **Confirma exactamente las Tablas 1 y 2 de abajo** (coinciden número a número con
+> la extracción del HTML) y trae el código fuente del modelo determinista y del
+> núcleo Monte Carlo, más — crucial, en las páginas 7-9 — la **Tabla 3** con los
+> resultados Monte Carlo completos en 5 distancias (20-40 m), incluida la media y
+> desviación del CAMPO ELÉCTRICO en cada una. Esto resuelve una ambigüedad
+> importante: **el "CV≈39% a 30m" citado más abajo es el CV del CAMPO E (V/m), no
+> de la probabilidad de baja** — dos estadísticos distintos que se habían estado
+> confundiendo. Ver `docs/FISICA_Y_MATEMATICA.md` §3.6.1 para el detalle completo
+> de la validación (el campo del simulador reproduce la Tabla 3 casi exactamente:
+> CV=0.394 en las 5 distancias contra ≈0.39 del paper).
 >
 > Paper: Akbar Anbar Jafari & Gholamreza Anbarjafari (feb-2026), *"A Multi-physics
 > Simulation Framework for High-power Microwave Counter-unmanned Aerial System Design
-> and Performance Evaluation"*. 17 páginas, 15 figuras (según el listado de arXiv;
-> el PDF descargado solo tiene 6). Enviado a *Journal of Defence Technology*. Sistema
-> modelado: HPM C-UAS a 2.45 GHz.
+> and Performance Evaluation"*. 17 páginas, 15 figuras. Enviado a *Journal of Defence
+> Technology*. Sistema modelado: HPM C-UAS a 2.45 GHz.
 >
 > Este archivo existe para que las fases P1-B, P1-C y P1-E no tengan que re-derivar
 > nada. Cada número que el simulador tome de acá debe citar esta referencia.
@@ -100,17 +97,27 @@ Ese CV≈39 % @ 30 m es el criterio de aceptación de P1-B.
 
 ## 4. Acoplamiento al cableado (modelo de arnés no apantallado)
 
-**2026-09-13 — matiz importante tras leer el PDF:** las ecuaciones de abajo (4-5 del
-paper) SÍ aparecen en el texto (página 3 del PDF, confirmadas), pero el código fuente
-mostrado (Listados 1-2 — el modelo determinista y el núcleo del Monte Carlo, este
-último "abreviado" según el propio paper) **no las usa**: compara el campo incidente
-de Friis (con pérdidas de apuntado y polarización) DIRECTAMENTE contra los umbrales
-E₅₀ de la Tabla 1, sin ningún paso de tensión inducida. Puede que el listado
-abreviado simplemente no muestre ese paso (es la hipótesis más probable — probado
-tomando el pipeline mostrado literalmente y sobrestima fuerte, +40pp a 20m, ver
-`docs/FISICA_Y_MATEMATICA.md` §3.6.1), o puede que estas ecuaciones sean motivación
-teórica sin un camino directo al resultado publicado. Sigue sin poder confirmarse
-del todo con lo disponible.
+**2026-09-13 — actualizado con la §4.5 del paper (página 7 del PDF completo):** las
+ecuaciones de abajo (4-5) sí se usan, pero como un análisis SEPARADO e ilustrativo, no
+como parte del pipeline que genera la Tabla 3. La §4.5 (Fig. 6) grafica la tensión
+inducida en el cableado en función de la longitud, para cuatro niveles de campo fijos
+(100/200/300/500 V/m) — a 300 V/m, un cable de 6 cm induce ≈45 V, por encima del rango
+típico de ruptura de compuerta MOSFET (20-40 V), lo que el paper usa para EXPLICAR por
+qué el cableado del ESC en el rango λ/2 es la vía de acoplamiento más vulnerable
+(consistente con Zhang et al. [37]). Es una pieza de análisis mecanístico — compara
+VOLTIOS contra un umbral en voltios (ruptura MOSFET), un par de unidades distinto al
+de la Tabla 1 (V/m contra E₅₀ en V/m).
+
+La Tabla 3 (§8 de este documento), en cambio, reporta explícitamente el campo en
+**V/m** (columna `Ē[V/m]`) como la cantidad que entra al modelo de 5 subsistemas — la
+misma unidad que los umbrales E₅₀ de la Tabla 1, sin conversión a voltios. Confirmado
+(`docs/FISICA_Y_MATEMATICA.md` §3.6.1): el simulador, calculando el campo incidente
+SIN el paso de tensión inducida (solo Friis + pérdidas de apuntado + polarización),
+reproduce esa columna `Ē[V/m]` casi exactamente. Conclusión: **la cadena de voltios
+(Ec. 4-5) es un análisis paralelo sobre la vulnerabilidad del ESC en particular, NO el
+paso que conecta el campo incidente con los umbrales E₅₀ de la Tabla 1** en el pipeline
+que produce los números de sistema (Tabla 3) — corrige una hipótesis anterior de esta
+misma sesión que especulaba lo contrario.
 
 Tensión inducida, régimen de dipolo corto (`L < λ/2`):
 
@@ -189,3 +196,35 @@ Baseline: 25 kW CW, plato de 60 cm (21.2 dBi), 2.45 GHz.
 auditoría: el simulador ajustó una sigmoide **determinista** a los puntos **Monte
 Carlo**, metiendo ese factor 1.6 dentro del umbral. Con el modelo de 5 subsistemas más
 las distribuciones de §3, los 51.4 % / 13.1 % deben **salir** del MC, no ajustarse.
+
+## 8. Tabla 3 completa (2026-09-13, leída del PDF) — 5 puntos, no solo 2
+
+La Tabla 3 del paper (página 9 del PDF) da los 5 puntos completos, con la media y
+desviación del CAMPO además de la probabilidad — algo que el HTML nunca dio:
+
+| Distancia | MC kill prob. | 95% CI | Determinista | Ē [V/m] (±1σ) |
+|---|---|---|---|---|
+| 20 m | 51.4% | [50.4, 52.3] | 83.0% | 306 ± 120 |
+| 25 m | 36.8% | [35.9, 37.8] | 62.5% | 245 ± 95 |
+| 30 m | 25.2% | [24.3, 26.0] | 43.5% | 205 ± 80 |
+| 35 m | 16.5% | [15.8, 17.2] | 29.0% | 174 ± 68 |
+| 40 m | 13.1% | [12.4, 13.8] | 20.0% | 153 ± 60 |
+
+**Nota importante:** el `Ē` de esta tabla (media del campo Monte Carlo, con pérdidas de
+apuntado y polarización ya aplicadas) es MENOR que el campo determinista "497.2 V/m"
+de la tabla de §7 (que es el campo SIN esas pérdidas, calculado directo por Friis) — no
+son la misma cantidad, aunque ambas tablas hablan de "20 m". Confirmado (2026-09-13,
+ver `docs/FISICA_Y_MATEMATICA.md` §3.6.1) que el simulador reproduce esta columna `Ē`
+casi exactamente en las 5 distancias (dentro de 2-3%), y que el `CV≈39%` citado en §3
+de este documento es el CV de ESTA columna (`σ/Ē`, ≈0.39 en las 5 filas), no el CV de
+la probabilidad de baja — una distinción que no era obvia solo con el HTML.
+
+**El hallazgo más importante de leer el PDF completo**: aplicando el modelo de 5
+subsistemas del propio paper (Tabla 1 de §1 + Ecuación 7 de §2) DIRECTAMENTE sobre el
+campo `Ē` de esta tabla (que el simulador ya reproduce casi exacto), la probabilidad
+sale ≈100% en las 5 distancias — no el 51.4%-13.1% que el paper reporta. La brecha es
+de 40-80 puntos porcentuales, muchísimo más grande que cualquier atenuación de
+acoplamiento razonable explicaría de forma directa. Detalle completo y la hipótesis más
+plausible (un factor de acoplamiento adicional, no documentado explícitamente en el
+texto, entre el campo incidente y lo que "ve" cada subsistema) en
+`docs/FISICA_Y_MATEMATICA.md` §3.6.1.

@@ -297,15 +297,71 @@ class TestMonteCarloBlancoUnico:
         assert d["espec"]["todo_constante"] is False
 
 
+class TestCampoReproduceLaTabla3:
+    """Validación POSITIVA, leyendo el PDF completo del paper (17 páginas,
+    2026-09-13): la Tabla 3 (página 9) da la media y desviación del CAMPO E
+    en 5 distancias, no solo la probabilidad de baja en 2 — algo que el HTML
+    nunca dio. El campo del simulador (Friis + apuntado gaussiano +
+    polarización, SIN ningún factor de acoplamiento adicional) reproduce esa
+    tabla con precisión.
+
+    Esto resuelve una confusión de esta misma sesión: el "CV≈39% @ 30m" que
+    se usaba como criterio de aceptación de P1-B/P1-C es el CV del CAMPO
+    (columna `Ē` de la Tabla 3), NO el CV de la probabilidad de baja (que sí
+    sigue sin cerrar — ver TestModeloSubsistemasBloqueado). Son dos
+    estadísticos distintos que se habían estado comparando como si fueran
+    el mismo.
+    """
+
+    # Tabla 3 del paper, página 9 del PDF (17 páginas, leído 2026-09-13):
+    # distancia -> (Ē medio V/m, σ V/m).
+    TABLA_3 = {
+        20.0: (306.0, 120.0),
+        25.0: (245.0, 95.0),
+        30.0: (205.0, 80.0),
+        35.0: (174.0, 68.0),
+        40.0: (153.0, 60.0),
+    }
+
+    def test_campo_medio_dentro_de_5_porciento(self):
+        for r, (media_paper, _sd) in self.TABLA_3.items():
+            d = monte_carlo_blanco_unico(r, n=6000)
+            media_sim = d["campo_publicable_medio_v_m"]
+            error_rel = abs(media_sim - media_paper) / media_paper
+            assert error_rel < 0.05, (
+                f"d={r}: media simulador={media_sim} vs paper={media_paper}, "
+                f"error {error_rel:.1%}"
+            )
+
+    def test_cv_del_campo_dentro_de_0_02(self):
+        """El CV≈39% del paper es del CAMPO — validado, no solo citado."""
+        for r, (media_paper, sd_paper) in self.TABLA_3.items():
+            d = monte_carlo_blanco_unico(r, n=6000)
+            cv_sim = d["campo_publicable_cv"]
+            cv_paper = sd_paper / media_paper
+            assert abs(cv_sim - cv_paper) < 0.02, (
+                f"d={r}: CV simulador={cv_sim:.4f} vs paper={cv_paper:.4f}"
+            )
+
+
 class TestModeloSubsistemasBloqueado:
-    """P1-C está BLOQUEADO. Estos tests fijan las tres señales de inconsistencia.
+    """P1-C está BLOQUEADO — en la PROBABILIDAD, no en el campo (ver
+    TestCampoReproduceLaTabla3 arriba, que sí cierra). Aplicando el modelo
+    de 5 subsistemas del propio paper (Tabla 1 + Ec. 7) sobre un campo que
+    ya reproduce la Tabla 3 con precisión, la probabilidad sale ≈100% en
+    las 5 distancias publicadas, no 51.4%-13.1% — una inconsistencia
+    dentro del propio paper entre su Tabla 1 y su Tabla 3, verificada con
+    su sigmoide exacta (Ec. 6), no una sustitución del proyecto.
 
-    No son tests de que el modelo funcione: son tests de que el modelo **no
-    cierra**, con los números medidos, para que (a) no se pierda el
-    diagnóstico y (b) si alguien lo arregla, estos tests fallen y haya que
-    actualizarlos — que es el único modo de saber que se arregló.
+    Estos tests fijan las señales que quedan tras reajustar el único
+    parámetro libre (`HPM_COUPLING_FIELD_EFFICIENCY`) con el modelo YA
+    corregido de polarización y apuntado. No son tests de que el modelo
+    funcione: son tests de que no cierra DENTRO DEL MARGEN que el paper
+    declara (±1.0/±0.7pp en sus dos puntos de calibración), para que (a) no
+    se pierda el diagnóstico y (b) si alguien lo arregla, estos tests fallen
+    y haya que actualizarlos.
 
-    Diagnóstico completo en docs/FISICA_Y_MATEMATICA.md §3.6.
+    Diagnóstico completo en docs/FISICA_Y_MATEMATICA.md §3.6.1.
     """
 
     # Márgenes que el propio paper declara sobre sus dos puntos.

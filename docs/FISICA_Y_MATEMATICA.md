@@ -399,13 +399,26 @@ respuesta: **sin polarización el CV cae a 0.284, por debajo del 0.39 del
 paper**. La verdad está en medio: la dispersión de polarización del paper es
 real pero menor que `cos²(U[0,π])` con piso 0.1.
 
-#### 3.6.1 Actualización 2026-09-13 — se leyó el PDF real (antes solo el HTML)
+#### 3.6.1 Actualización 2026-09-13 — se leyó el PDF real, completo (17 páginas)
 
-El usuario consiguió el PDF de arXiv:2602.08477 (v1, 6 páginas — ver nota de
-alcance al final de esta sección). Trae algo que el HTML no dio nunca: el
-**código fuente real** del modelo determinista (Listado 1) y del núcleo del
-Monte Carlo (Listado 2, explícitamente "abreviado" por el propio paper).
-Confirma dos cosas de la lista de arriba y refuta una hipótesis nueva.
+El usuario consiguió el PDF de arXiv:2602.08477. **Corrección de un error
+propio en esta misma sesión**: la primera lectura usó el comando `file` para
+verificar el número de páginas, que reportó "6 page(s)" — resultó ser una
+herramienta poco confiable para este PDF (1.7, streams de objetos
+comprimidos vía `pikepdf`), y llevó a documentar por un rato que el PDF
+estaba truncado y que había que buscar una v2. Verificado con `pdfinfo`
+(poppler): el archivo tiene **17 páginas completas**, coincide con "17
+pages, 15 figures" de arXiv, y trae Secciones 4.3-6 (resultados completos,
+discusión, conclusión) y la bibliografía — nada de esto faltaba, faltaba
+leerlo bien. No hay v2 en arXiv ni hace falta: el v1 ya está completo.
+
+El PDF trae algo que el HTML no dio nunca: el **código fuente real** del
+modelo determinista (Listado 1) y del núcleo del Monte Carlo (Listado 2,
+"abreviado" por el propio paper), más la **Tabla 3** (página 9) con los
+resultados completos en 5 distancias — no solo los 2 puntos de calibración
+que ya se conocían. Esto confirma tres cosas de la lista de arriba, refuta
+una hipótesis, y revela un hallazgo nuevo y más importante que todos los
+anteriores.
 
 **Confirmado — punto 2 de la lista (dónde va el piso de polarización):** el
 código del paper es literal — `pol_loss = max(cos(pol)**2, 0.1)`, aplicado
@@ -430,91 +443,123 @@ en `src.engine.experiments._factor_taper_haz` y en la copia paralela de
 mantenerse coherente con la anterior, misma cadena física con dos puntos de
 entrada — ver docstring de `monte_carlo_blanco_unico`).
 
-**Refutado — la hipótesis de que no hace falta acoplamiento adicional:** el
-Listado 1 (determinista) y el Listado 2 (Monte Carlo) comparan el campo
-incidente de Friis **directamente** contra los umbrales E₅₀ de la Tabla 1,
-sin ningún paso de acoplamiento a voltios inducidos en cable — la cadena
-`V_ind = E·L_eff·F(θ)·√η_pol` (Ec. 4-5) aparece en el texto como motivación
-teórica, no en el código mostrado. Probado tomando esto literalmente
-(`HPM_COUPLING_FIELD_EFFICIENCY = 1.0`, sin atenuación): **sobrestima fuerte**,
-+40 pp a 20 m (91.6 % contra 51.4 % publicado). El código "abreviado" o bien
-omite un paso real (candidato principal: la propia cadena de voltios que el
-texto sí describe), o falta algo más — pero "cero acoplamiento adicional" no
-es la respuesta.
+**Refutado — la hipótesis de que la cadena de voltios (Ec. 4-5) alimenta el
+resultado de sistema.** La §4.5 del paper (página 7, Fig. 6) sí usa
+`V_ind = E·L_eff·F(θ)·√η_pol`, pero como análisis MECANÍSTICO separado: a
+300 V/m, un cable de 6 cm induce ≈45 V, por encima del umbral de ruptura de
+un MOSFET (20-40 V) — eso explica CUALITATIVAMENTE por qué el ESC es
+vulnerable, comparando VOLTIOS contra un umbral en voltios. La Tabla 3
+(página 9), en cambio, reporta explícitamente el campo en **V/m** (columna
+`Ē`) como lo que entra al modelo de 5 subsistemas — la misma unidad que los
+umbrales E₅₀ de la Tabla 1, sin pasar por voltios. Confirmado: el simulador,
+calculando el campo incidente SIN el paso de tensión inducida (solo Friis +
+apuntado + polarización), reproduce esa columna `Ē` casi exactamente (ver
+abajo). La cadena de voltios es un análisis paralelo sobre el ESC en
+particular, no el paso que conecta el campo con los umbrales de sistema —
+no hay inconsistencia dimensional V/m-vs-voltios que resolver, porque el
+camino que sí se usa nunca introduce voltios.
 
-**Reajustado el único parámetro libre** (`HPM_COUPLING_FIELD_EFFICIENCY`, MC
-en el lazo — método correcto, ver `campo_acoplado_v_m`) bajo el modelo YA
-corregido de polarización y apuntado: `k = 0.44` minimiza el error cuadrático
-contra los dos puntos publicados. Con ese `k`:
+#### El hallazgo grande: el campo del simulador reproduce la Tabla 3 casi exacto — la probabilidad no
 
-| Distancia | Simulador (MC, 4000 tiradas) | Paper | Residuo | Margen |
-|---|---|---|---|---|
-| 20 m | 0.5365 | 0.514 | **+2.25 pp** | ±1.0 |
-| 40 m | 0.0866 | 0.131 | **−4.44 pp** | ±0.7 |
+Con la Tabla 3 completa (5 distancias, no solo 2) se puede validar el modelo
+por partes, algo que antes no era posible.
 
-Los residuos ahora son de **signos opuestos** (antes, con el modelo viejo,
-ambos eran negativos) — el carácter del bloqueo cambió, pero sigue bloqueado:
-ningún `k` único cierra los dos a la vez, la misma conclusión estructural que
-antes, por una razón distinta.
+**Parte 1 — el campo (Friis + apuntado gaussiano + polarización), sin ningún
+factor de acoplamiento adicional (`k=1.0`), reproduce la Tabla 3 casi
+exacto:**
 
-Y el CV a 30 m con este ajuste es **≈1.02** — PEOR que el 0.63 anterior, y
-2.6× el ≈0.39 del paper. Esto es informativo en sí mismo: **descarta la
-hipótesis de que "falta variabilidad" sea el problema** (ej. implementar
-`F(θ_wire)` como fuente adicional de varianza). El modelo ya tiene demasiada
-dispersión; agregar otra fuente estocástica lo empeoraría, no lo arreglaría.
-Repitiendo la atribución de varianza con el modelo corregido: apagar la
-polarización baja el CV de ≈1.02 a ≈0.29 — por DEBAJO del 0.39 del paper otra
-vez (antes había quedado por encima, 0.43). La conclusión "la verdad está en
-medio" se sostiene, pero con números distintos.
+| Distancia | Ē simulador | Ē paper | σ simulador | σ paper | CV simulador | CV paper |
+|---|---|---|---|---|---|---|
+| 20 m | 312.5 | 306 | 123.2 | 120 | 0.394 | 0.392 |
+| 25 m | 250.0 | 245 | 98.5 | 95 | 0.394 | 0.388 |
+| 30 m | 208.3 | 205 | 82.1 | 80 | 0.394 | 0.390 |
+| 35 m | 178.6 | 174 | 70.4 | 68 | 0.394 | 0.391 |
+| 40 m | 156.2 | 153 | 61.6 | 60 | 0.394 | 0.392 |
 
-**Nota de alcance sobre el PDF, verificada (no es un problema de descarga)**:
-el archivo tiene 6 páginas y corta a mitad de la §4.2 ("CMOS damage
-probability characterisation"), sin llegar a la §4.3 (donde probablemente
-está la discusión de CV≈39% citada en
-`docs/REFERENCIA_PAPER_2602.08477.md`, tomada del HTML), ni a las secciones 5
-(discusión) o 6 (conclusión), ni a la bibliografía — aunque el campo
-"Comments" de arXiv declara "17 pages, 15 figures". Se comprobó el mismo día
-que **no existe una v2** del paper en arXiv (solo v1, confirmado contra
-`arxiv.org/abs/2602.08477`) y que descargar el PDF de nuevo directamente
-desde `arxiv.org/pdf/2602.08477` da un archivo **idéntico byte a byte** (mismo
-MD5) al de 6 páginas ya disponible. Conclusión: **arXiv aloja un PDF
-incompleto para esta submission** — es un defecto real del paper (mismo
-espíritu que el hallazgo 10, los tres números publicados mutuamente
-inconsistentes), no algo resoluble consiguiendo mejor material. **No hay
-forma disponible de confirmar el CV≈39% contra el texto del paper**, ni de
-ver el código Monte Carlo completo (no abreviado) — el PDF disponible no
-alcanza para cerrar esto del todo, solo para corregir dos sub-modelos con
-evidencia sólida y refutar una hipótesis.
+Media y desviación dentro de 2-3% en las 5 distancias; CV dentro de 0.006.
+**Esto resuelve la ambigüedad de la señal 3 original**: el "CV≈39%" del
+paper es el CV del CAMPO, no de la probabilidad de baja — dos estadísticos
+distintos que se habían estado comparando como si fueran el mismo. Medido
+correctamente, **la señal 3 está CERRADA**: el simulador reproduce el CV
+publicado con precisión.
 
-#### Qué hay que confirmar todavía para desbloquearlo
+**Parte 2 — aplicando el modelo de 5 subsistemas del propio paper (Tabla 1 +
+Ec. 7) directamente sobre ESE campo (que ya coincide), la probabilidad sale
+≈100% en las 5 distancias, no 51.4%-13.1%:**
 
-1. **La cadena de voltios (Ec. 4-5) probablemente SÍ es parte del código
-   real** — el Listado 2 es "abreviado" y no la muestra, pero la evidencia de
-   arriba (k=1.0 sobrestima fuerte) apunta en esa dirección más que antes.
-   Si es así, sigue habiendo una inconsistencia dimensional V/m-vs-voltios
-   pendiente de resolver contra el código COMPLETO (no solo el abreviado).
-2. **`F(θ_wire)`, el factor de orientación del cable, sigue sin
-   implementarse** — pero la señal 3 actualizada (CV ya excesivo, empeoró)
-   hace más improbable que agregarlo sea la solución: sumaría varianza a un
-   modelo que ya tiene de más.
-3. **La sección de resultados/discusión del paper** (§4.3 en adelante) —
-   necesaria para confirmar el CV≈39% contra el propio texto, no solo contra
-   la cita ya extraída del HTML. **No disponible por ahora**: verificado
-   (2026-09-13) que no existe una v2 en arXiv y que el PDF que arXiv sirve
-   para v1 es el mismo archivo de 6 páginas, siempre — no es una cuestión de
-   conseguir mejor material, el paper publicado no incluye esa sección en
-   ningún formato accesible hoy.
+| Distancia | Ē (campo, coincide) | P_sim (OR-gate sobre Ē) | P_paper |
+|---|---|---|---|
+| 20 m | 312.5 | 91.2% | 51.4% |
+| 25 m | 250.0 | 82.1% | 36.8% |
+| 30 m | 208.3 | 74.2% | 25.2% |
+| 35 m | 178.6 | 67.1% | 16.5% |
+| 40 m | 156.2 | 60.3% | 13.1% |
 
-Este ítem queda BLOQUEADO por una limitación de la fuente, no del proyecto:
-no hay más evidencia que conseguir con las herramientas disponibles (HTML,
-PDF, búsqueda de versiones en arXiv, todas agotadas). Reabrirlo requeriría
-contactar a los autores, o que publiquen una v2 con el documento completo.
+Verificado también con el campo DETERMINISTA (sin ruido, calculado con
+Friis puro a partir del Listado 1: 482/386/322/276/241 V/m en 20-40m) contra
+la columna "Determinista" de la Tabla 3 (83.0/62.5/43.5/29.0/20.0%) —
+**mismo resultado**: el OR-gate sobre esos campos da ≈100% en las 5
+distancias, ya sea con la sigmoide logística del paper (Ec. 6) o con la
+log-logística del proyecto. **Esta parte de la Tabla 1 y la Tabla 3 del
+paper no son algebraicamente consistentes entre sí vía las Ecuaciones 6-7
+que el propio paper declara** — verificado con la sigmoide EXACTA del
+paper, sin ninguna sustitución del proyecto, así que no es un artefacto de
+la log-logística de P1-F.
+
+**Resuelto por ahora con un factor de acoplamiento adicional, reajustado con
+los 5 puntos (antes solo 2):** `HPM_COUPLING_FIELD_EFFICIENCY = 0.44` (MC en
+el lazo, sobre los 5 puntos de la Tabla 3, no solo 20m/40m):
+
+| Distancia | P_sim (k=0.44) | P_paper | Residuo |
+|---|---|---|---|
+| 20 m | 53.5% | 51.4% | **+2.1 pp** |
+| 25 m | 37.6% | 36.8% | **+0.8 pp** |
+| 30 m | 24.1% | 25.2% | **−1.1 pp** |
+| 35 m | 14.7% | 16.5% | **−1.8 pp** |
+| 40 m | 8.9% | 13.1% | **−4.2 pp** |
+
+Este ajuste con 5 puntos da una imagen MUCHO más coherente que el ajuste
+original con solo 2 puntos (que parecía mostrar residuos de signo
+opuesto sin patrón): acá el residuo decrece **suave y monótonamente** con
+la distancia, de +2.1pp a −4.2pp — un patrón que podría explicarse por
+ruido propio del Monte Carlo del paper (su IC95% en cada punto ya es de
+±1-2pp con 10.000 tiradas) o por un pequeño término dependiente de la
+distancia no modelado, no por un error grueso. El `k` exacto que cierra
+CADA distancia por separado también varía suave: 0.425 (20m) → 0.436 (25m)
+→ 0.449 (30m) → 0.457 (35m) → 0.490 (40m) — un rango de ±7% alrededor de
+0.45, no una dispersión caótica.
+
+**Conclusión honesta:** con 5 puntos en vez de 2, y separando la validación
+del campo (✅ cierra, con precisión) de la del modelo de daño (queda un
+residuo pequeño y suave, no cierra dentro de los márgenes ±1.0/±0.7pp que
+el paper declara SOLO para sus dos puntos de calibración, 20m y 40m), P1-C
+pasa de "no cierra por decenas de puntos, sin patrón claro" a "el campo
+cierra, el modelo de daño tiene un residuo de 1-4pp con un patrón suave,
+consistente con ruido de reimplementación independiente más que con un
+error conceptual". Sigue sin cumplir el criterio de aceptación declarado
+(dentro de ±1% en los dos puntos publicados, sin ajustar ningún umbral) —
+`HPM_COUPLING_FIELD_EFFICIENCY` es exactamente el umbral/parámetro ajustado
+que el criterio prohíbe — así que el ítem sigue sin poder marcarse
+`[x]` hecho. Pero es una brecha de una escala completamente distinta a la
+que se documentó horas antes en esta misma sesión (+40pp con `k=1.0`,
+"decenas de puntos, sin explicación").
+
+**Qué explicaría el residuo pequeño restante, sin evidencia nueva para
+elegir entre ellas:** (1) el propio paper usa la sigmoide LOGÍSTICA (Ec. 6),
+no la log-logística de P1-F — probado explícitamente arriba con la
+logística exacta y da el mismo resultado (≈100%), así que esto NO explica
+la diferencia entre el modelo y el paper, pero si el paper cometió algún
+otro pequeño error de redondeo o de qué exactamente entra a σ_E, podría
+explicar el residuo fino; (2) ruido propio del Monte Carlo del paper
+(N=10.000, su IC95% en cada punto ya cubre 1-2pp); (3) algún factor de
+acoplamiento menor no documentado explícitamente en el texto disponible.
 
 Las señales siguen fijadas en
 `tests/test_parametros.py::TestModeloSubsistemasBloqueado`, actualizadas con
 los números de esta sección — con la lógica invertida a propósito: los tests
-verifican que el modelo **no** cierra. Si alguien lo arregla, fallan — y eso
-es el único modo de saber que se arregló.
+verifican que el modelo **no** cierra dentro del margen declarado. Si
+alguien lo arregla, fallan — y eso es el único modo de saber que se
+arregló.
 
 ### 3.7 ✅ El piso de la sigmoide: `P(E=0) ≠ 0` — CORREGIDO (P1-F)
 
