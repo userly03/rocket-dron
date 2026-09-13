@@ -9,12 +9,23 @@
 > de abajo** (coinciden número a número con la extracción del HTML) y trae algo que
 > el HTML no dio nunca: el código fuente del modelo determinista y del núcleo Monte
 > Carlo (ver `docs/FISICA_Y_MATEMATICA.md` §3.6.1 para el detalle). **Pero el archivo
-> disponible tiene solo 6 páginas** — el listado de arXiv indica 17 páginas y 15
-> figuras (ver más abajo), y el contenido corta a mitad de la §4.2, antes de
-> Resultados completos (§4.3+), Discusión (§5), Conclusión (§6) y bibliografía. La
-> cita de "CV≈39% a 30m" de la sección 2 de abajo sigue viniendo solo del HTML — no
-> se pudo confirmar contra el texto del PDF porque esa sección no está en las 6
-> páginas disponibles.
+> tiene solo 6 páginas** y corta a mitad de la §4.2, antes de Resultados completos
+> (§4.3+), Discusión (§5), Conclusión (§6) y bibliografía — aunque el propio campo
+> "Comments" de arXiv dice "17 pages, 15 figures".
+>
+> **Verificado el mismo día que NO es un problema de la descarga**: se buscó en
+> arXiv si existe una v2 del paper — **no existe, solo hay v1** (confirmado contra
+> `arxiv.org/abs/2602.08477`, "Submission history: [v1] 9 Feb 2026, 192 KB", sin
+> más versiones). Se volvió a descargar el PDF directamente desde
+> `arxiv.org/pdf/2602.08477` y salió **byte a byte idéntico** (mismo MD5) al archivo
+> de 6 páginas que ya se tenía. Conclusión: **el propio arXiv aloja un PDF
+> incompleto/truncado para esta submission** — es una inconsistencia real del
+> paper (del mismo tipo que el hallazgo 10 de `docs/FISICA_Y_MATEMATICA.md`, los
+> tres números publicados mutuamente inconsistentes), no algo que se pueda resolver
+> consiguiendo "una mejor copia". La cita de "CV≈39% a 30m" de la sección 2 de abajo
+> sigue viniendo solo del HTML, y **no hay forma disponible de confirmarla contra el
+> texto del paper** — la sección donde probablemente está esa discusión no existe en
+> ningún PDF que arXiv sirva para este trabajo.
 >
 > Paper: Akbar Anbar Jafari & Gholamreza Anbarjafari (feb-2026), *"A Multi-physics
 > Simulation Framework for High-power Microwave Counter-unmanned Aerial System Design

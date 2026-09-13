@@ -467,16 +467,24 @@ polarización baja el CV de ≈1.02 a ≈0.29 — por DEBAJO del 0.39 del paper 
 vez (antes había quedado por encima, 0.43). La conclusión "la verdad está en
 medio" se sostiene, pero con números distintos.
 
-**Nota de alcance sobre el PDF**: el archivo que se leyó tiene 6 páginas y
-corta a mitad de la §4.2 ("CMOS damage probability characterisation"), sin
-llegar a la §4.3 (donde probablemente está la discusión de CV≈39% citada en
+**Nota de alcance sobre el PDF, verificada (no es un problema de descarga)**:
+el archivo tiene 6 páginas y corta a mitad de la §4.2 ("CMOS damage
+probability characterisation"), sin llegar a la §4.3 (donde probablemente
+está la discusión de CV≈39% citada en
 `docs/REFERENCIA_PAPER_2602.08477.md`, tomada del HTML), ni a las secciones 5
-(discusión) o 6 (conclusión), ni a la bibliografía. Es decir: **sigue sin
-poder confirmarse contra el propio texto del paper** la sección que reporta
-el CV≈39% ni cualquier detalle adicional de la cadena de acoplamiento que
-esas secciones puedan contener — el PDF disponible no alcanza para cerrar
-esto del todo, solo para corregir dos sub-modelos con evidencia sólida y
-refutar una hipótesis.
+(discusión) o 6 (conclusión), ni a la bibliografía — aunque el campo
+"Comments" de arXiv declara "17 pages, 15 figures". Se comprobó el mismo día
+que **no existe una v2** del paper en arXiv (solo v1, confirmado contra
+`arxiv.org/abs/2602.08477`) y que descargar el PDF de nuevo directamente
+desde `arxiv.org/pdf/2602.08477` da un archivo **idéntico byte a byte** (mismo
+MD5) al de 6 páginas ya disponible. Conclusión: **arXiv aloja un PDF
+incompleto para esta submission** — es un defecto real del paper (mismo
+espíritu que el hallazgo 10, los tres números publicados mutuamente
+inconsistentes), no algo resoluble consiguiendo mejor material. **No hay
+forma disponible de confirmar el CV≈39% contra el texto del paper**, ni de
+ver el código Monte Carlo completo (no abreviado) — el PDF disponible no
+alcanza para cerrar esto del todo, solo para corregir dos sub-modelos con
+evidencia sólida y refutar una hipótesis.
 
 #### Qué hay que confirmar todavía para desbloquearlo
 
@@ -489,10 +497,18 @@ refutar una hipótesis.
    implementarse** — pero la señal 3 actualizada (CV ya excesivo, empeoró)
    hace más improbable que agregarlo sea la solución: sumaría varianza a un
    modelo que ya tiene de más.
-3. **La sección de resultados/discusión del paper** (§4.3 en adelante), no
-   incluida en el PDF de 6 páginas disponible — necesaria para confirmar el
-   CV≈39% contra el propio texto, no solo contra la cita ya extraída del
-   HTML.
+3. **La sección de resultados/discusión del paper** (§4.3 en adelante) —
+   necesaria para confirmar el CV≈39% contra el propio texto, no solo contra
+   la cita ya extraída del HTML. **No disponible por ahora**: verificado
+   (2026-09-13) que no existe una v2 en arXiv y que el PDF que arXiv sirve
+   para v1 es el mismo archivo de 6 páginas, siempre — no es una cuestión de
+   conseguir mejor material, el paper publicado no incluye esa sección en
+   ningún formato accesible hoy.
+
+Este ítem queda BLOQUEADO por una limitación de la fuente, no del proyecto:
+no hay más evidencia que conseguir con las herramientas disponibles (HTML,
+PDF, búsqueda de versiones en arXiv, todas agotadas). Reabrirlo requeriría
+contactar a los autores, o que publiquen una v2 con el documento completo.
 
 Las señales siguen fijadas en
 `tests/test_parametros.py::TestModeloSubsistemasBloqueado`, actualizadas con

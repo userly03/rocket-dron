@@ -204,10 +204,18 @@
       (Ec. 4-5 del paper) probablemente SÍ es parte del código real — el Listado 2
       abreviado no la muestra, pero que `k=1.0` sobrestime tan fuerte lo hace más
       probable, no menos; (2) `F(θ_wire)` sigue sin implementar, pero ya no parece
-      la pieza que falta (ver señal 3); (3) el PDF disponible (6 páginas) corta a
-      mitad de la §4.2, antes de la sección donde probablemente está el CV≈39%
-      citado — sigue sin poder confirmarse contra el texto del paper, solo contra la
-      cita ya extraída del HTML.
+      la pieza que falta (ver señal 3); (3) la sección donde probablemente está el
+      CV≈39% citado (§4.3+, resultados/discusión) no está en ningún PDF que arXiv
+      sirva para este paper.
+      **VERIFICADO (2026-09-13): esto NO se resuelve consiguiendo mejor material.**
+      Se buscó una v2 en arXiv — no existe, solo hay v1. Se volvió a descargar el
+      PDF directo de `arxiv.org/pdf/2602.08477` y salió byte a byte idéntico (mismo
+      MD5) al archivo de 6 páginas ya disponible, pese a que el campo "Comments" de
+      arXiv declara "17 pages, 15 figures". El propio arXiv aloja un PDF incompleto
+      para esta submission — un defecto real del paper, no un problema de descarga.
+      **P1-C queda bloqueado por una limitación de la fuente**, agotadas las vías
+      disponibles (HTML, PDF, búsqueda de versiones); reabrirlo requeriría que los
+      autores publiquen una v2 completa o contactarlos directamente.
       **Efecto colateral positivo:** al corregir la polarización en el motor
       principal, el sesgo de Jensen medido en P3-A pasó de +66% a **+83%** (más
       pronunciado, no menos — mayor varianza real de acoplamiento). Calibración
