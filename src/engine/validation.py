@@ -71,7 +71,7 @@ def check_shot_invariants(
     # [0,1] pero no es una magnitud con una escala natural fija de "cuánto
     # es distinto" en términos absolutos — 15% de diferencia relativa es un
     # criterio conservador (bastante más estricto que la dispersión típica
-    # sorteada, ver DRONE_CABLE_LENGTH_*/DRONE_POLARIZATION_MIN en
+    # sorteada, ver DRONE_CABLE_LENGTH_*/DRONE_POLARIZATION_ANGLE_*_RAD en
     # config.py) para considerar "el mismo acoplamiento, dentro de ruido".
     ACOPLAMIENTO_TOLERANCIA_REL = 0.15
 

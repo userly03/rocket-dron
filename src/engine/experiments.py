@@ -528,21 +528,33 @@ experiment_manager = ExperimentManager()
 
 
 def _factor_taper_haz(offset_deg: float, apertura_deg: float) -> float:
-    """Atenuación en AMPLITUD por desapunte, coherente con ``friis_diagnostics``.
+    """Atenuación en AMPLITUD por error de apuntado (desapunte de tracking).
 
-    El motor aplica ``cos²`` a la densidad de POTENCIA, así que en amplitud de
-    campo el taper es ``cos¹`` (la raíz). Se replica exactamente eso acá para
-    que el MC de blanco único y el motor de simulación no discrepen.
-    (Que ese taper no sea un patrón de antena real es una limitación conocida
-    y separada: es el ítem P2-C del checklist.)
+    ACTUALIZADO 2026-09-13: antes replicaba el taper ``cos²`` (en potencia)
+    que el motor de simulación aplica al CONO DE EFECTO del arma — un
+    concepto físico DISTINTO (ancho angular del haz, con borde duro en
+    ``apertura_cono/2``) del error de apuntado que modela esta función
+    (jitter de tracking sobre un plato mucho más angosto). Confirmado contra
+    el código fuente real del paper (PDF de arXiv:2602.08477, Listado 2,
+    leído el 2026-09-13): el modelo de pérdida por apuntado es GAUSSIANO,
+    no ``cos²``:
+
+        G_point = exp(-2.76 · θ_norm²),   θ_norm = θ_err / (θ_3dB / 2)
+
+    en POTENCIA — de ahí la raíz cuadrada abajo, para devolver el factor en
+    amplitud que espera la llamada (``taper**2`` en
+    ``monte_carlo_blanco_unico``). A diferencia del ``cos²`` de cono (borde
+    duro, cae a 0 exactamente en ``apertura_cono/2``), la gaussiana no tiene
+    borde: se acerca a 0 pero nunca lo toca, coherente con que un error de
+    apuntado grande ATENÚA mucho el acoplamiento pero no lo anula por
+    completo (el plato real sigue teniendo lóbulos laterales).
     """
     semi = apertura_deg / 2.0
     if semi <= 0:
         return 1.0
-    if abs(offset_deg) >= semi:
-        return 0.0
-    normalizado = abs(offset_deg) / semi
-    return float(np.cos(normalizado * (np.pi / 2.0)))
+    theta_norm = offset_deg / semi
+    g_point = float(np.exp(-2.76 * theta_norm**2))
+    return float(np.sqrt(g_point))
 
 
 def monte_carlo_blanco_unico(

@@ -35,10 +35,12 @@ antes de aplicar una función no lineal cóncava da un valor MENOR que
 promediar los resultados (desigualdad de Jensen).
 
 La forma correcta —la que implementa este módulo— es integrar sobre la
-DISTRIBUCIÓN de acoplamiento (Monte Carlo con las mismas distribuciones de
-``DRONE_CABLE_LENGTH_MIN_M``/``MAX_M``/``DRONE_POLARIZATION_MIN`` que
-sortea ``Swarm`` al crear cada dron) y promediar las PROBABILIDADES
-resultantes, no los parámetros de entrada.
+DISTRIBUCIÓN de acoplamiento (Monte Carlo con las mismas distribuciones que
+sortea ``Drone`` al crearse: ``DRONE_CABLE_LENGTH_MIN_M``/``MAX_M`` para el
+cable, ``cos²φ`` con ``φ ~ U[DRONE_POLARIZATION_ANGLE_MIN_RAD,
+DRONE_POLARIZATION_ANGLE_MAX_RAD]`` acotado a ``DRONE_POLARIZATION_MIN_ETA``
+para la polarización) y promediar las PROBABILIDADES resultantes, no los
+parámetros de entrada.
 
 ═══════════════════════════════════════════════════════════════════════════
 LA FORMULACIÓN DEL PROBLEMA
@@ -84,7 +86,9 @@ import numpy as np
 from src.config import (
     DRONE_CABLE_LENGTH_MAX_M,
     DRONE_CABLE_LENGTH_MIN_M,
-    DRONE_POLARIZATION_MIN,
+    DRONE_POLARIZATION_ANGLE_MAX_RAD,
+    DRONE_POLARIZATION_ANGLE_MIN_RAD,
+    DRONE_POLARIZATION_MIN_ETA,
     MISSILE_DEFAULT_POWER,
     MISSILE_DEFAULT_RADIUS,
 )
@@ -207,7 +211,16 @@ def _muestra_de_acoplamiento(gen: np.random.Generator) -> tuple[float, float]:
     que un blanco detectado por radar (sin acceso a su estado interno)
     tiene, desde el punto de vista de quien planifica el disparo."""
     cable = float(gen.uniform(DRONE_CABLE_LENGTH_MIN_M, DRONE_CABLE_LENGTH_MAX_M))
-    polarizacion = float(gen.uniform(DRONE_POLARIZATION_MIN, 1.0))
+    # η_pol = cos²φ, φ ~ U[ÁNGULO_MIN, ÁNGULO_MAX], piso DRONE_POLARIZATION_MIN_ETA —
+    # MISMA distribución que ``Drone._sortear_polarizacion`` (confirmada
+    # contra el código fuente del paper, ver comentario en src/config.py).
+    # Antes usaba ``Uniforme[DRONE_POLARIZATION_MIN, 1.0]``, una distribución
+    # DISTINTA a la que el dron realmente sortea — el propio módulo cuya
+    # razón de ser es evitar sesgo de Jensen integrando sobre la
+    # distribución REAL de acoplamiento estaba integrando sobre la
+    # distribución equivocada.
+    angulo = float(gen.uniform(DRONE_POLARIZATION_ANGLE_MIN_RAD, DRONE_POLARIZATION_ANGLE_MAX_RAD))
+    polarizacion = max(DRONE_POLARIZATION_MIN_ETA, float(np.cos(angulo) ** 2))
     return cable, polarizacion
 
 

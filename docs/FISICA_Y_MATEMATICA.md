@@ -38,6 +38,7 @@ Se revisó cada fórmula del proyecto contra literatura real (ver
 | 11 | **El taper angular `cos²` no es el patrón de ninguna antena real**: sin lóbulos laterales, forma independiente de `D` y `λ`, y **exactamente cero fuera del cono nominal**. Contra el patrón de Airy (apertura circular, física establecida) la discrepancia es de +7.2 dB a 6° y **+28.9 dB a 7.4°**, y Airy integra **3.2× más potencia** sobre el ángulo sólido. O sea que el modelo **subestima la letalidad fuera de eje**: con `cos²` un enjambre justo fuera del haz es perfectamente seguro, con un patrón real recibe ~30 % del campo del eje y el primer nulo no llega hasta 14.4°. | Media (afecta blancos fuera de eje, no la calibración en eje) | **Implementado como opt-in** (`PROPAGATION_ANTENNA_PATTERN="airy"`), no activado por defecto porque mueve la calibración de §3.4. Validado contra las posiciones y niveles analíticos de Airy (HPBW 12.05°, nulo a 14.40°, lóbulo a −17.57 dB exacto). Ver [§3.9.1](#391-el-taper-cos-no-es-el-patrón-de-ninguna-antena). |
 | 12 | **Mi propia justificación de P2-C era falsa a 2.45 GHz.** El roadmap afirmaba que la reflexión en tierra *"convierte la altitud en variable táctica: un enjambre puede volar en un nulo"*. Las franjas miden **0.76 m a 100 m y 5.35 m a 700 m**, con 22–157 ciclos en la banda de vuelo (40–160 m), y el dron oscila ±4 m: cruza varias franjas por oscilación. Es el mismo error de escala que motivó cortar P3-08, cometido en su reemplazo. | Media (invalida una conclusión del roadmap, no el código) | **Corregido en el diseño**: el efecto se implementa pero su uso correcto es **estadístico** — `⟨|F|²⟩ = 2` exacto, o sea que el espacio libre **subestima la potencia media sobre tierra en 3.01 dB** (verificado en 6 combinaciones de frecuencia y rango), más una dispersión p5–p95 de −16 a +6 dB que entra como varianza. La altitud sí es táctica por debajo de ~0.5 GHz, y `franja_resoluble()` lo dice. Ver [§3.9.2](#392--la-altitud-no-es-variable-táctica-a-245-ghz). |
 | 13 | **Mi primer diseño del hazard rate de riesgo latente (P2-D) daba 99.3 % de muerte eventual, no 'usualmente se recupera'.** `DRONE_RIESGO_LATENTE_MAX_POR_S = 2.0` parecía razonable mirado un solo tick, pero integrado sobre toda la cola de decaimiento (`P(falla eventual) = 1-exp(-h₀·τ)`) con `τ=4s` da `P≈0.9997`. Contradecía directamente el propósito del ítem. | Alta (invertía el comportamiento pretendido del mecanismo) | **Corregido antes de cerrar el ítem**: se derivó `h₀ = ln(2)/τ ≈ 0.1733/s` fijando el PEOR caso de la zona de upset en un lanzamiento de moneda (50 % de falla eventual), verificado empíricamente contra la fórmula cerrada (1500 repeticiones/severidad, dentro de ±0.05). Ver [§3.10](#310-upset-vs-damage--fallo-latente-p2-d). |
+| 14 | **El motor principal (`Drone`) sorteaba la polarización como `Uniforme[0.3,1.0]` plano — el modelo VIEJO que P1-B ya había señalado como incorrecto en `parametros.py` sin haberlo corregido en el motor real**, del que dependen P2-D/P3-A/P3-B. Descubierto al leer el PDF real del paper (2602.08477, antes solo se tenía el HTML): el código fuente confirma `η_pol = cos²φ` con piso 0.1 sobre la POTENCIA — exactamente lo que `parametros.py` ya implementaba, y exactamente lo que `Drone` NO implementaba. El módulo de targeting (P3-A) que existe justamente para evitar sesgo de Jensen integrando sobre "la distribución real de acoplamiento" estaba integrando sobre la distribución EQUIVOCADA. | Alta (afectaba la física de todo disparo del motor principal, no un módulo aislado) | **Corregido (2026-09-13)**: `Drone._sortear_polarizacion` y `targeting._muestra_de_acoplamiento` migrados a `cos²(U[0,π])` con piso `DRONE_POLARIZATION_MIN_ETA`. Media de acoplamiento bajó de 0.65 a 0.51 y su varianza casi se triplicó — el sesgo de Jensen medido en P3-A pasó de +66% a +83%. Calibración (P1-D) intacta (no depende del sorteo de `Drone`). Suite completa 450/450. Ver [§3.14](#314-coevolución-genética-armaenjambre-p3-b) y [§3.6.1](#361-actualización-2026-09-13--se-leyó-el-pdf-real-antes-solo-el-html). |
 
 **Lo que SÍ ya estaba bien** (verificado, no solo asumido):
 - `S = P·G/(4πr²)` — el término `4πr²` es literalmente el área de una esfera; la propagación ya era 3D en el cálculo (no en el render, ver hallazgo 5).
@@ -355,7 +356,7 @@ Dirección opuesta ⇒ la estructura de varianza no era la del paper.
 
 Reajustado con el MC dentro del lazo: `k = 0.3693`.
 
-#### Las tres señales de que no cierra
+#### Las tres señales de que no cierra (estado ANTES de leer el PDF)
 
 **Señal 1 — no reproduce los puntos publicados.** Con el ajuste correcto:
 
@@ -398,37 +399,106 @@ respuesta: **sin polarización el CV cae a 0.284, por debajo del 0.39 del
 paper**. La verdad está en medio: la dispersión de polarización del paper es
 real pero menor que `cos²(U[0,π])` con piso 0.1.
 
-#### Qué hay que confirmar contra el PDF para desbloquearlo
+#### 3.6.1 Actualización 2026-09-13 — se leyó el PDF real (antes solo el HTML)
 
-Tres cosas, en orden de probable impacto:
+El usuario consiguió el PDF de arXiv:2602.08477 (v1, 6 páginas — ver nota de
+alcance al final de esta sección). Trae algo que el HTML no dio nunca: el
+**código fuente real** del modelo determinista (Listado 1) y del núcleo del
+Monte Carlo (Listado 2, explícitamente "abreviado" por el propio paper).
+Confirma dos cosas de la lista de arriba y refuta una hipótesis nueva.
 
-1. **`F(θ_wire)`, el factor de orientación del cable, no está implementado.**
-   El paper lo lleva en `V_ind = E·L_eff·F(θ_wire)·√η_pol` y atribuye la
-   incertidumbre dominante a la polarización **y la orientación del cable**
-   conjuntamente. Si `F(θ_wire)` y `η_pol` describen parcialmente la misma
-   alineación geométrica, aplicar `cos²φ` sobre todo el rango `[0, π]` está
-   sobredispersando.
-2. **Dónde se aplica el piso de 0.1**: ¿sobre `η_pol` (potencia) o sobre
-   `√η_pol` (amplitud)? Cambia el mínimo de acoplamiento de 0.316 a 0.1 en
-   amplitud, y con ello toda la cola baja — justo la zona convexa que infla la
-   media.
-3. **La inconsistencia dimensional.** Los umbrales de la Tabla 1 están en
-   **V/m**, pero la cadena de acoplamiento produce **voltios**
-   (`E [V/m] × L_eff [m]`). Mientras eso no se resuelva, la eficiencia de
-   acoplamiento es un parámetro adimensional ajustado, no una cantidad física
-   derivada — y su valor absoluto no es publicable (el cociente entre
-   configuraciones sí es insensible a él).
+**Confirmado — punto 2 de la lista (dónde va el piso de polarización):** el
+código del paper es literal — `pol_loss = max(cos(pol)**2, 0.1)`, aplicado
+sobre la POTENCIA (EIRP) antes de la raíz cuadrada para el campo. El piso va
+sobre `η_pol = cos²φ`, no sobre `√η_pol`. Coincide exactamente con lo que
+`src/engine/parametros.py` (P1-B) ya había implementado sin haber visto el
+PDF — pero el motor **principal** (`Drone`, usado por P2-D/P3-A/P3-B) seguía
+con un modelo viejo (`Uniforme[0.3,1.0]` plano) que nunca fue el correcto.
+**Corregido** en `Drone._sortear_polarizacion` (`src/models/drone.py`) y en
+la integración Monte Carlo de `src/engine/targeting.py`
+(`_muestra_de_acoplamiento`), que hasta ahora integraba sobre una
+distribución DISTINTA a la que el propio dron sorteaba — ver hallazgo 14.
 
-**También falta el realce por resonancia** (`1+(Q−1)exp(−(L−λ₀/2)²/(2σ_L²))`,
-`Q≈10`, `σ_L=0.02 m`) en esta cadena. Se omitió a propósito en esta iteración:
-con `L ~ U[5,25] cm` y `λ₀/2 = 6.12 cm` es un multiplicador fuertemente
-asimétrico y bimodal que **añadiría** varianza, y la señal 3 dice que ya hay de
-más. Añadirlo sin resolver (1) y (2) empeoraría el ajuste.
+**Confirmado — modelo de error de apuntado, dato nuevo:** el paper usa una
+gaussiana en potencia, `G_point = exp(-2.76·θ_norm²)` con
+`θ_norm = θ_err/(θ_3dB/2)`, no el `cos²` de cono que el simulador reutilizaba
+(un atajo de cuando no se conocía la fórmula real: el motor aplica `cos²` al
+CONO DE EFECTO del arma, un concepto físico distinto — ancho angular con
+borde duro — del jitter de tracking que este parámetro modela). **Corregido**
+en `src.engine.experiments._factor_taper_haz` y en la copia paralela de
+`src.engine.sensitivity.probabilidad_baja_desde_vector` (P2-A: debe
+mantenerse coherente con la anterior, misma cadena física con dos puntos de
+entrada — ver docstring de `monte_carlo_blanco_unico`).
 
-Las tres señales están fijadas en
-`tests/test_parametros.py::TestModeloSubsistemasBloqueado`, con la lógica
-invertida a propósito: los tests verifican que el modelo **no** cierra. Si
-alguien lo arregla, fallan — y eso es el único modo de saber que se arregló.
+**Refutado — la hipótesis de que no hace falta acoplamiento adicional:** el
+Listado 1 (determinista) y el Listado 2 (Monte Carlo) comparan el campo
+incidente de Friis **directamente** contra los umbrales E₅₀ de la Tabla 1,
+sin ningún paso de acoplamiento a voltios inducidos en cable — la cadena
+`V_ind = E·L_eff·F(θ)·√η_pol` (Ec. 4-5) aparece en el texto como motivación
+teórica, no en el código mostrado. Probado tomando esto literalmente
+(`HPM_COUPLING_FIELD_EFFICIENCY = 1.0`, sin atenuación): **sobrestima fuerte**,
++40 pp a 20 m (91.6 % contra 51.4 % publicado). El código "abreviado" o bien
+omite un paso real (candidato principal: la propia cadena de voltios que el
+texto sí describe), o falta algo más — pero "cero acoplamiento adicional" no
+es la respuesta.
+
+**Reajustado el único parámetro libre** (`HPM_COUPLING_FIELD_EFFICIENCY`, MC
+en el lazo — método correcto, ver `campo_acoplado_v_m`) bajo el modelo YA
+corregido de polarización y apuntado: `k = 0.44` minimiza el error cuadrático
+contra los dos puntos publicados. Con ese `k`:
+
+| Distancia | Simulador (MC, 4000 tiradas) | Paper | Residuo | Margen |
+|---|---|---|---|---|
+| 20 m | 0.5365 | 0.514 | **+2.25 pp** | ±1.0 |
+| 40 m | 0.0866 | 0.131 | **−4.44 pp** | ±0.7 |
+
+Los residuos ahora son de **signos opuestos** (antes, con el modelo viejo,
+ambos eran negativos) — el carácter del bloqueo cambió, pero sigue bloqueado:
+ningún `k` único cierra los dos a la vez, la misma conclusión estructural que
+antes, por una razón distinta.
+
+Y el CV a 30 m con este ajuste es **≈1.02** — PEOR que el 0.63 anterior, y
+2.6× el ≈0.39 del paper. Esto es informativo en sí mismo: **descarta la
+hipótesis de que "falta variabilidad" sea el problema** (ej. implementar
+`F(θ_wire)` como fuente adicional de varianza). El modelo ya tiene demasiada
+dispersión; agregar otra fuente estocástica lo empeoraría, no lo arreglaría.
+Repitiendo la atribución de varianza con el modelo corregido: apagar la
+polarización baja el CV de ≈1.02 a ≈0.29 — por DEBAJO del 0.39 del paper otra
+vez (antes había quedado por encima, 0.43). La conclusión "la verdad está en
+medio" se sostiene, pero con números distintos.
+
+**Nota de alcance sobre el PDF**: el archivo que se leyó tiene 6 páginas y
+corta a mitad de la §4.2 ("CMOS damage probability characterisation"), sin
+llegar a la §4.3 (donde probablemente está la discusión de CV≈39% citada en
+`docs/REFERENCIA_PAPER_2602.08477.md`, tomada del HTML), ni a las secciones 5
+(discusión) o 6 (conclusión), ni a la bibliografía. Es decir: **sigue sin
+poder confirmarse contra el propio texto del paper** la sección que reporta
+el CV≈39% ni cualquier detalle adicional de la cadena de acoplamiento que
+esas secciones puedan contener — el PDF disponible no alcanza para cerrar
+esto del todo, solo para corregir dos sub-modelos con evidencia sólida y
+refutar una hipótesis.
+
+#### Qué hay que confirmar todavía para desbloquearlo
+
+1. **La cadena de voltios (Ec. 4-5) probablemente SÍ es parte del código
+   real** — el Listado 2 es "abreviado" y no la muestra, pero la evidencia de
+   arriba (k=1.0 sobrestima fuerte) apunta en esa dirección más que antes.
+   Si es así, sigue habiendo una inconsistencia dimensional V/m-vs-voltios
+   pendiente de resolver contra el código COMPLETO (no solo el abreviado).
+2. **`F(θ_wire)`, el factor de orientación del cable, sigue sin
+   implementarse** — pero la señal 3 actualizada (CV ya excesivo, empeoró)
+   hace más improbable que agregarlo sea la solución: sumaría varianza a un
+   modelo que ya tiene de más.
+3. **La sección de resultados/discusión del paper** (§4.3 en adelante), no
+   incluida en el PDF de 6 páginas disponible — necesaria para confirmar el
+   CV≈39% contra el propio texto, no solo contra la cita ya extraída del
+   HTML.
+
+Las señales siguen fijadas en
+`tests/test_parametros.py::TestModeloSubsistemasBloqueado`, actualizadas con
+los números de esta sección — con la lógica invertida a propósito: los tests
+verifican que el modelo **no** cierra. Si alguien lo arregla, fallan — y eso
+es el único modo de saber que se arregló.
 
 ### 3.7 ✅ El piso de la sigmoide: `P(E=0) ≠ 0` — CORREGIDO (P1-F)
 
@@ -1120,14 +1190,25 @@ observable por radar. Estimar bajas esperadas con el acoplamiento MEDIO
 subestima el resultado, porque la sigmoide es cóncava en el rango relevante:
 
 ```
-bajas esperadas (Monte Carlo sobre la distribución):  0.0278
-P(acoplamiento promedio):                             0.0167
-diferencia:                                           +66 %
+bajas esperadas (Monte Carlo sobre la distribución):  0.0221
+P(acoplamiento promedio):                             0.0121
+diferencia:                                           +83 %
 ```
 
 La corrección: integrar (Monte Carlo, 200+ muestras) sobre la distribución
 real de `cable_length_m`/`polarization` por blanco, promediando
 PROBABILIDADES, no parámetros de entrada.
+
+**Actualizado 2026-09-13** (antes: +66 %): la distribución de polarización
+del blanco pasó de `Uniforme[0.3, 1.0]` (plana, la incorrecta que P1-B ya
+había señalado, ver §3.14 y `docs/FISICA_Y_MATEMATICA.md` en
+`DRONE_POLARIZATION_ANGLE_MIN_RAD`) a `cos²φ` con `φ~U[0,π]` acotado a 0.1
+— confirmada contra el código fuente real del paper (PDF de
+arXiv:2602.08477, no solo el HTML). La media de acoplamiento bajó de 0.65 a
+0.51 y su varianza casi se triplicó, así que el sesgo de Jensen —que
+depende de la varianza y de la curvatura local de la sigmoide— se hizo MÁS
+pronunciado, no menos. El hallazgo cualitativo (el MC supera a la
+probabilidad del acoplamiento medio) no cambió; el número sí.
 
 #### La formulación y su validación
 
@@ -1276,13 +1357,19 @@ población es un estimador mucho menos ruidoso que el máximo):
 
 | Población | Config (semilla 42) | Fitness medio, gen. 1 → gen. 6 |
 |---|---|---|
-| Arma vs. defensa fija (cuadrada, 20) | pop=10, réplicas=6, t=6s | 0.0017 → **0.0158** (×9.3) |
-| Defensa vs. arma fija (60kW, 15°, duty=0.01) | pop=10, réplicas=6, t=6s | 0.9813 → **0.9956** |
+| Arma vs. defensa fija (cuadrada, 20) | pop=10, réplicas=6, t=6s | 0.0017 → **0.0100** (×6.0) |
+| Defensa vs. arma fija (80kW, 15°, duty=0.01) | pop=10, réplicas=6, t=6s | 0.9862 → **0.9963** |
 
-El arma final evolucionó a `duty_cycle≈0.012` (extremo pulsado) y
-`potencia≈82 kW`; la defensa final evolucionó a `formación=aleatoria`,
-`cantidad≈52` — ambos resultados coherentes con los dos gradientes
+El arma final evolucionó a `duty_cycle≈0.014` (extremo pulsado) y
+`potencia≈31 kW`; la defensa final evolucionó a `formación=circular`,
+`cantidad≈54` — ambos resultados coherentes con los dos gradientes
 documentados arriba (pulsado gana, dispersión gana).
+
+*(Números re-medidos 2026-09-13 tras corregir la distribución de
+polarización del motor principal, ver §3.6.1 — antes: 0.0017→0.0158/×9.3 y
+0.9813→0.9956, defensa final "aleatoria". El hallazgo cualitativo (ambas
+poblaciones mejoran frente a un oponente fijo, reproducible con la misma
+semilla) no cambió.)*
 
 **Honestidad declarada sobre la corrida coevolutiva completa** (ambas
 poblaciones evolucionando simultáneamente contra el campeón móvil de la
@@ -1337,9 +1424,6 @@ Esto es lo que el modelo **no** captura, a propósito o por simplificación:
   metros) el modelo sobrestima o subestima el campo real; no hay un límite
   inferior físico, solo un `max(distancia, 1e-6)` para evitar división por
   cero.
-- **Sin polarización**: el paper varía "polarization mismatch" como fuente
-  de incertidumbre en su Monte Carlo. Acá no existe el concepto — se asume
-  acoplamiento óptimo siempre.
 - **El perfil de vuelo del misil** (ascenso/crucero/descenso) es un guion
   temporal (interpolación lineal por fracción de tiempo), no dinámica de
   vuelo real (empuje, arrastre, gravedad). Igual para la oscilación de

@@ -101,7 +101,20 @@ def probabilidad_desde_campo(
         if campo_v_m <= 0.0:
             return 0.0
         e50_seguro = max(float(e50), 1e-9)
-        return float(np.clip(1.0 / (1.0 + (e50_seguro / campo_v_m) ** b), 0.0, 1.0))
+        # P(E) = 1/(1+(E₅₀/E)^b) = sigmoide(b·ln(E/E₅₀)) — misma función,
+        # reescrita para no desbordar cuando E es astronómicamente chico
+        # frente a E₅₀ (ej. un desapunte extremo bajo el taper gaussiano de
+        # apuntado, que nunca llega a cero exacto, a diferencia del taper de
+        # cono — ver ``src.engine.experiments._factor_taper_haz``): con E
+        # pequeño, ``(E₅₀/E)**b`` desborda ``float`` mucho antes de que la
+        # probabilidad deje de ser, para cualquier propósito práctico, 0.
+        x = b * float(np.log(campo_v_m / e50_seguro))
+        if x >= 0:
+            p = 1.0 / (1.0 + np.exp(-x))
+        else:
+            z = np.exp(x)
+            p = z / (1.0 + z)
+        return float(np.clip(p, 0.0, 1.0))
 
     if modelo == "logistica":
         exponent = -steepness * (campo_v_m - e_threshold)
@@ -773,19 +786,36 @@ def campo_acoplado_v_m(
 ) -> float:
     """Campo que ve el subsistema susceptible, a partir del campo incidente.
 
-    ``eficiencia_campo`` es el único parámetro libre del modelo de subsistemas,
-    y está **determinado por los dos puntos publicados**, no elegido: el ajuste
-    por mínimos cuadrados sobre ambos da 0.2568 (atenuación 3.895× en campo,
-    15.2× en potencia), con residuos de −0.11 pp a 20 m y +0.62 pp a 40 m,
-    dentro de los márgenes ±1.0 / ±0.7 pp que el paper declara.
+    ``eficiencia_campo`` es el único parámetro libre del modelo de
+    subsistemas. CONFIRMADO contra el código fuente real del paper (PDF de
+    arXiv:2602.08477, Listados 1-2, leído el 2026-09-13) que el pipeline que
+    produce 51.4%/13.1% compara el campo incidente (con pérdidas de apuntado
+    y polarización ya aplicadas, ambas en potencia) DIRECTAMENTE contra los
+    umbrales E₅₀ de la Tabla 1 — sin ningún paso de acoplamiento a voltios
+    inducidos en cable visible en el código. La cadena
+    ``V_ind = E·L_eff·F(θ)·√η_pol`` (Ec. 4-5 del paper) aparece en el texto
+    como motivación teórica, pero no en el listado (explícitamente
+    "abreviado"), así que este parámetro sigue siendo un gancho de
+    atenuación en campo, sin unidades de voltios — no hay inconsistencia
+    dimensional V/m-vs-voltios que resolver, porque nunca se introducen
+    voltios en ningún camino de este proyecto.
 
-    LIMITACIÓN DECLARADA: los umbrales de la Tabla 1 están en V/m, pero la
-    cadena de acoplamiento del paper (``V_ind = E·L_eff·F(θ)·√η_pol``) produce
-    VOLTIOS. Esa inconsistencia dimensional no se pudo resolver con el texto
-    extraído del HTML de arXiv, así que acá el acoplamiento se modela como una
-    eficiencia adimensional en campo. Confirmar contra el PDF antes de publicar
-    cualquier resultado que dependa del valor absoluto de este parámetro (el
-    cociente entre configuraciones es insensible a él).
+    PROBADO Y DESCARTADO: ``eficiencia_campo=1.0`` (tomar el pipeline de
+    arriba literalmente, sin atenuación) sobrestima fuerte (+40pp a 20m) —
+    ver ``HPM_COUPLING_FIELD_EFFICIENCY`` en ``src/config.py`` para el
+    detalle. El default actual (0.44) es un reajuste por mínimos cuadrados
+    contra los dos puntos publicados, CON EL MC EN EL LAZO (método correcto:
+    ver la nota histórica sobre 0.2568/0.3693 más abajo) bajo el modelo YA
+    corregido de polarización y apuntado — pero tampoco cierra: los
+    residuos a 20m y 40m salen de signos OPUESTOS (antes, con el modelo
+    viejo, ambos eran del mismo signo), y el CV a 30m con este ajuste es
+    ≈1.03, peor que antes. Ningún valor de este parámetro puede arreglar
+    eso: es un problema de FORMA de la curva (cómo cae con la distancia y
+    con qué varianza), no de escala. Historia de valores intentados:
+    0.2568 (ajustado contra el determinista — error de método, absorbía el
+    sesgo del MC en el parámetro, descartado); 0.3693 (MC en el lazo bajo el
+    modelo VIEJO de polarización, correcto pero sin validar); 0.44 (MC en el
+    lazo bajo el modelo corregido, correcto pero sin validar — el actual).
     """
     return float(max(0.0, campo_incidente_v_m) * np.clip(eficiencia_campo, 0.0, 1.0))
 

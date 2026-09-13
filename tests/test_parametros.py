@@ -318,19 +318,27 @@ class TestModeloSubsistemasBloqueado:
             p = monte_carlo_blanco_unico(r, n=4000)["probabilidad_media"]
             residuos[r] = p - obj
 
-        # ACTUALIZADO en P1-F: el carácter del bloqueo CAMBIÓ. Con la
-        # logística los residuos tenían signo opuesto (−1.15 y +4.32 pp), lo
-        # que probaba que ningún k único los cerraba. Con la log-logística
-        # ambos son negativos (−9.96 y −8.91 pp), así que un k mayor podría
-        # acercar los dos a la vez — el bloqueo ya no es por signos opuestos.
-        # Lo que sigue bloqueando es la VARIANZA: el CV subió de 0.63 a 1.17,
-        # o sea 3× el ≈0.39 del paper (ver test_senal_3). Sigue haciendo falta
-        # el PDF para resolver la cadena de acoplamiento.
-        assert residuos[20.0] < 0
+        # ACTUALIZADO 2026-09-13: se leyó el PDF real del paper (antes solo
+        # el HTML). Confirmó el modelo de apuntado (gaussiano) y de
+        # polarización (piso sobre cos²φ, no sobre su raíz) y permitió
+        # DESCARTAR por evidencia la hipótesis "no hay acoplamiento
+        # adicional" (eficiencia=1.0 sobrestima +40pp a 20m — ver
+        # HPM_COUPLING_FIELD_EFFICIENCY en config.py). Reajustando el único
+        # parámetro libre con el MC en el lazo bajo el modelo YA corregido
+        # (k=0.44), el carácter del bloqueo cambió otra vez: los residuos
+        # ahora son de SIGNOS OPUESTOS (antes, con log-logística y el modelo
+        # viejo, ambos eran negativos) — ningún k único los cierra, la misma
+        # conclusión que con la logística original pero por una razón
+        # distinta. Lo que sigue bloqueando es la VARIANZA (ver
+        # test_senal_3): el CV subió a ≈1.03, peor que antes. Sigue haciendo
+        # falta la sección de resultados del paper (no incluida en las 6
+        # páginas del PDF disponible) para resolver la cadena de
+        # acoplamiento.
+        assert residuos[20.0] > 0
         assert residuos[40.0] < 0
         # Ambos residuos son varias veces sus márgenes declarados.
-        assert abs(residuos[20.0]) > 3 * self.OBJ[20.0][1]
-        assert abs(residuos[40.0]) > 3 * self.OBJ[40.0][1]
+        assert abs(residuos[20.0]) > 2 * self.OBJ[20.0][1]
+        assert abs(residuos[40.0]) > 5 * self.OBJ[40.0][1]
 
     def test_senal_2_el_sesgo_va_en_direccion_opuesta_al_paper(self):
         """El paper: MC "systematically lower than deterministic". Acá es al revés.
@@ -354,18 +362,22 @@ class TestModeloSubsistemasBloqueado:
         )
 
     def test_senal_3_el_cv_es_demasiado_alto(self):
-        """CV ≈ 0.63 a 30 m contra el ≈0.39 que reporta el paper."""
+        """CV ≈ 1.02 a 30 m contra el ≈0.39 que reporta el paper.
+
+        ACTUALIZADO 2026-09-13: subió de ≈0.63 (modelo de apuntado/
+        polarización viejo) a ≈1.02 tras corregir ambos contra el código
+        real del paper — empeoró, no mejoró (ver
+        test_senal_1_no_reproduce_los_puntos_publicados para el porqué).
+        """
         cv = monte_carlo_blanco_unico(30.0, n=4000)["cv"]
-        assert cv > 0.50, f"CV medido {cv}: si bajó, revisar §3.6"
+        assert cv > 0.80, f"CV medido {cv}: si bajó mucho, revisar §3.6"
 
     def test_la_polarizacion_es_la_fuente_dominante_de_varianza(self):
-        """Atribución: apagar la polarización baja el CV de ~0.63 a ~0.28.
+        """Atribución: apagar la polarización baja el CV de ~1.0 a ~0.29.
 
         Coincide con la conclusión del paper sobre CUÁL parámetro domina
         (polarización y orientación del cable), y localiza el problema: la
-        magnitud de la dispersión, no la identidad del culpable. Nótese que
-        sin polarización el CV cae POR DEBAJO del 0.39 del paper, así que la
-        verdad está en medio.
+        magnitud de la dispersión, no la identidad del culpable.
         """
         base = EspecificacionMC.del_paper()
         sin_pol = replace(base, angulo_polarizacion_rad=Constante(0.0))
@@ -373,16 +385,19 @@ class TestModeloSubsistemasBloqueado:
         cv_sin = monte_carlo_blanco_unico(30.0, espec=sin_pol, n=3000)["cv"]
         assert cv_base > cv_sin
         assert (cv_base - cv_sin) > 0.25, "la polarización debe dominar la varianza"
-        # ACTUALIZADO en P1-F, y es un cambio de conclusión: con la logística,
-        # apagar la polarización dejaba el CV en 0.284, POR DEBAJO del ≈0.39
-        # del paper — o sea que la verdad estaba en medio y bastaba moderar la
-        # dispersión de polarización. Con la log-logística, el CV sin
-        # polarización es 0.43, ya POR ENCIMA del paper. La varianza es
-        # excesiva incluso sin ella, así que el problema no se arregla solo
-        # tocando la polarización: hay algo más en la cadena de acoplamiento.
-        assert cv_sin > 0.39, (
-            "si vuelve a caer por debajo del 0.39 del paper, la conclusión de "
-            "§3.6 cambia otra vez: revisar el diagnóstico"
+        # ACTUALIZADO 2026-09-13 (tras leer el PDF real y corregir el
+        # modelo de apuntado + reajustar el acoplamiento, ver
+        # test_senal_1_no_reproduce_los_puntos_publicados): con la
+        # polarización apagada, el CV cae a ≈0.29 — por DEBAJO del ≈0.39 del
+        # paper otra vez (con el modelo anterior a esta corrección había
+        # quedado por encima, 0.43). La conclusión vuelve a ser "la verdad
+        # está en medio": ni apagar la polarización por completo ni dejarla
+        # como está reproduce el CV publicado — consistente con que
+        # `cos²(U[0,π])` con piso 0.1 es más dispersa que lo que el paper
+        # realmente usa (ver docs/FISICA_Y_MATEMATICA.md §3.6).
+        assert cv_sin < 0.39, (
+            "si vuelve a subir por encima del 0.39 del paper, la conclusión "
+            "de §3.6 cambia otra vez: revisar el diagnóstico"
         )
 
     def test_el_modelo_agregado_sigue_siendo_el_default(self):

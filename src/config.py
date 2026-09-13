@@ -1,5 +1,6 @@
 """Configuración del simulador desde variables de entorno."""
 
+import math
 import os
 from pathlib import Path
 
@@ -284,10 +285,13 @@ HPM_APERTURE_EFFICIENCY: float = float(os.getenv("HPM_APERTURE_EFFICIENCY", "0.5
 HPM_DAMAGE_MODEL: str = os.getenv("HPM_DAMAGE_MODEL", "agregado")
 
 # Umbrales de daño por subsistema: {nombre: (E₅₀ V/m, σ_E V/m)}. Tabla 1 de
-# arXiv:2602.08477, tomados como publicados y NO ajustados. Procedencia
-# declarada en docs/REFERENCIA_PAPER_2602.08477.md §1 (extraídos del HTML de
-# arXiv con dos fetches independientes concordantes; pendiente de confirmar
-# contra el PDF).
+# arXiv:2602.08477, tomados como publicados y NO ajustados.
+#
+# CONFIRMADO CONTRA EL PDF (2026-09-13, antes solo extraídos del HTML de
+# arXiv con dos fetches independientes concordantes — ahora leídos
+# directamente de la Tabla 1 del PDF, coinciden exactamente): 150/30
+# (GPS/GNSS LNA), 200/40 (cámara CMOS), 250/50 (flight controller), 300/60
+# (ESC gate oxide), 350/70 (BMS MOSFET) V/m.
 HPM_SUBSISTEMAS: dict[str, tuple[float, float]] = {
     "gps_gnss_lna": (150.0, 30.0),
     "camara_cmos": (200.0, 40.0),
@@ -299,24 +303,39 @@ HPM_SUBSISTEMAS: dict[str, tuple[float, float]] = {
 # Eficiencia de acoplamiento en CAMPO entre el campo incidente y el campo que
 # ve el subsistema susceptible.
 #
-# ⚠ VALOR PROVISIONAL — NO VALIDADO. El modelo de subsistemas está BLOQUEADO
-# (ver CHECKLIST_MEJORAS.md P1-C y docs/FISICA_Y_MATEMATICA.md §3.6): con
-# ninguna de las dos calibraciones intentadas reproduce los dos puntos
-# publicados dentro de los márgenes del paper.
+# ACTUALIZADO 2026-09-13, tras leer el PDF real del paper (antes solo se
+# tenía el HTML de arXiv, sin el código fuente). El Listado 1 (modelo
+# determinista) y el Listado 2 (núcleo del Monte Carlo, "abreviado" según
+# el propio paper) muestran el pipeline que produce 51.4%/13.1%: parten del
+# campo incidente de Friis, aplican pérdida por apuntado (potencia,
+# gaussiana — ver ``DRONE_POLARIZATION_ANGLE_MIN_RAD`` y
+# ``src.engine.experiments._factor_taper_haz``) y pérdida de polarización
+# (potencia, cos²φ acotado a 0.1) — y comparan ESE campo contra los umbrales
+# E₅₀ de la Tabla 1 (ambos en V/m), SIN ningún paso de acoplamiento a
+# voltios inducidos en cable (Ec. 4-5 del paper, que en el texto aparece
+# como motivación teórica, no como parte del código mostrado).
 #
-#   ajuste contra el DETERMINISTA : k = 0.2568  → residuos −0.11 / +0.62 pp
-#       (parecía cerrar, pero es un error de método: ajustar un cálculo
-#        determinista a puntos que son SALIDA de un Monte Carlo es exactamente
-#        el defecto §1.3 de la auditoría, absorber el sesgo del MC dentro de un
-#        parámetro. Se descartó.)
-#   ajuste con el MC EN EL LAZO   : k = 0.3693  → residuos −1.48 / +4.19 pp
-#       (método correcto, pero NO cierra: el residuo a 40 m es 6× el margen)
+# PROBADO Y DESCARTADO: k=1.0 (sin atenuación extra, tomando el pipeline de
+# arriba literalmente) SOBRESTIMA fuerte — a 20m da 91.6% contra 51.4%
+# publicado, +40pp. La hipótesis "no hay ningún paso de acoplamiento
+# adicional" no sostiene los números publicados: o el Listado 2 abreviado
+# omite un paso real (el más probable candidato sigue siendo la cadena de
+# voltios de la Ec. 4-5), o falta algo más en la cadena.
 #
-# Se deja el valor del ajuste correcto (0.3693) porque es el metodológicamente
-# defendible, aunque no valide. Nada del comportamiento por defecto depende de
-# él: HPM_DAMAGE_MODEL = "agregado".
+# Reajustado con el MC en el lazo (método correcto, ver docstring de
+# ``campo_acoplado_v_m``) bajo el modelo YA corregido (polarización +
+# apuntado): k=0.44 minimiza el error cuadrático a los dos puntos
+# publicados, pero SIGUE sin cerrar — y con una firma distinta a antes:
+# residuo +2.25pp a 20m (2.25× el margen ±1.0pp) y −4.44pp a 40m (6.3× el
+# margen ±0.7pp), de SIGNOS OPUESTOS (antes, con el modelo viejo, ambos
+# residuos eran negativos) — ningún k único cierra los dos. El CV a 30m con
+# este k es ≈1.03, PEOR que el 0.63 de antes y muy por encima del ≈0.39 del
+# paper — descarta que "falta variabilidad" (ej. F(θ_wire) sin implementar)
+# sea el problema: el modelo YA tiene demasiada varianza, agregar más la
+# empeoraría. Ver CHECKLIST_MEJORAS.md P1-C y docs/FISICA_Y_MATEMATICA.md
+# §3.6 para el detalle completo.
 HPM_COUPLING_FIELD_EFFICIENCY: float = float(
-    os.getenv("HPM_COUPLING_FIELD_EFFICIENCY", "0.3693")
+    os.getenv("HPM_COUPLING_FIELD_EFFICIENCY", "0.44")
 )
 
 # --- Presupuesto energético y térmico del arma (P2-F) ---
@@ -477,13 +496,35 @@ DRONE_HARDENED_THRESHOLD_MULT: float = float(os.getenv("DRONE_HARDENED_THRESHOLD
 # 1.0–7.5 GHz, bracketando la frecuencia por defecto del arma (2.45 GHz).
 DRONE_CABLE_LENGTH_MIN_M: float = float(os.getenv("DRONE_CABLE_LENGTH_MIN_M", "0.02"))
 DRONE_CABLE_LENGTH_MAX_M: float = float(os.getenv("DRONE_CABLE_LENGTH_MAX_M", "0.15"))
-DRONE_POLARIZATION_MIN: float = float(os.getenv("DRONE_POLARIZATION_MIN", "0.3"))
-# Piso de η_pol = cos²φ en el modelo del paper (P1-B). Distinto de
-# DRONE_POLARIZATION_MIN, que acota un sorteo UNIFORME del factor de potencia:
-# éste acota cos²φ con φ ~ U[0,π], cuya densidad diverge en 0. Sin piso, una
-# fracción no despreciable de blancos quedaría con acoplamiento numéricamente
-# nulo — y un blanco perfectamente cruzado en polarización igual acopla algo,
-# por despolarización del entorno y por la geometría 3D real del cableado.
+# η_pol = cos²φ, φ ~ Uniforme[ÁNGULO_MIN, ÁNGULO_MAX] rad (default [0, π]),
+# acotado por abajo a DRONE_POLARIZATION_MIN_ETA.
+#
+# CONFIRMADO contra el código fuente real del paper (arXiv:2602.08477,
+# Listado 2, leído en PDF el 2026-09-13 — antes solo se tenía el HTML de
+# arXiv, sin el código): `pol_loss = max(cos(pol)**2, 0.1)`, multiplicado
+# directamente sobre la potencia (EIRP) antes de la raíz cuadrada para el
+# campo — exactamente este modelo, piso incluido, y el piso va sobre
+# cos²φ (dominio de potencia), NO sobre √(cos²φ). Ya estaba implementado así
+# en `src/engine/parametros.py` (P1-B, deducido sin el PDF, ahora confirmado
+# correcto) pero el motor principal (`Drone`, del que dependen P2-D/P3-A/P3-B)
+# seguía usando un modelo viejo y físicamente incorrecto: `Uniforme[0.3, 1.0]`
+# plano — mismo error que P1-B ya había señalado en `parametros.py` sin
+# haberlo corregido en el motor principal. Corregido acá (2026-09-13).
+#
+# Antes: `DRONE_POLARIZATION_MIN = 0.3` acotaba un sorteo uniforme directo
+# del factor de potencia — plano, subestimaba la varianza justo en la
+# variable que el paper reporta como dominante del CV (§3.6 de
+# docs/FISICA_Y_MATEMATICA.md).
+DRONE_POLARIZATION_ANGLE_MIN_RAD: float = float(
+    os.getenv("DRONE_POLARIZATION_ANGLE_MIN_RAD", "0.0")
+)
+DRONE_POLARIZATION_ANGLE_MAX_RAD: float = float(
+    os.getenv("DRONE_POLARIZATION_ANGLE_MAX_RAD", str(math.pi))
+)
+# Piso de η_pol = cos²φ. Sin piso, con φ ~ U[0,π] (densidad de cos²φ diverge
+# en 0), una fracción no despreciable de blancos quedaría con acoplamiento
+# numéricamente nulo — y un blanco perfectamente cruzado en polarización
+# igual acopla algo, por despolarización del entorno y geometría 3D real.
 DRONE_POLARIZATION_MIN_ETA: float = float(os.getenv("DRONE_POLARIZATION_MIN_ETA", "0.1"))
 HPM_COUPLING_Q: float = float(os.getenv("HPM_COUPLING_Q", "5.0"))
 

@@ -18,7 +18,9 @@ from src.config import (
     DRONE_LOST_LINK_FLYAWAY_FRACTION,
     DRONE_LOST_LINK_HOVER_FRACTION,
     DRONE_LOST_LINK_RTH_FRACTION,
-    DRONE_POLARIZATION_MIN,
+    DRONE_POLARIZATION_ANGLE_MAX_RAD,
+    DRONE_POLARIZATION_ANGLE_MIN_RAD,
+    DRONE_POLARIZATION_MIN_ETA,
     DRONE_RIESGO_LATENTE_DECAY_TAU_S,
     DRONE_RIESGO_LATENTE_MAX_POR_S,
     HPM_DISPARO_DURACION_S,
@@ -150,7 +152,7 @@ class Drone:
         self.polarization = (
             polarization
             if polarization is not None
-            else float(self._rng().uniform(DRONE_POLARIZATION_MIN, 1.0))
+            else self._sortear_polarizacion()
         )
 
         # Perfil de contingencia lost-link (P2-E, Parte 3): comportamiento
@@ -232,6 +234,22 @@ class Drone:
     def _rng(self) -> Generator:
         """Generador de esta instancia, o el global si no se inyectó ninguno."""
         return self.rng if self.rng is not None else global_rng()
+
+    def _sortear_polarizacion(self) -> float:
+        """
+        η_pol = cos²φ, φ ~ Uniforme[ÁNGULO_MIN, ÁNGULO_MAX] (default [0, π]),
+        acotado por abajo a ``DRONE_POLARIZATION_MIN_ETA``.
+
+        Confirmado contra el código fuente real del paper (arXiv:2602.08477,
+        ver comentario de ``DRONE_POLARIZATION_ANGLE_MIN_RAD`` en
+        ``src/config.py``): mismo modelo, piso incluido, que ya usaba
+        ``src.engine.parametros.ParametrosBlanco.eta_polarizacion`` (P1-B) —
+        unificado acá para que el motor principal use la misma distribución
+        que P1-B ya había deducido correctamente.
+        """
+        angulo = float(self._rng().uniform(DRONE_POLARIZATION_ANGLE_MIN_RAD, DRONE_POLARIZATION_ANGLE_MAX_RAD))
+        eta = math.cos(angulo) ** 2
+        return max(DRONE_POLARIZATION_MIN_ETA, eta)
 
     def _sortear_perfil_lost_link(self) -> PerfilLostLink:
         """

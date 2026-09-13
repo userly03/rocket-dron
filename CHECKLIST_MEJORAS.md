@@ -165,37 +165,57 @@
       done: con P1-B activo, el MC reproduce 51.4% @ 20 m y 13.1% @ 40 m dentro del ±1%
       declarado, **sin ajustar ningún umbral a esos puntos**; el umbral agregado viejo
       queda documentado como aproximación histórica.
-      **⚠ BLOQUEADO (2026-09-12).** Implementado bajo `HPM_DAMAGE_MODEL =
-      "subsistemas"` (default sigue `"agregado"`, nada por defecto depende de él), pero
-      **NO valida**. Diagnóstico completo en `docs/FISICA_Y_MATEMATICA.md` §3.6.
+      **⚠ BLOQUEADO (2026-09-12, reintentado y actualizado 2026-09-13 con el PDF
+      real del paper).** Implementado bajo `HPM_DAMAGE_MODEL = "subsistemas"`
+      (default sigue `"agregado"`, nada por defecto depende de él), pero **NO
+      valida**. Diagnóstico completo en `docs/FISICA_Y_MATEMATICA.md` §3.6/§3.6.1.
       El argumento metodológico se sostiene: agregado = 2 params / 2 puntos = **0 gl,
-      no falsable**; subsistemas = 1 param / 2 puntos = **1 gl, falsable**. Pero falla:
-      · **Señal 1:** residuos −1.15 pp (20 m) y **+4.32 pp** (40 m), márgenes ±1.0/±0.7.
-        Signos opuestos ⇒ ningún `k` único los cierra.
-      · **Señal 2:** el MC queda por *encima* de su determinista; el paper reporta lo
-        inverso ("MC systematically lower"). ⇒ la varianza está en la zona **convexa**
-        (cola baja), donde promediar sube la media (Jensen).
-      · **Señal 3:** CV = 0.6285 a 30 m contra ≈0.39 del paper.
-      · **Atribución de varianza:** la **polarización explica el 55% del CV**
-        (apagarla lo baja de 0.628 a 0.284 — *por debajo* del paper, así que la verdad
-        está en medio). Coincide con el paper en *cuál* parámetro domina; discrepa en
-        la *magnitud*.
-      **ERROR DE MÉTODO QUE COMETÍ Y DESCARTÉ:** el primer ajuste dio `k=0.2568` con
-      residuos −0.11/+0.62 pp, *dentro* de márgenes — pero ajustaba el cálculo
-      **determinista** a puntos que son salida de un **Monte Carlo**, o sea absorbía el
-      sesgo del MC dentro del parámetro: el defecto §1.3 cometido de nuevo. Lo delató
-      que la dirección del sesgo salía opuesta a la que el paper declara.
-      **Para desbloquear, confirmar contra el PDF (en orden de impacto):**
-      (1) `F(θ_wire)`, el factor de orientación de cable, no está implementado y puede
-      ser parcialmente redundante con `η_pol` → sobredispersión;
-      (2) si el piso de 0.1 se aplica a `η_pol` o a `√η_pol` (cambia el mínimo de
-      acoplamiento de 0.316 a 0.1 en amplitud, o sea toda la cola convexa);
-      (3) la inconsistencia dimensional V/m vs voltios de la cadena de acoplamiento.
-      El realce por resonancia se omitió a propósito: añadiría varianza y la señal 3
-      dice que ya hay de más.
-      Las tres señales están fijadas en
-      `tests/test_parametros.py::TestModeloSubsistemasBloqueado`, con la lógica
-      invertida: verifican que el modelo **no** cierra. Si alguien lo arregla, fallan.
+      no falsable**; subsistemas = 1 param / 2 puntos = **1 gl, falsable**. Pero falla.
+
+      **2026-09-13 — el usuario consiguió el PDF real (antes solo HTML de arXiv).**
+      Trae el código fuente del modelo (Listados 1-2, "abreviado"). Confirmó dos cosas
+      y refutó una hipótesis:
+      · **Confirmado:** el piso de polarización va sobre `η_pol=cos²φ` (potencia), no
+        sobre `√η_pol` — exactamente lo que `parametros.py` (P1-B) ya implementaba.
+        Pero **el motor PRINCIPAL (`Drone`) seguía con el modelo viejo** (`Uniforme
+        [0.3,1.0]` plano) — nunca se había conectado la corrección de P1-B al motor
+        real. Corregido ahora en `Drone`/`targeting.py` (ver hallazgo 14 en
+        FISICA_Y_MATEMATICA.md).
+      · **Confirmado:** el modelo de error de apuntado es gaussiano en potencia
+        (`G_point=exp(-2.76·θ_norm²)`), no el `cos²` de cono que se reutilizaba.
+        Corregido en `_factor_taper_haz`/`sensitivity.py`.
+      · **Refutado:** "no hace falta acoplamiento adicional" (el código mostrado
+        compara el campo incidente directo contra E₅₀, sin voltios). Probado
+        literalmente (`k=1.0`): sobrestima +40pp a 20m. Descartado.
+      · **Reajustado** el único parámetro libre con el modelo YA corregido: `k=0.44`
+        (antes 0.3693). Con ese `k`:
+        - **Señal 1:** residuos **+2.25 pp** (20 m) y **−4.44 pp** (40 m), márgenes
+          ±1.0/±0.7. Signos opuestos (antes ambos negativos) ⇒ sigue sin cerrar, con
+          una firma distinta.
+        - **Señal 2:** sigue igual (MC por encima de su determinista, dirección
+          opuesta al paper).
+        - **Señal 3:** CV = **1.02** a 30 m contra ≈0.39 del paper — **empeoró**
+          (antes 0.63). Descarta que "falta variabilidad" (ej. `F(θ_wire)`) sea el
+          problema: ya hay demasiada, agregar más lo empeoraría.
+        - **Atribución de varianza:** apagar polarización baja el CV a ≈0.29 (antes
+          quedaba en 0.43, por encima del paper; ahora por debajo otra vez) — "la
+          verdad está en medio" se sostiene, con números nuevos.
+      **Lo que sigue bloqueando, ahora más preciso:** (1) la cadena de voltios
+      (Ec. 4-5 del paper) probablemente SÍ es parte del código real — el Listado 2
+      abreviado no la muestra, pero que `k=1.0` sobrestime tan fuerte lo hace más
+      probable, no menos; (2) `F(θ_wire)` sigue sin implementar, pero ya no parece
+      la pieza que falta (ver señal 3); (3) el PDF disponible (6 páginas) corta a
+      mitad de la §4.2, antes de la sección donde probablemente está el CV≈39%
+      citado — sigue sin poder confirmarse contra el texto del paper, solo contra la
+      cita ya extraída del HTML.
+      **Efecto colateral positivo:** al corregir la polarización en el motor
+      principal, el sesgo de Jensen medido en P3-A pasó de +66% a **+83%** (más
+      pronunciado, no menos — mayor varianza real de acoplamiento). Calibración
+      (P1-D) intacta. Suite completa 450/450 tras el cambio.
+      Las señales siguen fijadas en `tests/test_parametros.py::
+      TestModeloSubsistemasBloqueado`, actualizadas con los números de arriba, con la
+      lógica invertida: verifican que el modelo **no** cierra. Si alguien lo arregla,
+      fallan.
 
 - [x] **P1-D · Test de regresión de la calibración**
       qué: un test que re-deriva los dos puntos publicados desde la configuración actual
@@ -641,9 +661,11 @@
       **CERRADO (2026-09-13).** `src/engine/targeting.py` + `GET /api/targeting/plan`.
       40 tests nuevos en `tests/test_targeting.py`.
       **Sesgo de Jensen medido, no solo evitado**: bajas esperadas por Monte Carlo sobre
-      la distribución de acoplamiento dan **0.0278**, contra **0.0167** usando el
-      acoplamiento promedio — **+66%** de subestimación si se hubiera usado la media
-      (la sigmoide es cóncava en el rango relevante).
+      la distribución de acoplamiento dan **0.0221**, contra **0.0121** usando el
+      acoplamiento promedio — **+83%** de subestimación si se hubiera usado la media
+      (la sigmoide es cóncava en el rango relevante). *(Número actualizado 2026-09-13
+      tras corregir la distribución de polarización, ver P1-C más abajo — antes +66%,
+      medido con la distribución vieja e incorrecta; el hallazgo cualitativo no cambió.)*
       **Validado contra fuerza bruta EXACTA** (no contra el propio greedy, que es
       tautológico por construcción — la búsqueda local arranca desde ahí):
       · 20 matrices de valor ALEATORIAS (sin estructura física), ≤6×6: **17/20 exactas**,
@@ -692,15 +714,18 @@
 
       | Población | Fitness medio, gen. 1 → gen. 6 (semilla 42) |
       |---|---|
-      | Arma vs. defensa fija (cuadrada, 20) | 0.0017 → 0.0158 (×9.3) |
-      | Defensa vs. arma fija (60kW/15°/duty=0.01) | 0.9813 → 0.9956 |
+      | Arma vs. defensa fija (cuadrada, 20) | 0.0017 → 0.0100 (×6.0) |
+      | Defensa vs. arma fija (80kW/15°/duty=0.01) | 0.9862 → 0.9963 |
 
-      Arma final: `duty_cycle≈0.012` (extremo pulsado), `potencia≈82kW`. Defensa final:
-      `formación=aleatoria`, `cantidad≈52` — ambos coherentes con los dos gradientes reales
+      Arma final: `duty_cycle≈0.014` (extremo pulsado), `potencia≈31kW`. Defensa final:
+      `formación=circular`, `cantidad≈54` — ambos coherentes con los dos gradientes reales
       documentados (pulsado > CW a igual energía; dispersión > formación compacta contra un
       arma de haz angosto). Reproducibilidad exacta con la misma semilla verificada
       (`tests/test_coevolution.py::TestReproducibilidad`). 23 tests nuevos, calibración
       intacta (0.4677/0.1113).
+      *(Números re-medidos 2026-09-13 tras corregir la distribución de polarización del
+      motor principal — ver P1-C más abajo; antes 0.0017→0.0158/×9.3 y 0.9813→0.9956. El
+      hallazgo cualitativo no cambió.)*
 
 ---
 

@@ -22,7 +22,9 @@ import pytest
 from src.config import (
     DRONE_CABLE_LENGTH_MAX_M,
     DRONE_CABLE_LENGTH_MIN_M,
-    DRONE_POLARIZATION_MIN,
+    DRONE_POLARIZATION_ANGLE_MAX_RAD,
+    DRONE_POLARIZATION_ANGLE_MIN_RAD,
+    DRONE_POLARIZATION_MIN_ETA,
 )
 from src.engine.hpm_engine import calculate_neutralization_probability_friis as pf
 from src.engine.targeting import (
@@ -92,7 +94,13 @@ class TestBajasEsperadasEvitaElSesgoDeJensen:
         bajas_mc = bajas_esperadas(opcion, cluster, n_muestras=3000, seed=1)
 
         cable_medio = (DRONE_CABLE_LENGTH_MIN_M + DRONE_CABLE_LENGTH_MAX_M) / 2
-        pol_medio = (DRONE_POLARIZATION_MIN + 1.0) / 2
+        # E[max(cos²φ, piso)] para φ~U[ÁNGULO_MIN, ÁNGULO_MAX] — no tiene una
+        # forma cerrada trivial de escribir a mano (la distribución ya no es
+        # uniforme desde que se corrigió a cos²φ, ver src/config.py), así
+        # que se aproxima por cuadratura numérica directa en vez de arriesgar
+        # una derivación manual.
+        angulos = np.linspace(DRONE_POLARIZATION_ANGLE_MIN_RAD, DRONE_POLARIZATION_ANGLE_MAX_RAD, 200_000)
+        pol_medio = float(np.mean(np.maximum(np.cos(angulos) ** 2, DRONE_POLARIZATION_MIN_ETA)))
         p_del_promedio = pf(
             25.0, 30.0, 15.0, 0.0, cable_length_m=cable_medio, polarization=pol_medio
         )

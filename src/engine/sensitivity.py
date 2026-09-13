@@ -153,9 +153,16 @@ def espacio_parametros_dano() -> list[ParametroSensibilidad]:
         ParametroSensibilidad(
             "coupling_field_efficiency",
             0.5 * config_mod.HPM_COUPLING_FIELD_EFFICIENCY,
-            1.5 * config_mod.HPM_COUPLING_FIELD_EFFICIENCY,
-            "Eficiencia de acoplamiento en campo. PROVISIONAL y no validada "
-            "(P1-C bloqueado): se explora ±50 % del valor ajustado.",
+            config_mod.HPM_COUPLING_FIELD_EFFICIENCY,
+            "Eficiencia de acoplamiento en campo. Default 1.0 (2026-09-13,"
+            " confirmado contra el código del paper: no hay paso de "
+            "acoplamiento adicional en el pipeline real, ver "
+            "HPM_COUPLING_FIELD_EFFICIENCY en config.py). Rango [0.5, 1.0] —"
+            " no [0.5, 1.5] como antes: por encima de 1.0 el parámetro se "
+            "recorta (campo_acoplado_v_m clampea a [0,1]), así que barrer "
+            "por encima sería un tramo degenerado sin variación real. Se "
+            "mantiene en el espacio como control de robustez, no porque siga"
+            " siendo un parámetro libre sin determinar.",
             calibrado=False,
         ),
         ParametroSensibilidad(
@@ -203,12 +210,18 @@ def probabilidad_baja_desde_vector(
     ganancia = antenna_gain_from_dish(d, valores["eficiencia_apertura"], f_ghz)
     apertura = dish_beamwidth_deg(d, f_ghz)
 
-    # Taper por desapunte: cos² sobre densidad de potencia ⇒ cos¹ en amplitud.
+    # Taper por error de apuntado: gaussiano en potencia (G_point =
+    # exp(-2.76·θ_norm²), θ_norm=θ_err/(θ_3dB/2)), confirmado contra el
+    # código fuente real del paper (2026-09-13) — ver
+    # ``src.engine.experiments._factor_taper_haz``, que debe mantenerse
+    # coherente con esto (misma cadena física, dos puntos de entrada).
     semi = apertura / 2.0
     offset = abs(valores["error_apuntado_deg"])
-    taper = 0.0 if (semi <= 0 or offset >= semi) else float(
-        np.cos((offset / semi) * (np.pi / 2.0))
-    )
+    if semi <= 0:
+        taper = 1.0
+    else:
+        theta_norm = offset / semi
+        taper = float(np.sqrt(np.exp(-2.76 * theta_norm**2)))
 
     duty = float(np.clip(duty_cycle, 1e-3, 1.0))
     r = max(float(distancia_m), 1e-6)

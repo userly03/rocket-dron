@@ -105,7 +105,12 @@ class TestReplica:
         cable_res = 299_792_458.0 / (2 * 2.45e9)
         monkeypatch.setattr("src.models.drone.DRONE_CABLE_LENGTH_MIN_M", cable_res)
         monkeypatch.setattr("src.models.drone.DRONE_CABLE_LENGTH_MAX_M", cable_res)
-        monkeypatch.setattr("src.models.drone.DRONE_POLARIZATION_MIN", 1.0)
+        # η_pol = cos²φ = 1 exactamente cuando φ=0 — fijar el rango de
+        # sorteo a un único punto en 0 fuerza acoplamiento óptimo de
+        # polarización en todos los drones, igual que antes con
+        # DRONE_POLARIZATION_MIN=1.0 bajo el modelo viejo (Uniforme plano).
+        monkeypatch.setattr("src.models.drone.DRONE_POLARIZATION_ANGLE_MIN_RAD", 0.0)
+        monkeypatch.setattr("src.models.drone.DRONE_POLARIZATION_ANGLE_MAX_RAD", 0.0)
 
         dist = distance3d(0, 0, 8, 700, 500, 40)
         bearing = target_angle_from_origin(0, 0, 700, 500)
