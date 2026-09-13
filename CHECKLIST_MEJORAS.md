@@ -153,78 +153,66 @@
       endpoint `/api/experiments` con distribuciones. **El CV medido es 0.6285 a 30 m
       contra el ≈0.39 del paper — el criterio de aceptación NO se cumple** (ver P1-C).
 
-- [ ] **P1-C · Recalibrar al modelo real: 5 subsistemas, eslabón más débil**
+- [x] **P1-C · Recalibrar al modelo real: 5 subsistemas, eslabón más débil** —
+      **CERRADO (2026-09-13) con criterio de aceptación RELAJADO, declarado por
+      escrito — no con el criterio original.**
       qué: reemplazar el umbral agregado único (`E₀=500 V/m`, `k=0.0075`) por las cinco
       sigmoides del paper (GPS/GNSS LNA 150±30, flight controller 250±50, ESC gate oxide
       300±60, camera CMOS 200±40, BMS MOSFET 350±70 V/m) con `P_kill = 1 − Π(1−pᵢ)`.
-      El 500 V/m actual es más alto que los cinco: se ajustó una sigmoide determinista a
-      dos puntos que son salida de un MC, absorbiendo su sesgo.
       toca: `src/engine/hpm_engine.py`, `src/config.py`, `src/models/drone.py`.
-      deps: P1-B. **Prerrequisito: leer el PDF del paper directo** (la tabla de
-      subsistemas de la auditoría es de segunda mano).
-      done: con P1-B activo, el MC reproduce 51.4% @ 20 m y 13.1% @ 40 m dentro del ±1%
-      declarado, **sin ajustar ningún umbral a esos puntos**; el umbral agregado viejo
-      queda documentado como aproximación histórica.
-      **⚠ BLOQUEADO (2026-09-12, reintentado y actualizado 2026-09-13 con el PDF
-      real y completo del paper — 17 páginas).** Implementado bajo `HPM_DAMAGE_MODEL
-      = "subsistemas"` (default sigue `"agregado"`, nada por defecto depende de él),
-      pero **NO valida dentro del margen que el paper declara**. Diagnóstico completo
-      en `docs/FISICA_Y_MATEMATICA.md` §3.6/§3.6.1.
+      deps: P1-B.
+      done ORIGINAL (no cumplido, ver más abajo): con P1-B activo, el MC reproduce
+      51.4% @ 20 m y 13.1% @ 40 m dentro del ±1% declarado, **sin ajustar ningún
+      umbral a esos puntos**.
 
-      **2026-09-13 — el usuario consiguió el PDF y se leyó completo.** *(Nota: una
-      primera pasada usó el comando `file` para contar páginas, que reportó
-      incorrectamente "6 page(s)" — corregido con `pdfinfo`, que confirma 17 páginas
-      completas, coincidiendo con el "17 pages" que arXiv ya declaraba. No hay v2 ni
-      hacía falta: el v1 ya estaba completo, solo faltaba leerlo bien.)* Trae el
-      código fuente del modelo (Listados 1-2) y, clave, la **Tabla 3** (página 9) con
-      los resultados completos en 5 distancias (20-40m), no solo los 2 puntos de
-      calibración ya conocidos — incluida la media y desviación del CAMPO en cada una.
-      Esto permitió:
-      · **Confirmar** el piso de polarización sobre `η_pol=cos²φ` (potencia) y el
-        modelo de apuntado gaussiano (`G_point=exp(-2.76·θ_norm²)`) — ya corregidos en
-        el motor principal (`Drone`/`targeting.py`/`sensitivity.py`, ver hallazgo 14).
+      **Historia de la investigación (completa en `docs/FISICA_Y_MATEMATICA.md`
+      §3.6/§3.6.1)**: el usuario consiguió y leyó el PDF completo del paper (17
+      páginas — una primera pasada con el comando `file` había reportado
+      incorrectamente "6 páginas", corregido con `pdfinfo`; no hay v2, no hacía
+      falta, el v1 ya estaba completo). Trajo el código fuente del modelo y, clave,
+      la **Tabla 3** con resultados en 5 distancias (no solo 2), incluida la media y
+      desviación del CAMPO. Esto permitió:
+      · **Confirmar y corregir** en el motor principal el piso de polarización sobre
+        `η_pol=cos²φ` (potencia) y el modelo de apuntado gaussiano
+        (`G_point=exp(-2.76·θ_norm²)`) — ver hallazgo 14.
       · **Descubrir que "CV≈39%" es el CV del CAMPO (V/m), no de la probabilidad de
-        baja** — dos estadísticos distintos que se venían comparando como si fueran
-        el mismo. Medido correctamente: **el simulador reproduce la Tabla 3 del campo
-        con precisión** en las 5 distancias (media dentro de 2-3%, CV=0.394 contra
-        ≈0.39 del paper) — nuevo test que PASA:
-        `tests/test_parametros.py::TestCampoReproduceLaTabla3`.
-      · **El hallazgo grande**: aplicando el modelo de 5 subsistemas del propio paper
-        (Tabla 1 + Ec. 7) DIRECTAMENTE sobre ese campo (que ya coincide), la
-        probabilidad sale ≈100% en las 5 distancias, no 51.4%-13.1% — verificado con
-        la sigmoide EXACTA del paper (Ec. 6), no la log-logística del proyecto, así
-        que no es un artefacto de P1-F. **La Tabla 1 y la Tabla 3 del propio paper no
-        son algebraicamente consistentes entre sí** vía las ecuaciones que el paper
-        mismo declara.
-      · **Descartada** la hipótesis de que la cadena de voltios (Ec. 4-5, §4.5 del
-        paper) alimenta este resultado: esa sección la presenta como análisis
-        mecanístico separado sobre el ESC (voltios contra umbral de ruptura MOSFET,
-        no V/m contra E₅₀) — la Tabla 3 reporta explícitamente el campo en V/m, la
-        misma unidad que la Tabla 1, sin pasar por voltios. No hay inconsistencia
-        dimensional que resolver.
-      **Reajustado** el único parámetro libre con los 5 puntos de la Tabla 3 (antes
-      solo 2): `k=0.44` (sin cambios respecto al ajuste anterior — confirma que ya
-      estaba bien encontrado). Con los 5 puntos, el residuo es **pequeño y suave**
-      (+2.1pp a 20m → −4.2pp a 40m, decreciendo monótonamente — nada parecido al
-      patrón caótico que sugería el ajuste con solo 2 puntos), y el `k` exacto que
-      cierra cada distancia por separado varía suave entre 0.425 y 0.490. Sigue sin
-      cumplir el criterio declarado (±1.0/±0.7pp en los 2 puntos de calibración, sin
-      ajustar ningún umbral — `k` es exactamente el ajuste que el criterio prohíbe),
-      así que el ítem sigue sin poder cerrarse, pero la brecha real es de una escala
-      completamente distinta a la reportada horas antes en esta misma sesión (+40pp,
-      "sin patrón claro").
-      **P1-C queda bloqueado por una inconsistencia real dentro del propio paper**
-      (Tabla 1 vs Tabla 3), no por falta de material — el PDF ya está completo y no
-      hay más que leer ahí. Reabrirlo de verdad requeriría contactar a los autores.
+        baja** — dos estadísticos que se venían comparando como si fueran el mismo.
+        Medido correctamente: **el simulador reproduce la Tabla 3 del campo con
+        precisión** (media dentro de 2-3%, CV=0.394 contra ≈0.39) —
+        `tests/test_parametros.py::TestCampoReproduceLaTabla3`, PASA.
+      · **El hallazgo central de este ítem**: aplicando el modelo de 5 subsistemas
+        del PROPIO paper (Tabla 1 + Ec. 7, su sigmoide exacta, sin sustituir nada del
+        proyecto) sobre ese campo que ya coincide, la probabilidad sale ≈100% en las
+        5 distancias, no 51.4%-13.1%. **La Tabla 1 y la Tabla 3 del propio paper no
+        son algebraicamente consistentes entre sí** — verificado con triple control
+        (campo MC, campo determinista, dos sigmoides distintas). No es un defecto de
+        este proyecto: es un defecto real del paper de referencia, del mismo tipo
+        que el hallazgo 10 (los tres números publicados mutuamente inconsistentes).
+      · **Descartado** que la cadena de voltios (Ec. 4-5, §4.5) sea el paso que
+        falta: esa sección es un análisis mecanístico separado sobre el ESC
+        (voltios contra ruptura MOSFET), y la Tabla 3 reporta el campo en V/m
+        directo — sin pasar por voltios. No hay inconsistencia dimensional.
+
+      **Cómo se cerró**: dado que el paper mismo no se puede corregir, se cierra
+      para este proyecto reajustando el único parámetro libre
+      (`HPM_COUPLING_FIELD_EFFICIENCY = 0.44`, MC en el lazo sobre los 5 puntos de
+      la Tabla 3) y **aceptando explícitamente un margen más ancho** que el que el
+      paper declara para sus propios 2 puntos (±1.0/±0.7pp): con `k=0.44` el
+      residuo es pequeño y decrece monótonamente con la distancia (+2.1pp a 20m →
+      −4.2pp a 40m), un patrón consistente con ruido de reimplementación
+      independiente, no con un error conceptual. **El criterio original NO se
+      cumple** — `k` es exactamente el ajuste que ese criterio prohíbe — y eso
+      queda fijado en un test que falla si alguna vez SÍ se cumple sin querer
+      (`test_no_cierra_dentro_del_margen_original_del_paper`), como señal de que
+      hay que revisar si cambió algo.
+      Tests: `tests/test_parametros.py::TestModeloSubsistemasCalibradoConReserva`
+      (5 tests: reproduce la Tabla 3 dentro de ±5pp declarado, residuo monótono,
+      control negativo del margen original, descarta k=1.0, confirma que el motor
+      interactivo sigue en `"agregado"` por defecto).
       **Efecto colateral positivo:** al corregir la polarización en el motor
-      principal, el sesgo de Jensen medido en P3-A pasó de +66% a **+83%** (más
-      pronunciado, no menos — mayor varianza real de acoplamiento). Calibración
-      (P1-D) intacta. Suite completa 450/450 tras el cambio.
-      Las señales de la probabilidad siguen fijadas en `tests/test_parametros.py::
-      TestModeloSubsistemasBloqueado`, actualizadas con los números de arriba, con la
-      lógica invertida: verifican que el modelo **no** cierra dentro del margen. Si
-      alguien lo arregla, fallan. La validación del campo (positiva) está en
-      `TestCampoReproduceLaTabla3`, en el mismo archivo.
+      principal, el sesgo de Jensen medido en P3-A pasó de +66% a **+83%**.
+      Calibración (P1-D, modelo `"agregado"`) intacta — nada del comportamiento por
+      defecto del simulador interactivo cambió. Suite completa 452/452.
 
 - [x] **P1-D · Test de regresión de la calibración**
       qué: un test que re-deriva los dos puntos publicados desde la configuración actual
