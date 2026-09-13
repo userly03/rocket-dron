@@ -70,6 +70,16 @@
     wtaSummary: document.getElementById("wta-summary"),
     wtaTotal: document.getElementById("wta-total"),
     wtaList: document.getElementById("wta-list"),
+    btnLabSensibilidad: document.getElementById("btn-lab-sensibilidad"),
+    labSensDistancia: document.getElementById("lab-sens-distancia"),
+    labSensResult: document.getElementById("lab-sens-result"),
+    labSensBars: document.getElementById("lab-sens-bars"),
+    labSensAmenazas: document.getElementById("lab-sens-amenazas"),
+    btnLabDosis: document.getElementById("btn-lab-dosis"),
+    labDosisResult: document.getElementById("lab-dosis-result"),
+    btnLabSubsistemas: document.getElementById("btn-lab-subsistemas"),
+    labSubsDistancia: document.getElementById("lab-subs-distancia"),
+    labSubsResult: document.getElementById("lab-subs-result"),
     btnStart: document.getElementById("btn-start"),
     btnStop: document.getElementById("btn-stop"),
     btnReset: document.getElementById("btn-reset"),
@@ -210,6 +220,32 @@
       return `<li class="wta-${g.tipo}">${cuenta}${arma} → cluster ${g.cluster_id} (${g.cluster_tamano} drones), ~${g.bajas_suma.toFixed(2)} bajas esp.</li>`;
     }).join("");
     window.Render3D?.setWtaPlan(plan);
+  }
+
+  // Laboratorio (P2-A/P2-B/P1-C): análisis puramente informativos, ninguno
+  // toca el estado de la simulación en vivo — cada botón llama a un
+  // endpoint de solo lectura y muestra el resultado acá mismo.
+  function labBarRow(label, valor01, noCalibrado, valorTexto) {
+    const pct = Math.max(0, Math.min(100, valor01 * 100));
+    return `<div class="lab-bar-row${noCalibrado ? " no-calibrado" : ""}">
+      <span class="lab-bar-label" title="${label}">${label}</span>
+      <span class="lab-bar-track"><span class="lab-bar-fill" style="width:${pct}%"></span></span>
+      <span class="lab-bar-value">${valorTexto}</span>
+    </div>`;
+  }
+
+  async function runLabButton(btn, fn) {
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "⏳ CALCULANDO...";
+    try {
+      await fn();
+    } catch (e) {
+      addLog(`Laboratorio: ${e.message}`, "error");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
   }
 
   function clearWtaPlan() {
@@ -588,6 +624,52 @@
       clearWtaPlan();
       ui.btnWtaExecute.disabled = false;
     });
+
+    ui.btnLabSensibilidad.addEventListener("click", () => runLabButton(ui.btnLabSensibilidad, async () => {
+      const distancia = +ui.labSensDistancia.value || 30;
+      const d = await api(`/api/sensibilidad?distancia_m=${distancia}&n_base=128&r_morris=15`);
+      const params = [...d.sobol.parametros].sort((a, b) => b.st - a.st).slice(0, 8);
+      ui.labSensBars.innerHTML = params.map((p) =>
+        labBarRow(p.nombre, p.st, !p.calibrado, `S_T=${p.st.toFixed(3)}`)
+      ).join("");
+      const amenazas = d.amenazas_a_la_validez || [];
+      ui.labSensAmenazas.innerHTML = amenazas.length
+        ? `⚠ Domina la incertidumbre y NO está calibrado contra el paper: ` +
+          amenazas.map((a) => `<strong>${a.nombre}</strong> (S_T=${a.st.toFixed(3)})`).join(", ")
+        : "✅ Ningún parámetro no calibrado domina la varianza a esta distancia.";
+      ui.labSensResult.classList.remove("hidden");
+      addLog(`Sensibilidad @ ${distancia}m: dominan ${d.dominantes.slice(0, 3).join(", ")}`, "info");
+    }));
+
+    ui.btnLabDosis.addEventListener("click", () => runLabButton(ui.btnLabDosis, async () => {
+      const d = await api("/api/dosis-respuesta?n_por_distancia=150&n_bootstrap=500");
+      const a = d.ajuste, c = d.comparacion;
+      const badge = c.recupera_la_calibracion
+        ? '<span class="lab-badge-ok">✅ recupera la calibración</span>'
+        : '<span class="lab-badge-bad">⚠ NO recupera la calibración</span>';
+      ui.labDosisResult.innerHTML = `
+        <div>Función de enlace: <strong>${a.link_function}</strong></div>
+        <div>E₅₀ ajustado: <strong>${a.e50_v_m.toFixed(1)} V/m</strong> (IC95%: ${a.ic95_e50_v_m[0].toFixed(1)}–${a.ic95_e50_v_m[1].toFixed(1)}) — configurado: ${c.e50_configurado.toFixed(1)}</div>
+        <div>Parámetro de forma: <strong>${a.parametro_forma.toFixed(3)}</strong> (IC95%: ${a.ic95_parametro_forma[0].toFixed(3)}–${a.ic95_parametro_forma[1].toFixed(3)}) — configurado: ${c.parametro_forma_configurado.toFixed(3)}</div>
+        <div style="margin-top:6px">${badge}</div>
+      `;
+      ui.labDosisResult.classList.remove("hidden");
+      addLog(`Dosis-respuesta: ${c.recupera_la_calibracion ? "recupera" : "NO recupera"} la calibración configurada`, "info");
+    }));
+
+    ui.btnLabSubsistemas.addEventListener("click", () => runLabButton(ui.btnLabSubsistemas, async () => {
+      const distancia = +ui.labSubsDistancia.value || 30;
+      const d = await api(`/api/subsistemas?distancia_m=${distancia}`);
+      const filas = d.subsistemas.map((s) =>
+        labBarRow(`${s.nombre} (E₅₀=${s.e50_v_m}V/m)`, s.probabilidad, false, `${(s.probabilidad * 100).toFixed(1)}%`)
+      ).join("");
+      ui.labSubsResult.innerHTML = `
+        <div style="margin-bottom:6px">Campo a ${distancia}m: <strong>${d.campo_v_m} V/m</strong> — probabilidad de sistema (OR-gate): <strong>${(d.probabilidad_sistema_or_gate * 100).toFixed(1)}%</strong></div>
+        ${filas}
+      `;
+      ui.labSubsResult.classList.remove("hidden");
+      addLog(`Desglose @ ${distancia}m: subsistema más vulnerable ${d.subsistemas[0].nombre} (${(d.subsistemas[0].probabilidad * 100).toFixed(1)}%)`, "info");
+    }));
 
     ui.btnJamStart.addEventListener("click", async () => {
       try {

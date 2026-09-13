@@ -124,6 +124,41 @@
               </div>
             </div>
           </details>
+          <details class="collapsible" id="lab-panel">
+            <summary class="panel-title">🧪 Laboratorio <span class="collapsible-hint">análisis, no cambia la simulación en vivo</span></summary>
+
+            <div class="lab-block">
+              <h3>Sensibilidad global (Morris + Sobol)</h3>
+              <p class="wta-hint">Qué parámetro domina la incertidumbre del modelo de daño a una distancia dada — y si ese parámetro está calibrado contra el paper o no.</p>
+              <div class="lab-controls">
+                <label>Distancia <input type="number" id="lab-sens-distancia" value="30" min="1" max="2000" step="1"> m</label>
+                <button type="button" id="btn-lab-sensibilidad" class="btn btn-reset">📊 CALCULAR SENSIBILIDAD</button>
+              </div>
+              <div id="lab-sens-result" class="lab-result hidden">
+                <div id="lab-sens-bars" class="lab-bars"></div>
+                <div id="lab-sens-amenazas" class="lab-amenazas"></div>
+              </div>
+            </div>
+
+            <div class="lab-block">
+              <h3>Curva dosis-respuesta (P2-B)</h3>
+              <p class="wta-hint">Ajusta por máxima verosimilitud la curva que el motor REAL produce (con blindaje, duty cycle, huella de susceptibilidad) y la compara contra los parámetros configurados.</p>
+              <div class="lab-controls">
+                <button type="button" id="btn-lab-dosis" class="btn btn-reset">📈 AJUSTAR CURVA</button>
+              </div>
+              <div id="lab-dosis-result" class="lab-result hidden"></div>
+            </div>
+
+            <div class="lab-block">
+              <h3>Modelo de 5 subsistemas (P1-C)</h3>
+              <p class="wta-hint">A este campo, ¿qué subsistema falla primero? Usa la Tabla 1 del paper — informativo, el motor en vivo sigue con el modelo agregado.</p>
+              <div class="lab-controls">
+                <label>Distancia <input type="number" id="lab-subs-distancia" value="30" min="1" max="2000" step="1"> m</label>
+                <button type="button" id="btn-lab-subsistemas" class="btn btn-reset">🔬 CALCULAR DESGLOSE</button>
+              </div>
+              <div id="lab-subs-result" class="lab-result hidden"></div>
+            </div>
+          </details>
         </section>
       </div>
 

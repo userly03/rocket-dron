@@ -416,6 +416,51 @@ def get_dosis_respuesta(
     )
 
 
+@router.get("/subsistemas")
+def get_desglose_subsistemas(
+    distancia_m: float = 30.0,
+    potencia_kw: float = 25.0,
+    apertura_cono: float = 15.0,
+    duty_cycle: float = 1.0,
+) -> dict:
+    """
+    Desglose de probabilidad de daño POR SUBSISTEMA (Tabla 1 del paper,
+    P1-C) al campo que resulta de disparar con estos parámetros a
+    ``distancia_m``, en el eje (offset angular cero) — misma cadena Friis
+    que usa el motor interactivo (``HPM_MODEL="friis"``), no la del
+    pipeline de reproducción del paper (P1-B/P1-C, que usa un modelo de
+    ganancia de plato distinto).
+
+    Puramente informativo: NO cambia ``HPM_DAMAGE_MODEL`` del motor
+    interactivo, que sigue decidiendo bajas con el modelo agregado por
+    defecto. Sirve para responder "a esta distancia, ¿qué subsistema
+    fallaría primero?" sin tocar el estado de la simulación en vivo.
+    """
+    if not (0.1 <= distancia_m <= 5000.0):
+        raise HTTPException(status_code=400, detail="distancia_m fuera de rango")
+    if not (0.1 <= potencia_kw <= 10_000.0):
+        raise HTTPException(status_code=400, detail="potencia_kw fuera de rango")
+    if not (1.0 <= apertura_cono <= 360.0):
+        raise HTTPException(status_code=400, detail="apertura_cono fuera de rango")
+    if not (0.001 <= duty_cycle <= 1.0):
+        raise HTTPException(status_code=400, detail="duty_cycle fuera de rango")
+
+    from src.engine.hpm_engine import desglose_por_subsistema, friis_diagnostics, probabilidad_dano_sistema
+
+    diag = friis_diagnostics(potencia_kw, distancia_m, apertura_cono, 0.0, duty_cycle)
+    campo = diag["campo_e_efectivo_v_m"]
+    return {
+        "distancia_m": distancia_m,
+        "campo_v_m": round(campo, 2),
+        "subsistemas": [
+            {**fila, "e50_v_m": round(fila["e50_v_m"], 1), "sigma_e_v_m": round(fila["sigma_e_v_m"], 1),
+             "probabilidad": round(fila["probabilidad"], 4)}
+            for fila in desglose_por_subsistema(campo)
+        ],
+        "probabilidad_sistema_or_gate": round(probabilidad_dano_sistema(campo), 4),
+    }
+
+
 @router.get("/targeting/plan")
 def get_targeting_plan(
     sim: SimulationDep,

@@ -648,6 +648,102 @@ body.view-spectrum .chart-box-spectrum { display: block !important; }
 #metric-munition.munition-low { color: var(--accent-yellow); }
 #metric-munition.munition-empty { color: var(--accent-red); }
 
+.lab-block {
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.lab-block:last-child { border-bottom: none; margin-bottom: 0; }
+
+.lab-block h3 {
+  font-size: 0.78rem;
+  color: var(--accent-green);
+  margin: 0 0 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.lab-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+}
+
+.lab-controls label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lab-controls input[type="number"] {
+  width: 70px;
+  background: var(--bg-panel-alt);
+  border: 1px solid var(--border-color);
+  color: var(--text-bright);
+  font-family: var(--font-mono);
+  padding: 3px 6px;
+  border-radius: var(--panel-radius);
+}
+
+.lab-result {
+  font-size: 0.75rem;
+  color: var(--text-primary);
+}
+
+.lab-bar-row {
+  display: grid;
+  grid-template-columns: 170px 1fr 60px;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+}
+
+.lab-bar-row .lab-bar-label {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lab-bar-row.no-calibrado .lab-bar-label { color: var(--accent-yellow); }
+
+.lab-bar-track {
+  background: var(--bg-panel-alt);
+  border-radius: 2px;
+  height: 10px;
+  overflow: hidden;
+}
+
+.lab-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent-green);
+}
+
+.lab-bar-row.no-calibrado .lab-bar-fill { background: var(--accent-yellow); }
+
+.lab-bar-value {
+  font-size: 0.68rem;
+  text-align: right;
+  color: var(--text-bright);
+}
+
+.lab-amenazas {
+  margin-top: 8px;
+  font-size: 0.68rem;
+  color: var(--accent-yellow);
+  line-height: 1.5;
+}
+
+.lab-badge-ok { color: var(--accent-green); font-weight: bold; }
+.lab-badge-bad { color: var(--accent-red); font-weight: bold; }
+
 .wta-hint {
   font-size: 0.68rem;
   color: var(--text-muted);

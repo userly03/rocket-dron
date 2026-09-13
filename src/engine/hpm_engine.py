@@ -780,6 +780,34 @@ def probabilidad_dano_sistema(
     return float(np.clip(1.0 - supervivencia, 0.0, 1.0))
 
 
+def desglose_por_subsistema(
+    campo_v_m: float,
+    subsistemas: dict[str, tuple[float, float]] | None = None,
+    link: str | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Probabilidad de daño de CADA subsistema por separado a un campo dado,
+    más su probabilidad de sistema (OR-gate, ecuación 7) — para mostrar en
+    el frontend (panel "Laboratorio") cuál subsistema domina a qué campo,
+    en vez de solo el número agregado de ``probabilidad_dano_sistema``.
+
+    Ordenado de más a menos vulnerable (E₅₀ ascendente) — el orden en que
+    fallarían si el campo subiera gradualmente.
+    """
+    tabla = HPM_SUBSISTEMAS if subsistemas is None else subsistemas
+    filas = [
+        {
+            "nombre": nombre,
+            "e50_v_m": e50,
+            "sigma_e_v_m": sigma_e,
+            "probabilidad": probabilidad_dano_subsistema(campo_v_m, e50, sigma_e, link),
+        }
+        for nombre, (e50, sigma_e) in tabla.items()
+    ]
+    filas.sort(key=lambda f: f["e50_v_m"])
+    return filas
+
+
 def campo_acoplado_v_m(
     campo_incidente_v_m: float,
     eficiencia_campo: float = HPM_COUPLING_FIELD_EFFICIENCY,

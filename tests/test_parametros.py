@@ -457,3 +457,69 @@ class TestModeloSubsistemasCalibradoConReserva:
         simulador en vivo, solo habilita "subsistemas" como opt-in
         calibrado (HPM_DAMAGE_MODEL="subsistemas")."""
         assert cfg.HPM_DAMAGE_MODEL == "agregado"
+
+
+class TestDesgloseSubsistemas:
+    """desglose_por_subsistema() — la pieza nueva del panel "Laboratorio"
+    del frontend: qué subsistema falla primero a un campo dado."""
+
+    def test_ordenado_de_mas_a_menos_vulnerable(self):
+        from src.engine.hpm_engine import desglose_por_subsistema
+
+        filas = desglose_por_subsistema(300.0)
+        e50s = [f["e50_v_m"] for f in filas]
+        assert e50s == sorted(e50s)
+        assert filas[0]["nombre"] == "gps_gnss_lna"  # el E50 más bajo de la Tabla 1
+
+    def test_a_e50_de_un_subsistema_su_propia_probabilidad_es_50_por_ciento(self):
+        from src.engine.hpm_engine import desglose_por_subsistema
+
+        filas = desglose_por_subsistema(cfg.HPM_SUBSISTEMAS["esc_gate_oxide"][0])
+        fila_esc = next(f for f in filas if f["nombre"] == "esc_gate_oxide")
+        assert fila_esc["probabilidad"] == pytest.approx(0.5, abs=1e-6)
+
+    def test_probabilidad_de_sistema_es_al_menos_la_del_mas_vulnerable(self):
+        from src.engine.hpm_engine import desglose_por_subsistema, probabilidad_dano_sistema
+
+        campo = 220.0
+        filas = desglose_por_subsistema(campo)
+        p_sistema = probabilidad_dano_sistema(campo)
+        assert p_sistema >= max(f["probabilidad"] for f in filas)
+
+
+class TestEndpointSubsistemas:
+    def test_responde_con_las_claves_esperadas(self):
+        from fastapi.testclient import TestClient
+
+        from src.main import app
+
+        with TestClient(app) as client:
+            resp = client.get("/api/subsistemas", params={"distancia_m": 30.0})
+            assert resp.status_code == 200
+            d = resp.json()
+            assert set(d.keys()) == {
+                "distancia_m", "campo_v_m", "subsistemas", "probabilidad_sistema_or_gate",
+            }
+            assert len(d["subsistemas"]) == 5
+            for fila in d["subsistemas"]:
+                assert 0.0 <= fila["probabilidad"] <= 1.0
+
+    def test_rechaza_parametros_fuera_de_rango(self):
+        from fastapi.testclient import TestClient
+
+        from src.main import app
+
+        with TestClient(app) as client:
+            assert client.get("/api/subsistemas", params={"distancia_m": -1}).status_code == 400
+            assert client.get("/api/subsistemas", params={"apertura_cono": 0}).status_code == 400
+            assert client.get("/api/subsistemas", params={"duty_cycle": 0}).status_code == 400
+
+    def test_no_toca_el_modelo_de_dano_del_motor_interactivo(self):
+        """Puramente informativo: llamar el endpoint no cambia HPM_DAMAGE_MODEL."""
+        from fastapi.testclient import TestClient
+
+        from src.main import app
+
+        with TestClient(app) as client:
+            client.get("/api/subsistemas", params={"distancia_m": 20.0})
+        assert cfg.HPM_DAMAGE_MODEL == "agregado"
