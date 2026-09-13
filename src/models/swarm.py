@@ -245,7 +245,18 @@ class Swarm:
             ]
             nuevos_angulos = compute_headings(con_flocking, dt, self.centro_x, self.centro_y)
             for drone in con_flocking:
-                if drone.estado_enlace == EstadoEnlace.OK:
+                # P2-D, Parte 3 — comportamiento degradado: un upset del
+                # flight controller (autopiloto) significa que el dron
+                # momentáneamente NO puede procesar comandos de flocking
+                # nuevos (brownout/desincronización), aunque su enlace de
+                # radio siga OK — causa física distinta al enlace perdido
+                # (esa es interferencia externa; esta es un glitch interno),
+                # pero mismo efecto observable: el rumbo queda congelado en
+                # el último valor hasta que el riesgo decae o madura.
+                if (
+                    drone.estado_enlace == EstadoEnlace.OK
+                    and drone.subsistema_en_riesgo != "flight_controller"
+                ):
                     drone.angulo = nuevos_angulos[drone.id]
 
         for drone in self.drones:
@@ -288,6 +299,29 @@ class Swarm:
         for drone in self.drones:
             drone.actualizar_amenaza(dt)
 
+    def actualizar_riesgos_latentes(self, dt: float) -> list[dict]:
+        """
+        Decae el riesgo latente de todos los drones un paso ``dt`` (P2-D,
+        Parte 3) y recoge las neutralizaciones DIFERIDAS que maduraron este
+        tick — ver ``Drone.actualizar_riesgo_latente``. Se llama desde
+        ``SimulationEngine._tick``, mismo patrón que ``actualizar_amenazas``.
+
+        Returns:
+            Lista de ``{"drone_id", "shot_id", "distancia_m"}`` por cada
+            dron recién neutralizado por fallo latente — vacía la mayoría
+            de los ticks. ``SimulationEngine`` la usa para atribuir la baja
+            al disparo/detonación original en ``analytics``.
+        """
+        eventos: list[dict] = []
+        for drone in self.drones:
+            shot_id = drone.origen_riesgo_shot_id
+            distancia = drone.origen_riesgo_distancia_m
+            if drone.actualizar_riesgo_latente(dt):
+                eventos.append(
+                    {"drone_id": drone.id, "shot_id": shot_id, "distancia_m": distancia}
+                )
+        return eventos
+
     def drones_activos(self) -> list[Drone]:
         return [d for d in self.drones if d.estado == DroneEstado.ACTIVO]
 
@@ -296,3 +330,33 @@ class Swarm:
         for drone in self.drones:
             conteo[drone.estado.value] += 1
         return conteo
+
+    def contar_upset_damage(self) -> dict:
+        """
+        Fracción de drones en cada categoría del modelo upset/damage (P2-D):
+        ``en_riesgo`` (upset activo, ``riesgo_latente_por_s > 0`` — todavía
+        recuperable), ``danados_permanente`` (neutralizados por daño
+        inmediato o por fallo latente que maduró — indistinguibles desde
+        acá, ambos son EstadoSalud.NEUTRALIZADO) e ``intactos`` (el resto).
+        Expuesto en el panel físico — ver ``PhysicsAnalytics.get_physics_panel``.
+        """
+        total = len(self.drones)
+        en_riesgo = sum(1 for d in self.drones if d.riesgo_latente_por_s > 0.0)
+        neutralizados = sum(
+            1 for d in self.drones if d.estado_salud == EstadoSalud.NEUTRALIZADO
+        )
+        por_subsistema: dict[str, int] = {}
+        for d in self.drones:
+            if d.subsistema_en_riesgo:
+                por_subsistema[d.subsistema_en_riesgo] = (
+                    por_subsistema.get(d.subsistema_en_riesgo, 0) + 1
+                )
+        return {
+            "total": total,
+            "en_riesgo_upset": en_riesgo,
+            "danados_permanente": neutralizados,
+            "intactos": max(0, total - en_riesgo - neutralizados),
+            "fraccion_en_riesgo": round(en_riesgo / total, 4) if total else 0.0,
+            "fraccion_danados_permanente": round(neutralizados / total, 4) if total else 0.0,
+            "por_subsistema_en_riesgo": por_subsistema,
+        }

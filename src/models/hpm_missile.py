@@ -11,8 +11,11 @@ from numpy.random import Generator
 from src.config import (
     HPM_DUTY_CYCLE,
     HPM_K_CONSTANT,
+    HPM_MISSILE_LOGLOGISTIC_B,
+    HPM_MISSILE_LOGLOGISTIC_E50_V_M,
     HPM_MODEL,
     MISSILE_CRUISE_ALTITUDE_M,
+    MISSILE_DETONACION_DURACION_S,
     MISSILE_DETONATION_DISTANCE,
     MISSILE_LAUNCH_ALTITUDE_M,
     MISSILE_MAX_TURN_RATE_DEG_S,
@@ -23,10 +26,12 @@ from src.engine.hpm_engine import (
     apply_hardening_odds,
     calculate_area_neutralization_probability,
     calculate_area_neutralization_probability_friis,
+    e50_upset_desde_damage,
+    energia_absorbida_j,
     target_angle_from_origin,
 )
 from src.engine.physics import update_position
-from src.models.drone import Drone, DroneEstado
+from src.models.drone import Drone, DroneEstado, EstadoSalud
 from src.utils.helpers import angle_difference, distance, distance3d
 from src.utils.reproducibilidad import rng as global_rng
 
@@ -253,25 +258,42 @@ class HPMissile:
         max_delta = _ALTITUDE_RATE_M_S * dt
         self.z += float(np.clip(z_deseado - self.z, -max_delta, max_delta))
 
-    def calcular_daño(self, dron: Drone, distancia: float) -> float:
+    def calcular_daño(
+        self,
+        dron: Drone,
+        distancia: float,
+        e50: float | None = None,
+        b: float | None = None,
+    ) -> float:
         """
         Probabilidad de neutralización por efecto HPM de área (modelo CHAMP).
 
         Modelo "friis" (por defecto): física real vía densidad de potencia
         y campo E (ver ``calculate_area_neutralization_probability_friis``).
         Modelo "legacy": exponencial ad-hoc original — P = 1 - exp(-k·P/d²).
+
+        ``e50``/``b`` (P2-D): permiten pedir la probabilidad con un umbral
+        DISTINTO al de daño calibrado — usado por ``detonar`` para calcular
+        también ``p_upset`` con el mismo campo pero un umbral más bajo (ver
+        ``e50_upset_desde_damage``). ``None`` (default) usa los umbrales
+        calibrados del misil, comportamiento idéntico al de antes de P2-D.
         """
         if distancia > self.radio_efecto:
             return 0.0
 
         if HPM_MODEL == "friis":
-            probabilidad = calculate_area_neutralization_probability_friis(
+            kwargs = dict(
                 potencia_kw=self.potencia_hpm,
                 distancia=distancia,
                 duty_cycle=self.duty_cycle,
                 cable_length_m=dron.cable_length_m,
                 polarization=dron.polarization,
             )
+            if e50 is not None:
+                kwargs["e50"] = e50
+            if b is not None:
+                kwargs["b"] = b
+            probabilidad = calculate_area_neutralization_probability_friis(**kwargs)
             # Blindaje: reducción proporcional en espacio de momios (ver
             # apply_hardening_odds) — NO desplazar el umbral E, eso colapsaba
             # la probabilidad de los drones blindados a ~0 en casi todo el
@@ -308,13 +330,59 @@ class HPMissile:
 
             probabilidad = self.calcular_daño(drone, dist)
             neutralizado = False
+            entro_en_riesgo = False
 
-            if float(self._rng().random()) < probabilidad:
+            # P2-D, Parte 2: energía absorbida en unidades reales (solo modelo
+            # "friis" — ver el razonamiento en Drone.recibir_daño sobre por
+            # qué el modelo "legacy" ad-hoc conserva su aritmética original).
+            # Apertura 360°/offset 0: el misil es un radiador de área, sin
+            # cono direccional (ver calcular_daño / friis_diagnostics).
+            if HPM_MODEL == "friis":
+                drone.energia_absorbida_j += energia_absorbida_j(
+                    potencia_kw=self.potencia_hpm,
+                    distancia=dist,
+                    apertura_cono=360.0,
+                    angulo_offset=0.0,
+                    duty_cycle=self.duty_cycle,
+                    cable_length_m=drone.cable_length_m,
+                    duracion_exposicion_s=MISSILE_DETONACION_DURACION_S,
+                )
+
+            # Umbral de UPSET (P2-D, Parte 3): mismo campo, umbral del misil
+            # más bajo. Ver Drone.recibir_daño para el razonamiento completo
+            # — acá el misil es un objeto EXTERNO al dron, así que no puede
+            # reutilizar la lógica interna de recibir_daño; usa el método
+            # público compartido ``entrar_en_riesgo_latente``.
+            p_upset = probabilidad
+            if HPM_MODEL == "friis":
+                p_upset = self.calcular_daño(
+                    drone, dist,
+                    e50=e50_upset_desde_damage(HPM_MISSILE_LOGLOGISTIC_E50_V_M),
+                    b=HPM_MISSILE_LOGLOGISTIC_B,
+                )
+
+            tenia_riesgo_sin_atribuir_antes = (
+                drone.riesgo_latente_por_s > 0.0 and drone.origen_riesgo_shot_id is None
+            )
+
+            u = float(self._rng().random())
+
+            if u < probabilidad:
                 drone.estado = DroneEstado.NEUTRALIZADO
                 drone.salud = 0.0
                 drone.velocidad = 0.0
+                drone.riesgo_latente_por_s = 0.0
+                drone.subsistema_en_riesgo = None
                 neutralizado = True
-            elif probabilidad > 0:
+            elif HPM_MODEL == "friis" and u < p_upset:
+                ancho_zona = max(p_upset - probabilidad, 1e-12)
+                severidad = (p_upset - u) / ancho_zona
+                drone.entrar_en_riesgo_latente(severidad, dist)
+                entro_en_riesgo = not tenia_riesgo_sin_atribuir_antes
+            elif HPM_MODEL != "friis" and probabilidad > 0:
+                # Modelo "legacy": misma aritmética ad-hoc de siempre, sin
+                # zona de upset (ver Drone.recibir_daño para el razonamiento
+                # de por qué no se toca el camino ad-hoc).
                 dano = probabilidad * self.potencia_hpm * 0.5
                 drone.salud = max(0.0, drone.salud - dano)
                 if drone.salud < 50:
@@ -337,6 +405,10 @@ class HPMissile:
                     "estado": drone.estado.value,
                     "salud": round(drone.salud, 2),
                     "tipo": "soft_kill",
+                    # P2-D: upset/damage — ver hpm_weapon.py para el mismo patrón.
+                    "entro_en_riesgo": entro_en_riesgo,
+                    "riesgo_latente_por_s": round(drone.riesgo_latente_por_s, 6),
+                    "subsistema_en_riesgo": drone.subsistema_en_riesgo,
                 }
             )
 

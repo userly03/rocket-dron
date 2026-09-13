@@ -615,6 +615,84 @@ DRONE_LOST_LINK_DESCENT_RATE_M_S: float = float(
     os.getenv("DRONE_LOST_LINK_DESCENT_RATE_M_S", "2.0")
 )
 
+# --- Upset vs damage + fallo latente (P2-D) ---
+# Reemplaza la premisa cortada de P3-09 (thermal runaway de batería, que
+# fallaba el presupuesto energético por ~10⁹: 10-20 kJ para llevar una celda
+# 18650 a runaway contra microjulios acoplados por un pulso de 100 ns — ver
+# docs/AUDITORIA_CHECKLIST.md §3.6). Se conserva la maquinaria valiosa de ese
+# ítem (decaimiento por tick + atribución diferida de bajas al disparo
+# original) con el mecanismo físico correcto: la literatura de vulnerabilidad
+# EMI separa UPSET (perturbación RECUPERABLE — reset de brownout,
+# desincronización de ESC, deriva de IMU, pérdida momentánea de fix GPS) de
+# DAMAGE (falla PERMANENTE — ruptura de óxido de puerta, latchup destructivo).
+# Una sola sigmoide a "neutralizado" no puede expresar el caso operativamente
+# decisivo: un enjambre que se desordena y SE RECUPERA.
+#
+# DECISIÓN DE MODELADO (categoría 3, NO dato de ningún paper — a diferencia
+# de HPM_SUBSISTEMAS, que sí son los umbrales publicados de daño permanente):
+# el umbral de UPSET se deriva del umbral de DAÑO ya calibrado
+# (HPM_LOGLOGISTIC_E50_V_M / HPM_MISSILE_LOGLOGISTIC_E50_V_M) escalado por una
+# brecha en dB de campo. Se evita depender de P1-C (bloqueado, ver
+# docs/FISICA_Y_MATEMATICA.md §3.6): usar los umbrales absolutos de la Tabla 1
+# del paper mezclaría un modelo NO validado con la contabilidad de upset. La
+# convención general en literatura de vulnerabilidad EMI/IEMI para
+# electrónica digital sitúa los umbrales de upset recuperable entre 10 y
+# 20 dB por debajo del umbral de daño permanente, en campo. Se toma el
+# extremo CONSERVADOR de ese rango (10 dB — el upset "cuesta" relativamente
+# poco campo), que en amplitud de campo es un factor 10^(10/20) ≈ 3.162:
+#     E50_upset = E50_damage / 3.162
+# Mismo exponente de forma ``b`` que el umbral de daño: no se inventa una
+# segunda curva, se desplaza la ya calibrada.
+HPM_UPSET_DB_GAP_FIELD: float = float(os.getenv("HPM_UPSET_DB_GAP_FIELD", "10.0"))
+
+# Duración de exposición para CONTABILIDAD DE ENERGÍA ABSORBIDA (Parte 2 —
+# NO la probabilidad de daño, que ya usa el campo INSTANTÁNEO vía duty
+# cycle/Wunsch-Bell). Mismo razonamiento que motivó HPM_DISPARO_DURACION_S en
+# P2-F para el presupuesto del ARMA: la energía de un pulso aislado
+# (potencia · HPM_PULSE_DURATION_NS) da microjulios, irrelevante para
+# cualquier contabilidad acumulativa — lo que importa es la ráfaga completa.
+# El cañón reutiliza HPM_DISPARO_DURACION_S (mismo evento físico, la ráfaga
+# de tierra). El misil tiene su propia duración, mucho más corta: una
+# detonación es un evento único, no una ráfaga sostenida — el tren de pulsos
+# de un misil tipo CHAMP dura del orden de decenas de milisegundos, no medio
+# segundo.
+MISSILE_DETONACION_DURACION_S: float = float(
+    os.getenv("MISSILE_DETONACION_DURACION_S", "0.05")
+)
+
+# Hazard rate MÁXIMO inicial (1/s) al entrar en "riesgo latente" — el caso de
+# una exposición en la zona de upset, más cerca del umbral de daño que del de
+# upset (severidad→1 en la escala [0,1] de esa zona, ver
+# Drone.recibir_daño).
+#
+# DERIVACIÓN (no un número elegido a ojo): con un hazard rate que decae
+# exponencialmente con constante de tiempo τ (``DRONE_RIESGO_LATENTE_
+# DECAY_TAU_S`` abajo), la probabilidad de que el riesgo madure en una
+# neutralización ALGUNA VEZ (integrando la exposición completa, no un solo
+# tick) es:
+#     P(falla eventual) = 1 - exp(-h₀·τ)
+# donde h₀ es el hazard inicial. Se fija el peor caso posible (severidad=1,
+# la exposición justo por debajo del umbral de daño) en un lanzamiento de
+# moneda: P(falla eventual) = 0.5 ⟹ h₀·τ = ln(2) ⟹ h₀ = ln(2)/τ.
+# Con τ=4s: h₀ ≈ 0.1733/s. Consecuencia: en el PEOR caso de upset, la mitad
+# de los drones se recupera y la mitad no — y para el resto de la zona
+# (severidad<1) las chances de recuperarse son mayores. Verificado por
+# simulación (no solo por la fórmula cerrada): a severidad=0.6 sobre 2000
+# repeticiones, ~19-20% de fallo eventual, consistente con
+# 1-exp(-0.6·0.1733·4).
+DRONE_RIESGO_LATENTE_MAX_POR_S: float = float(
+    os.getenv("DRONE_RIESGO_LATENTE_MAX_POR_S", "0.1733")
+)
+
+# Constante de tiempo de decaimiento del riesgo latente (s). Deliberadamente
+# CORTA frente a THREAT_MEMORY_DECAY_TAU_S (memoria táctica del enjambre,
+# P2-E): un upset electrónico real (brownout, desincronización) se resuelve
+# en segundos si el subsistema no llegó a fallar del todo, no en la escala de
+# tiempo de una maniobra de enjambre.
+DRONE_RIESGO_LATENTE_DECAY_TAU_S: float = float(
+    os.getenv("DRONE_RIESGO_LATENTE_DECAY_TAU_S", "4.0")
+)
+
 # --- Logging de validación en terminal ---
 SIM_LOG_LEVEL: str = os.getenv("SIM_LOG_LEVEL", "INFO")
 

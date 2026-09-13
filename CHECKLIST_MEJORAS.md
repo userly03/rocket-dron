@@ -431,7 +431,7 @@
       altura del emisor o la amplitud de oscilación — porque entonces la conclusión
       cambia.
 
-- [ ] **P2-D · ⭐ Upset vs damage + fallo latente**
+- [x] **P2-D · ⭐ Upset vs damage + fallo latente**
       *(reemplaza la premisa de P3-09; conserva su maquinaria)*
       qué: dos umbrales por subsistema (*upset* recuperable / *damage* permanente) y tasa
       de riesgo para fallo diferido. Reemplaza `dano = probabilidad*potencia*0.5`
@@ -446,6 +446,35 @@
       done: con reloj controlado, un dron con upset recupera y uno con damage no; una baja
       diferida queda atribuida al disparo original en la curva de efectividad; la fracción
       upset/damage aparece en el panel.
+      **CERRADO (2026-09-12).** `Drone.entrar_en_riesgo_latente` (punto de entrada
+      compartido cañón/misil), `Swarm.actualizar_riesgos_latentes`,
+      `analytics.record_delayed_kill` + `_upgrade_hit`, `Swarm.contar_upset_damage`. 38
+      tests nuevos en `tests/test_upset_damage.py`.
+      **Umbral de upset derivado del de daño YA CALIBRADO** (`E₅₀,upset = E₅₀,damage /
+      10^(10dB/20) ≈ 154.13 V/m`), no de la Tabla 1 de P1-C —bloqueada— para no propagarle
+      su falta de validación a un mecanismo nuevo. Zona `[P_damage, P_upset)` con ancho
+      apreciable en todo el rango de combate (0.47-0.66 de ancho entre 20 y 60 m).
+      **Energía absorbida con unidades reales** (`S_promedio·A_efectiva·duración`, en
+      julios) reemplaza `probabilidad·potencia·0.5`. `A_efectiva = cable_length_m²`: no
+      introduce parámetro libre nuevo, reutiliza la huella de susceptibilidad ya sorteada.
+      Verificado: escala exactamente ×4 al duplicar el cable, ×2 al duplicar la duración.
+      🔴 **Encontré y corregí mi propio error de diseño antes de cerrar el ítem:** el
+      primer valor del hazard rate (`2.0/s`) parecía razonable mirado un tick, pero
+      integrado sobre la cola de decaimiento (`P(falla eventual)=1-exp(-h₀·τ)`) daba
+      **99.3% de muerte eventual** medido por simulación — contradecía el propio propósito
+      del ítem ("se desordena y se recupera"). Corregido derivando `h₀=ln(2)/τ≈0.1733/s`:
+      fija el PEOR caso de la zona de upset en un lanzamiento de moneda (50%), verificado
+      contra la fórmula cerrada con 1500 repeticiones/severidad (±0.05 de tolerancia).
+      **Comportamiento degradado real, no solo diagnóstico:** `flight_controller` en
+      upset congela el rumbo (verificado contra un vecino control que sí gira);
+      `gps_gnss_lna` en upset degrada RTH a "mantener rumbo" (verificado contra el mismo
+      escenario sin el upset, que sí gira hacia home).
+      **Atribución diferida verificada de punta a punta, sin forzar nada más que la
+      maduración**: un disparo real a 30 m mete un dron en upset orgánicamente, el
+      `shot_id` se atribuye correctamente, y tras 60 s el dron muere por fallo latente
+      con `shot_history` mostrando `neutralizados: 1, bajas_diferidas: 1` en la entrada
+      ORIGINAL — sin duplicar el conteo de `intentos` en la curva de efectividad.
+      Calibración intacta (0.4677/0.1113, desviación <0.003 pp).
 
 - [x] **P2-E · OPFOR reactivo + perfiles de pérdida de enlace** *(era P2-06)*
       qué: (i) **partir `DroneEstado` en `estado_salud` y `estado_enlace`** — prerrequisito

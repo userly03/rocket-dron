@@ -148,12 +148,32 @@ class HPMWeapon:
             if abs(angulo_offset) > self.apertura_cono / 2.0:
                 continue
 
+            # Riesgo latente PREVIO a esta exposición: si ya estaba
+            # pendiente sin id de disparo asignado (por ejemplo, un miss
+            # anterior no atribuido — no debería ocurrir en la práctica,
+            # pero evita atribuir por error un riesgo VIEJO a este disparo).
+            tenia_riesgo_sin_atribuir_antes = (
+                drone.riesgo_latente_por_s > 0.0 and drone.origen_riesgo_shot_id is None
+            )
+
             neutralizado = drone.recibir_daño(
                 potencia=self.potencia,
                 distancia=distancia,
                 angulo_offset=angulo_offset,
                 apertura_cono=self.apertura_cono,
                 duty_cycle=self.duty_cycle,
+            )
+
+            # P2-D, Parte 3: ¿esta exposición metió al dron en riesgo latente?
+            # (o refrescó uno existente) — la marca ``entro_en_riesgo`` es la
+            # señal que ``SimulationEngine._atribuir_riesgo_latente`` usa
+            # para completar ``origen_riesgo_shot_id`` una vez que
+            # ``analytics`` asigna el id real del disparo (que todavía no se
+            # conoce en este punto: se asigna DESPUÉS del bucle completo).
+            entro_en_riesgo = (
+                drone.riesgo_latente_por_s > 0.0
+                and drone.origen_riesgo_shot_id is None
+                and not tenia_riesgo_sin_atribuir_antes
             )
 
             eventos.append(
@@ -174,6 +194,10 @@ class HPMWeapon:
                     "neutralizado": neutralizado,
                     "estado": drone.estado.value,
                     "salud": round(drone.salud, 2),
+                    # P2-D: upset/damage — ver docstring de arriba.
+                    "entro_en_riesgo": entro_en_riesgo,
+                    "riesgo_latente_por_s": round(drone.riesgo_latente_por_s, 6),
+                    "subsistema_en_riesgo": drone.subsistema_en_riesgo,
                 }
             )
 

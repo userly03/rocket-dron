@@ -135,6 +135,9 @@ class PhysicsAnalytics:
             "neutralizados": neutralizados,
             "distancia_promedio": round(dist_prom, 2),
             "tasa_exito": round(neutralizados / len(eventos), 3) if eventos else 0.0,
+            # Bajas atribuidas DESPUÉS del disparo por fallo latente (P2-D),
+            # nunca al crear la entrada — ver record_delayed_kill.
+            "bajas_diferidas": 0,
         }
         self.shot_history.append(entry)
         return entry
@@ -168,6 +171,7 @@ class PhysicsAnalytics:
             "neutralizados": neutralizados,
             "distancia_promedio": round(dist_prom, 2),
             "tasa_exito": round(neutralizados / len(impactos), 3) if impactos else 0.0,
+            "bajas_diferidas": 0,
         }
         self.shot_history.append(entry)
         return entry
@@ -177,6 +181,7 @@ class PhysicsAnalytics:
         potencia_kw: float,
         radio_efecto: float | None = None,
         hpm: dict[str, Any] | None = None,
+        upset_damage: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         radio = radio_efecto or self.beam_sigma * 2
         energy_mj = self._pulse_energy_mj(potencia_kw)
@@ -244,7 +249,67 @@ class PhysicsAnalytics:
                 "ultimo_rechazo": hpm.get("ultimo_rechazo"),
             }
 
+        if upset_damage:
+            # Upset vs damage (P2-D): mismo criterio — es el estado REAL del
+            # enjambre (Swarm.contar_upset_damage), no una métrica decorativa.
+            panel["upset_damage"] = upset_damage
+
         return panel
+
+    def record_delayed_kill(self, shot_id: int, distancia: float | None) -> bool:
+        """
+        Atribuye una baja DIFERIDA (fallo latente, P2-D) al disparo o
+        detonación ORIGINAL, en vez de perderla sin registrar. Es la
+        maquinaria valiosa que se conservó de la premisa cortada de P3-09
+        (ver docs/AUDITORIA_CHECKLIST.md §3.6: el mecanismo de thermal
+        runaway fallaba el presupuesto energético por ~10⁹, pero "kills
+        atribuidos al disparo original ticks después" seguía siendo un
+        efecto real y valioso — solo hacía falta la causa correcta).
+
+        A diferencia de ``record_cannon_shot``/``record_missile_detonation``,
+        NO crea una entrada nueva en ``shot_history``: MUTA la entrada
+        ORIGINAL in-place — ``shot_history`` guarda referencias a los mismos
+        dicts que se le agregaron, así que buscarla por ``id`` y modificarla
+        ahí es válido y es justamente lo que hace que la curva de
+        efectividad refleje la baja en el disparo que la causó, aunque haya
+        ocurrido varios ticks después.
+
+        Returns:
+            True si se encontró y actualizó el disparo original. False si
+            el id ya salió de la ventana de ``shot_history``
+            (``maxlen=100``) — la baja diferida no se pierde del conteo de
+            drones (eso ya lo maneja ``Drone.actualizar_riesgo_latente``),
+            solo de la atribución/diagnóstico, aceptable para un disparo
+            viejo que ya salió de la ventana reciente.
+        """
+        entry = next((s for s in self.shot_history if s["id"] == shot_id), None)
+        if entry is None:
+            return False
+
+        entry["neutralizados"] += 1
+        entry["tasa_exito"] = (
+            round(entry["neutralizados"] / entry["afectados"], 3)
+            if entry["afectados"] else 0.0
+        )
+        entry["bajas_diferidas"] = entry.get("bajas_diferidas", 0) + 1
+
+        if distancia is not None:
+            self._upgrade_hit(distancia)
+
+        return True
+
+    def _upgrade_hit(self, distancia: float) -> None:
+        """
+        Sube a "neutralizado" un intento YA CONTADO en ``distance_stats``
+        (por ``_record_hit`` en el momento del disparo original, con
+        ``neutralizado=False``) sin volver a incrementar ``intentos`` — eso
+        contaría el mismo intento dos veces. Usa la distancia del disparo
+        ORIGINAL (guardada en ``Drone.origen_riesgo_distancia_m``), no la
+        posición actual del dron, que pudo moverse entre el disparo y la
+        baja diferida.
+        """
+        label = self._distance_bin(distancia)
+        self.distance_stats[label]["neutralizados"] += 1
 
     def get_effectiveness_curve(self) -> list[dict]:
         curve = []
@@ -341,7 +406,9 @@ class PhysicsAnalytics:
         self.shot_history.clear()
         self._init_distance_bins()
 
-    def to_snapshot(self, hpm: dict, missiles: list | None = None) -> dict:
+    def to_snapshot(
+        self, hpm: dict, missiles: list | None = None, swarm: Any = None
+    ) -> dict:
         zones = []
         for m in missiles or []:
             if hasattr(m, "to_dict"):
@@ -351,8 +418,9 @@ class PhysicsAnalytics:
             zones.append(d)
 
         potencia = hpm.get("potencia", 25)
+        upset_damage = swarm.contar_upset_damage() if swarm is not None else None
         return {
-            "physics": self.get_physics_panel(potencia, hpm=hpm),
+            "physics": self.get_physics_panel(potencia, hpm=hpm, upset_damage=upset_damage),
             "metrics": {
                 "total_energy_mj": round(self.total_energy_mj, 4),
                 "total_energy_mj_mega": round(self.total_energy_mj / 1e6, 6),

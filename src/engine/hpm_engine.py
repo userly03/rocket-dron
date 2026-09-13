@@ -46,6 +46,7 @@ from src.config import (
     HPM_SIGMOID_STEEPNESS,
     HPM_SUBSISTEMAS,
     HPM_SUBSISTEMAS_LOGLOGISTIC_B,
+    HPM_UPSET_DB_GAP_FIELD,
 )
 from src import config as config_mod
 from src.engine.radar_engine import SPEED_OF_LIGHT_M_S
@@ -787,3 +788,80 @@ def campo_acoplado_v_m(
     cociente entre configuraciones es insensible a él).
     """
     return float(max(0.0, campo_incidente_v_m) * np.clip(eficiencia_campo, 0.0, 1.0))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# P2-D · Umbral de upset (derivado del umbral de daño) y energía absorbida
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def e50_upset_desde_damage(
+    e50_damage: float, gap_db_campo: float = HPM_UPSET_DB_GAP_FIELD
+) -> float:
+    """
+    Umbral de UPSET (recuperable), derivado del umbral de DAÑO (permanente)
+    ya calibrado, escalado por una brecha en dB de CAMPO (ver
+    ``HPM_UPSET_DB_GAP_FIELD`` en ``src/config.py`` para la justificación de
+    la brecha de 10 dB):
+
+        E50_upset = E50_damage / 10^(gap_db/20)
+
+    Es una decisión de modelado (categoría 3), no un dato de arXiv:2602.08477
+    — ese paper no distingue upset de daño. Se deriva del umbral CALIBRADO
+    (no de la Tabla 1 sin validar de P1-C) para no acoplar la contabilidad de
+    upset a un modelo bloqueado.
+    """
+    factor = 10.0 ** (gap_db_campo / 20.0)
+    return float(e50_damage) / max(factor, 1e-9)
+
+
+def energia_absorbida_j(
+    potencia_kw: float,
+    distancia: float,
+    apertura_cono: float,
+    angulo_offset: float,
+    duty_cycle: float,
+    cable_length_m: float,
+    duracion_exposicion_s: float,
+    pulse_duration_ns: float | None = None,
+) -> float:
+    """
+    Energía absorbida por el arnés de cableado durante UNA exposición
+    (P2-D, Parte 2). Reemplaza ``dano = probabilidad·potencia·0.5``, aritmética
+    dimensionalmente vacía señalada en docs/AUDITORIA_CHECKLIST.md §4.5 como
+    el último resto de los "puntos de daño arbitrarios" que
+    docs/FISICA_Y_MATEMATICA.md §5.4 declara haber eliminado.
+
+    Cadena física:
+
+        S_promedio = S_pico · duty_cycle
+        A_efectiva = cable_length_m²
+        E_absorbida = S_promedio · A_efectiva · duracion_exposicion_s      [J]
+
+    ``S_promedio`` recupera la densidad de potencia PROMEDIO a partir de la
+    que calcula ``friis_diagnostics`` (basada en el PICO — correcto para el
+    campo instantáneo que gobierna la sigmoide de daño, pero no para energía
+    total: la energía es potencia promedio por tiempo, por definición).
+
+    ``A_efectiva`` NO introduce un parámetro libre nuevo: se deriva de la
+    longitud de cable YA sorteada por dron (``cable_length_m``, huella de
+    susceptibilidad de P2-04) como el orden de magnitud de la sección que
+    subtiende un lazo de esa longitud. Un cable más largo (y más cerca de la
+    resonancia) también capta más energía — el mismo parámetro aleatorio
+    gobierna dos efectos físicos relacionados, en vez de sumar una constante
+    inventada.
+
+    ``duracion_exposicion_s`` NO es ``HPM_PULSE_DURATION_NS`` (un pulso
+    aislado da microjulios, irrelevante) sino la duración de la RÁFAGA
+    completa — mismo razonamiento que ``HPM_DISPARO_DURACION_S`` en P2-F.
+    Se pasa explícita porque cañón (ráfaga sostenida) y misil (detonación
+    única) tienen duraciones muy distintas.
+    """
+    diag = friis_diagnostics(
+        potencia_kw, distancia, apertura_cono, angulo_offset,
+        duty_cycle=duty_cycle, pulse_duration_ns=pulse_duration_ns,
+    )
+    duty = float(np.clip(duty_cycle, 1e-3, 1.0))
+    densidad_promedio = diag["densidad_potencia_w_m2"] * duty
+    area_efectiva_m2 = max(float(cable_length_m), 1e-6) ** 2
+    return float(densidad_promedio * area_efectiva_m2 * max(float(duracion_exposicion_s), 0.0))

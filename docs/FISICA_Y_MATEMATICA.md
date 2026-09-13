@@ -37,6 +37,7 @@ Se revisó cada fórmula del proyecto contra literatura real (ver
 | 10 | **Los tres números publicados del paper son mutuamente inconsistentes.** 51.4 % @ 20 m y 13.1 % @ 40 m fijan un parámetro de forma `b = 2.81`; el alcance de 90 % de baja de ~18 m exige `b = 20.32` — un factor **7.2**. Entre 497 y 552 V/m (+11 % de campo) la probabilidad tendría que saltar de 51.4 % a 90 %. Ocurre bajo cualquier ajuste de dos parámetros, logística incluida. | Media (afecta qué se puede exigir al simulador, no al simulador en sí) | **Diagnosticado, no corregible desde acá**: es un problema de la referencia. Explicación más probable (inferencia): los 18 m salen de su curva **determinista**, no de la Monte Carlo contra la que el simulador calibra — los puntos deterministas dan `b ≈ 4.3-5.8`, mismo orden. Consecuencia: el criterio de aceptación de P1-E (18 m/88 m) **nunca fue alcanzable**, lo que explica retroactivamente por qué la brecha no cerraba. Fijado como aritmética verificable en `tests/test_duty_cycle.py`. Ver [§3.7.1](#371--los-tres-números-publicados-del-paper-son-mutuamente-inconsistentes). |
 | 11 | **El taper angular `cos²` no es el patrón de ninguna antena real**: sin lóbulos laterales, forma independiente de `D` y `λ`, y **exactamente cero fuera del cono nominal**. Contra el patrón de Airy (apertura circular, física establecida) la discrepancia es de +7.2 dB a 6° y **+28.9 dB a 7.4°**, y Airy integra **3.2× más potencia** sobre el ángulo sólido. O sea que el modelo **subestima la letalidad fuera de eje**: con `cos²` un enjambre justo fuera del haz es perfectamente seguro, con un patrón real recibe ~30 % del campo del eje y el primer nulo no llega hasta 14.4°. | Media (afecta blancos fuera de eje, no la calibración en eje) | **Implementado como opt-in** (`PROPAGATION_ANTENNA_PATTERN="airy"`), no activado por defecto porque mueve la calibración de §3.4. Validado contra las posiciones y niveles analíticos de Airy (HPBW 12.05°, nulo a 14.40°, lóbulo a −17.57 dB exacto). Ver [§3.9.1](#391-el-taper-cos-no-es-el-patrón-de-ninguna-antena). |
 | 12 | **Mi propia justificación de P2-C era falsa a 2.45 GHz.** El roadmap afirmaba que la reflexión en tierra *"convierte la altitud en variable táctica: un enjambre puede volar en un nulo"*. Las franjas miden **0.76 m a 100 m y 5.35 m a 700 m**, con 22–157 ciclos en la banda de vuelo (40–160 m), y el dron oscila ±4 m: cruza varias franjas por oscilación. Es el mismo error de escala que motivó cortar P3-08, cometido en su reemplazo. | Media (invalida una conclusión del roadmap, no el código) | **Corregido en el diseño**: el efecto se implementa pero su uso correcto es **estadístico** — `⟨|F|²⟩ = 2` exacto, o sea que el espacio libre **subestima la potencia media sobre tierra en 3.01 dB** (verificado en 6 combinaciones de frecuencia y rango), más una dispersión p5–p95 de −16 a +6 dB que entra como varianza. La altitud sí es táctica por debajo de ~0.5 GHz, y `franja_resoluble()` lo dice. Ver [§3.9.2](#392--la-altitud-no-es-variable-táctica-a-245-ghz). |
+| 13 | **Mi primer diseño del hazard rate de riesgo latente (P2-D) daba 99.3 % de muerte eventual, no 'usualmente se recupera'.** `DRONE_RIESGO_LATENTE_MAX_POR_S = 2.0` parecía razonable mirado un solo tick, pero integrado sobre toda la cola de decaimiento (`P(falla eventual) = 1-exp(-h₀·τ)`) con `τ=4s` da `P≈0.9997`. Contradecía directamente el propósito del ítem. | Alta (invertía el comportamiento pretendido del mecanismo) | **Corregido antes de cerrar el ítem**: se derivó `h₀ = ln(2)/τ ≈ 0.1733/s` fijando el PEOR caso de la zona de upset en un lanzamiento de moneda (50 % de falla eventual), verificado empíricamente contra la fórmula cerrada (1500 repeticiones/severidad, dentro de ±0.05). Ver [§3.10](#310-upset-vs-damage--fallo-latente-p2-d). |
 
 **Lo que SÍ ya estaba bien** (verificado, no solo asumido):
 - `S = P·G/(4πr²)` — el término `4πr²` es literalmente el área de una esfera; la propagación ya era 3D en el cálculo (no en el render, ver hallazgo 5).
@@ -803,6 +804,146 @@ angular, y la energía que falta está en los nulos.
 `HPM_FREQUENCY_GHZ` es un parámetro barrible, el modelo determinista se conserva
 y es el correcto en ese régimen — pero hay que consultar
 `propagation.franja_resoluble()`, no asumirlo.
+
+### 3.10 Upset vs damage + fallo latente (P2-D)
+
+**Categoría: decisión de modelado (categoría 3)**, con una pieza de física
+establecida real (la conversión hazard-rate → probabilidad-por-tick) y una
+elección explícita de qué literatura general se sigue (no un dato de
+arXiv:2602.08477, que no distingue upset de daño).
+
+#### Reemplaza la premisa cortada de P3-09
+
+El thermal runaway de batería original fallaba el presupuesto energético por
+~10⁹ (§3.6: 10–20 kJ para llevar una celda 18650 a runaway, contra microjulios
+acoplados por un pulso de 100 ns). Se conservó la maquinaria valiosa de ese
+ítem —decaimiento por tick, atribución diferida de bajas al disparo
+original— con el mecanismo físico correcto: la literatura de vulnerabilidad
+EMI separa **upset** (perturbación RECUPERABLE — reset de brownout,
+desincronización de ESC, deriva de IMU, pérdida momentánea de fix GPS) de
+**damage** (falla PERMANENTE — ruptura de óxido de puerta, latchup
+destructivo). Una sola sigmoide a "neutralizado" no puede expresar el caso
+operativamente decisivo: un enjambre que se desordena y **se recupera**.
+
+#### El umbral de upset, y por qué NO usa la Tabla 1 de P1-C
+
+```
+E₅₀,upset = E₅₀,damage / 10^(gap_dB/20)
+```
+
+con `gap_dB = 10` (extremo conservador de la convención general de 10–20 dB
+entre susceptibilidad recuperable y daño permanente en electrónica digital).
+Con el `E₅₀` calibrado del cañón (487.39 V/m): `E₅₀,upset ≈ 154.13 V/m`.
+
+**Deliberadamente NO se deriva de `HPM_SUBSISTEMAS`** (la Tabla 1 publicada,
+usada en el modelo de subsistemas de §3.6). Razón: ese modelo sigue
+**bloqueado** — no reproduce los puntos de calibración y su varianza es 1.6×
+alta (§3.6). Acoplar la contabilidad de upset a un modelo no validado
+propagaría esa falta de validación a un mecanismo nuevo. En cambio, se
+desplaza el umbral **ya calibrado** (`HPM_LOGLOGISTIC_E50_V_M`), que sí pasa
+las pruebas de `tests/test_calibracion.py`.
+
+La zona `[P_damage, P_upset)` tiene ancho apreciable en el rango de combate
+(ver tabla), lo que garantiza que el mecanismo tiene efecto observable:
+
+| Distancia | `P_damage` | `P_upset` | Ancho de zona |
+|---|---|---|---|
+| 20 m | 0.4677 | 0.9572 | 0.489 |
+| 30 m | 0.2195 | 0.8773 | 0.658 |
+| 40 m | 0.1113 | 0.7610 | 0.650 |
+| 60 m | 0.0385 | 0.5047 | 0.466 |
+
+#### 🔴 Hallazgo 13: mi primer cálculo del hazard rate daba 99 % de muerte, no "usualmente se recupera"
+
+El diseño original fijaba `DRONE_RIESGO_LATENTE_MAX_POR_S = 2.0` con la
+justificación (incorrecta) de que "la probabilidad de fallar CADA SEGUNDO"
+era manejable. Eso ignora que el hazard se integra sobre TODA la cola de
+decaimiento, no solo un tick: para un hazard que decae exponencialmente con
+constante `τ`, la probabilidad de morir **alguna vez** es
+
+```
+P(falla eventual) = 1 − exp(−h₀·τ)
+```
+
+Con `h₀ = 2.0/s` y `τ = 4 s`: `h₀·τ = 8`, `P(falla eventual) ≈ 1 − e⁻⁸ ≈
+0.9997` — prácticamente todo dron que entraba en upset terminaba muriendo.
+**Medido por simulación antes de corregirlo: 99.3 % de muertes a severidad
+0.6 en 2000 repeticiones**, contradiciendo directamente el propósito del
+ítem ("un enjambre que se desordena y se recupera").
+
+**Corrección**: se fija el PEOR caso de la zona de upset (severidad = 1.0,
+justo bajo el umbral de daño) en un lanzamiento de moneda —
+`P(falla eventual) = 0.5` — y se despeja `h₀`:
+
+```
+h₀ = ln(2) / τ = ln(2) / 4 ≈ 0.1733 /s
+```
+
+Verificado empíricamente contra la fórmula cerrada (1500 repeticiones por
+severidad, tolerancia ±0.05):
+
+| Severidad | `P` teórica | `P` empírica |
+|---|---|---|
+| 0.1 | 0.067 | 0.067 |
+| 0.3 | 0.188 | 0.183 |
+| 0.6 | 0.340 | 0.358 |
+| 1.0 | 0.500 | 0.512 |
+
+Con esta corrección, la mayoría del rango de severidad favorece la
+recuperación, y solo en el punto más severo es un resultado incierto — la
+lectura correcta de "se desordena y se recupera" en vez de "se desordena y
+casi siempre cae".
+
+#### Energía absorbida: unidades reales
+
+```
+S_promedio = S_pico · duty_cycle
+A_efectiva = cable_length_m²
+E_absorbida = S_promedio · A_efectiva · duración_exposición      [J]
+```
+
+Reemplaza `dano = probabilidad·potencia·0.5` (dimensionalmente vacío, hallazgo
+del §4.5 de la auditoría, último resto de los "puntos de daño arbitrarios"
+que el §5.4 original de este documento declaraba eliminados). `A_efectiva` no
+introduce un parámetro libre nuevo: se deriva de la longitud de cable YA
+sorteada por dron (huella de susceptibilidad de P2-04) — un cable más largo
+(y más cerca de la resonancia) también capta más energía, doble efecto físico
+con una sola variable aleatoria. `duración_exposición` reutiliza
+`HPM_DISPARO_DURACION_S` (cañón) o su análogo `MISSILE_DETONACION_DURACION_S`
+(misil, 0.05 s — mucho más corta: una detonación es un evento único, no una
+ráfaga sostenida de tierra).
+
+#### Subsistema afectado y comportamiento degradado
+
+Sorteo ponderado por `1/E₅₀` sobre `HPM_SUBSISTEMAS` (el GPS/GNSS LNA, más
+débil, es el más probable — consistente con el hallazgo de §3.6/§3.8 de que
+domina el subsistema más débil del OR-gate). Es un sorteo de **ranking
+relativo**, no depende de que el modelo de subsistemas esté calibrado en
+términos absolutos.
+
+Dos subsistemas tienen consecuencia mecánica sobre el vuelo (los otros tres
+—cámara, ESC, BMS— quedan como diagnóstico/reporte, decisión de alcance):
+
+- **`flight_controller` en upset**: el dron no adopta el rumbo nuevo que le
+  asignaría `compute_headings` — el autopiloto no puede procesar comandos de
+  flocking (brownout/desincronización), aunque el enlace de radio siga OK.
+  Verificado contra un vecino control en la misma formación que sí adopta el
+  rumbo nuevo.
+- **`gps_gnss_lna` en upset**: el perfil lost-link RTH degrada a "mantener
+  rumbo" (no puede calcular la dirección de retorno sin posición) — reutiliza
+  el mismo camino de degradación elegante que ya existía para
+  `home_x`/`home_y` no provistos.
+
+#### Atribución diferida al disparo original
+
+`analytics.record_delayed_kill(shot_id, distancia)` **muta** la entrada
+existente de `shot_history` (no crea una nueva) y sube el bin correspondiente
+de `distance_stats` sin duplicar `intentos`. Verificado de punta a punta con
+un disparo real y sin forzar nada más que el hazard de maduración: un dron a
+30 m entra en upset organicamente, el `shot_id` se atribuye correctamente
+(comparado contra `shot_history[-1]["id"]`), y tras 60 s de reloj muere por
+fallo latente con `shot_history` reflejando `neutralizados: 1,
+bajas_diferidas: 1` en la entrada ORIGINAL.
 
 ## 4. Limitaciones conocidas (honestidad ante todo)
 

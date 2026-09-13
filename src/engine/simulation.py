@@ -149,6 +149,7 @@ class SimulationEngine:
                 "analytics": self.analytics.to_snapshot(
                     self.hpm.to_dict(),
                     self.missile_system.misiles,
+                    swarm=self.swarm,
                 ),
             }
 
@@ -294,6 +295,7 @@ class SimulationEngine:
             )
 
             self._sembrar_memoria_amenaza(eventos, self.hpm.origen_x, self.hpm.origen_y)
+            self._atribuir_riesgo_latente(eventos, shot["id"])
 
         self._log(
             "hpm_disparo",
@@ -437,6 +439,29 @@ class SimulationEngine:
             if drone is not None:
                 drone.registrar_impacto(impacto_x, impacto_y)
 
+    def _atribuir_riesgo_latente(self, eventos: list[dict], shot_id: int) -> None:
+        """
+        Completa ``Drone.origen_riesgo_shot_id`` con el id REAL del disparo
+        una vez que ``analytics`` lo asignó (P2-D, Parte 3).
+
+        Por qué es un paso aparte y no algo que ``HPMWeapon.disparar``/
+        ``HPMissile.detonar`` puedan hacer ellos mismos: el id de
+        ``shot_history`` recién se conoce DESPUÉS de recorrer todos los
+        drones (``analytics.record_cannon_shot``/``record_missile_detonation``
+        se llaman con la lista de eventos ya completa) — en el momento en
+        que cada dron entra en riesgo latente, todavía no existe ningún id
+        que asignarle. ``evento["entro_en_riesgo"]`` (puesto por el arma) es
+        la señal de qué drones necesitan esta atribución; mismo patrón de
+        lookup por id que ``_sembrar_memoria_amenaza``.
+        """
+        by_id = {d.id: d for d in self.swarm.drones}
+        for evento in eventos:
+            if not evento.get("entro_en_riesgo"):
+                continue
+            drone = by_id.get(evento["drone_id"])
+            if drone is not None and drone.riesgo_latente_por_s > 0.0:
+                drone.origen_riesgo_shot_id = shot_id
+
     def _process_jamming_events(self, eventos: list[dict]) -> None:
         interferidos = [e["drone_id"] for e in eventos if e["tipo"] == "dron_interferido"]
         recuperados = [e["drone_id"] for e in eventos if e["tipo"] == "dron_recuperado"]
@@ -456,7 +481,7 @@ class SimulationEngine:
     def _process_missile_events(self, eventos: list[dict]) -> None:
         for evento in eventos:
             if evento["tipo"] == "misil_detonado":
-                self.analytics.record_missile_detonation(
+                shot = self.analytics.record_missile_detonation(
                     evento["potencia_hpm"],
                     evento["radio_efecto"],
                     evento["impactos"],
@@ -471,6 +496,7 @@ class SimulationEngine:
                 self._sembrar_memoria_amenaza(
                     evento["impactos"], evento["x"], evento["y"]
                 )
+                self._atribuir_riesgo_latente(evento["impactos"], shot["id"])
                 self._log(
                     "misil_detonado",
                     {
@@ -535,6 +561,7 @@ class SimulationEngine:
             return self.analytics.to_snapshot(
                 self.hpm.to_dict(),
                 self.missile_system.misiles,
+                swarm=self.swarm,
             )
 
     def get_status(self) -> dict[str, Any]:
@@ -572,6 +599,32 @@ class SimulationEngine:
         # "pausada con misiles en vuelo" (la memoria de un dron no se
         # "congela" solo porque no se esté recalculando su rumbo).
         self.swarm.actualizar_amenazas(dt)
+
+        # Fallo latente (P2-D, Parte 3): mismo criterio que la memoria de
+        # amenaza — el hazard rate de un dron en riesgo es una función del
+        # tiempo transcurrido, no del flocking, así que decae (y puede
+        # madurar en una neutralización DIFERIDA) tanto si el enjambre se
+        # mueve este tick como en la rama "pausada con misiles en vuelo".
+        for evento_riesgo in self.swarm.actualizar_riesgos_latentes(dt):
+            atribuido = False
+            if evento_riesgo["shot_id"] is not None:
+                atribuido = self.analytics.record_delayed_kill(
+                    evento_riesgo["shot_id"], evento_riesgo["distancia_m"]
+                )
+            self._log(
+                "baja_diferida",
+                {
+                    "drone_id": evento_riesgo["drone_id"],
+                    "shot_id": evento_riesgo["shot_id"],
+                    "atribuido": atribuido,
+                },
+            )
+            validacion_logger.info(
+                "--- FALLO LATENTE — t=%.2fs --- dron %s neutralizado por "
+                "fallo latente (disparo original: %s, atribuido=%s)",
+                self.tiempo, evento_riesgo["drone_id"],
+                evento_riesgo["shot_id"], atribuido,
+            )
 
         eventos_jamming: list[dict] = []
         if mover_enjambre:

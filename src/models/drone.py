@@ -19,14 +19,22 @@ from src.config import (
     DRONE_LOST_LINK_HOVER_FRACTION,
     DRONE_LOST_LINK_RTH_FRACTION,
     DRONE_POLARIZATION_MIN,
+    DRONE_RIESGO_LATENTE_DECAY_TAU_S,
+    DRONE_RIESGO_LATENTE_MAX_POR_S,
+    HPM_DISPARO_DURACION_S,
     HPM_FREQUENCY_GHZ,
+    HPM_LOGLOGISTIC_B,
+    HPM_LOGLOGISTIC_E50_V_M,
     HPM_MODEL,
+    HPM_SUBSISTEMAS,
     THREAT_MEMORY_DECAY_TAU_S,
 )
 from src.engine.hpm_engine import (
     apply_hardening_odds,
     calculate_neutralization_probability,
     calculate_neutralization_probability_friis,
+    e50_upset_desde_damage,
+    energia_absorbida_j,
     resonance_frequency_ghz,
     susceptibility_coupling_factor,
 )
@@ -169,6 +177,39 @@ class Drone:
         self.amenaza_y = 0.0
         self.amenaza_intensidad = 0.0
 
+        # Fallo latente (P2-D, Parte 3): hazard rate (1/s) de una degradación
+        # RECUPERABLE en curso. 0.0 = sin riesgo pendiente. Se activa en
+        # ``recibir_daño`` cuando una exposición cae en la zona de UPSET
+        # (por debajo del umbral de daño, por encima del umbral de upset —
+        # ver ``e50_upset_desde_damage``); decae cada tick hacia la
+        # recuperación (ver ``actualizar_riesgo_latente``), pero puede
+        # madurar en una neutralización DIFERIDA antes de decaer del todo
+        # ("un enjambre que se desordena y se recupera", o a veces no).
+        self.riesgo_latente_por_s = 0.0
+        # Qué subsistema manifestó el upset más reciente (nombre de
+        # ``HPM_SUBSISTEMAS``), sorteado por debilidad relativa — solo
+        # diagnóstico/comportamiento degradado (ver ``mover``), NO gobierna
+        # ninguna probabilidad: el modelo de 5 subsistemas de P1-C sigue
+        # bloqueado (docs/FISICA_Y_MATEMATICA.md §3.6) y esta huella no
+        # depende de su calibración.
+        self.subsistema_en_riesgo: str | None = None
+        # A qué disparo/detonación atribuir una baja diferida si el riesgo
+        # latente madura en neutralización ticks después. Se deja en None
+        # hasta que ``SimulationEngine`` conoce el id real del disparo (se
+        # asigna DESPUÉS de que ``analytics`` lo registra — ver
+        # ``HPMWeapon.disparar``/``HPMissile.detonar`` y
+        # ``SimulationEngine._atribuir_riesgo_latente``).
+        self.origen_riesgo_shot_id: int | None = None
+        self.origen_riesgo_distancia_m: float | None = None
+
+        # Energía acumulada absorbida (P2-D, Parte 2), en julios —
+        # contabilidad con UNIDADES REALES que reemplaza la aritmética
+        # ``probabilidad·potencia·0.5`` (dimensionalmente vacía, ver
+        # docs/AUDITORIA_CHECKLIST.md §4.5). Puramente informativa: no
+        # gobierna ningún estado, es la suma de ``energia_absorbida_j`` de
+        # cada exposición.
+        self.energia_absorbida_j = 0.0
+
         # Radar: si el dron fue detectado por el radar en el tick actual
         # (gobierna la selección automática de blancos, no la física del
         # daño). Default True: "conocido" hasta que Swarm.actualizar() lo
@@ -210,6 +251,29 @@ class Drone:
         if u < c3:
             return PerfilLostLink.ATERRIZAR
         return PerfilLostLink.FLYAWAY
+
+    def _sortear_subsistema_afectado(self) -> str:
+        """
+        Qué subsistema manifiesta el upset (P2-D, Parte 3), por sorteo
+        ponderado inversamente al umbral de daño de cada uno
+        (``HPM_SUBSISTEMAS`` — Tabla 1 del paper, valores publicados y NO
+        ajustados). El más débil (menor E₅₀) es el más probable, consistente
+        con el hallazgo de sensibilidad de P1-C/P2-A: a campo bajo domina el
+        subsistema más débil del OR-gate (ver docs/FISICA_Y_MATEMATICA.md
+        §3.6). Es un sorteo de RANKING relativo, no depende de que el modelo
+        de subsistemas esté calibrado en términos absolutos — solo de que la
+        Tabla 1 esté bien ordenada, que sí está verificado.
+        """
+        nombres = list(HPM_SUBSISTEMAS.keys())
+        pesos = [1.0 / HPM_SUBSISTEMAS[n][0] for n in nombres]
+        total = sum(pesos)
+        u = float(self._rng().random()) * total
+        acumulado = 0.0
+        for nombre, peso in zip(nombres, pesos):
+            acumulado += peso
+            if u < acumulado:
+                return nombre
+        return nombres[-1]
 
     @property
     def estado(self) -> DroneEstado:
@@ -349,7 +413,12 @@ class Drone:
     def _girar_hacia_home(
         self, dt: float, home_x: float | None, home_y: float | None
     ) -> None:
-        if home_x is None or home_y is None:
+        # P2-D, Parte 3 — comportamiento degradado: sin GPS/GNSS (LNA en
+        # upset) el dron no puede calcular su posición ni, por tanto, el
+        # rumbo hacia el punto de retorno — RTH degrada a "mantener rumbo",
+        # reutilizando el mismo camino de degradación elegante que ya existe
+        # para cuando no se pasa ``home_x``/``home_y`` en absoluto.
+        if home_x is None or home_y is None or self.subsistema_en_riesgo == "gps_gnss_lna":
             return
         angulo_deseado = math.degrees(math.atan2(home_y - self.y, home_x - self.x)) % 360
         max_giro = BOIDS_MAX_TURN_RATE_DEG_S * dt
@@ -402,6 +471,85 @@ class Drone:
         if self.amenaza_intensidad < 1e-4:
             self.amenaza_intensidad = 0.0
 
+    def actualizar_riesgo_latente(self, dt: float) -> bool:
+        """
+        Decae el riesgo latente (P2-D, Parte 3) y sortea si madura en una
+        neutralización DIFERIDA este tick. Se llama desde
+        ``SimulationEngine._tick`` (mismo patrón que ``actualizar_amenaza``:
+        avanza siempre que avanza el reloj de simulación, tanto en el bucle
+        de 60 FPS como en el runner Monte Carlo).
+
+        La conversión hazard-rate → probabilidad-por-tick es la estándar
+        para un proceso de riesgo constante dentro del tick:
+        ``P_falla = 1 − exp(−h·dt)`` (no la aproximación lineal ``h·dt``,
+        exacta incluso si el tick es largo o el hazard alto).
+
+        Si el dron sobrevive el tick, el hazard decae exponencialmente
+        (constante ``DRONE_RIESGO_LATENTE_DECAY_TAU_S``) hacia la
+        recuperación — cuando cae por debajo de un umbral despreciable, el
+        dron se declara recuperado (``estado_salud`` vuelve a ``ACTIVO``,
+        se limpia el origen de atribución): la mayoría de los drones en
+        riesgo latente terminan así, "un enjambre que se desordena y se
+        recupera".
+
+        Returns:
+            True si el dron acaba de ser neutralizado por fallo latente EN
+            ESTE TICK (para que ``SimulationEngine`` lo atribuya al disparo
+            original vía ``origen_riesgo_shot_id`` antes de que este método
+            lo borre).
+        """
+        if self.riesgo_latente_por_s <= 0.0 or dt <= 0.0:
+            return False
+        if self.estado_salud == EstadoSalud.NEUTRALIZADO:
+            return False
+
+        probabilidad_falla_tick = 1.0 - math.exp(-self.riesgo_latente_por_s * dt)
+        if float(self._rng().random()) < probabilidad_falla_tick:
+            self.estado_salud = EstadoSalud.NEUTRALIZADO
+            self.salud = 0.0
+            self.riesgo_latente_por_s = 0.0
+            self.subsistema_en_riesgo = None
+            self.velocidad = 0.0
+            return True
+
+        self.riesgo_latente_por_s *= math.exp(-dt / DRONE_RIESGO_LATENTE_DECAY_TAU_S)
+        if self.riesgo_latente_por_s < 1e-4:
+            self.riesgo_latente_por_s = 0.0
+            self.subsistema_en_riesgo = None
+            self.origen_riesgo_shot_id = None
+            self.origen_riesgo_distancia_m = None
+            self.estado_salud = EstadoSalud.ACTIVO
+            self.salud = 100.0
+        else:
+            # Salud DERIVADA (indicador para la UI, no causal): refleja
+            # cuánto hazard remanente queda, no cuánta "energía" absorbió.
+            fraccion_riesgo = min(1.0, self.riesgo_latente_por_s / DRONE_RIESGO_LATENTE_MAX_POR_S)
+            self.salud = round(100.0 * (1.0 - 0.8 * fraccion_riesgo), 2)
+
+        return False
+
+    def entrar_en_riesgo_latente(self, severidad: float, distancia_m: float) -> None:
+        """
+        Marca a este dron en riesgo latente (P2-D, Parte 3) con la
+        ``severidad`` dada (en [0,1]; 1.0 = justo debajo del umbral de daño,
+        el caso más grave dentro de la zona de upset; →0 = roce mínimo con
+        el umbral de upset).
+
+        Punto de entrada COMÚN para el cañón (``recibir_daño``, llamado
+        sobre ``self``) y el misil (``HPMissile.detonar``, llamado sobre un
+        dron externo) — evita duplicar la selección de subsistema y la
+        conversión severidad→hazard rate en dos lugares.
+        """
+        severidad = min(1.0, max(0.0, float(severidad)))
+        self.riesgo_latente_por_s = severidad * DRONE_RIESGO_LATENTE_MAX_POR_S
+        self.subsistema_en_riesgo = self._sortear_subsistema_afectado()
+        # El id real del disparo lo completa SimulationEngine DESPUÉS de que
+        # analytics lo asigna (ver _atribuir_riesgo_latente).
+        self.origen_riesgo_shot_id = None
+        self.origen_riesgo_distancia_m = distancia_m
+        self.estado_salud = EstadoSalud.DANADO
+        self.salud = round(100.0 * (1.0 - 0.8 * severidad), 2)
+
     def recibir_daño(
         self,
         potencia: float,
@@ -409,53 +557,120 @@ class Drone:
         angulo_offset: float = 0.0,
         apertura_cono: float = 30.0,
         duty_cycle: float = 1.0,
+        pulse_duration_ns: float | None = None,
     ) -> bool:
         """
-        Calcula probabilidad de neutralización según el modelo HPM.
+        Calcula probabilidad de neutralización según el modelo HPM y — en el
+        modelo ``friis`` — resuelve upset vs damage con energía absorbida en
+        unidades reales (P2-D).
 
         ``duty_cycle`` separa potencia promedio de pico (daño latchup por
         campo instantáneo); 1.0 = CW, compatible con el modelo calibrado.
 
         Returns:
-            True si el dron fue neutralizado en este impacto.
+            True si el dron fue neutralizado en este impacto (inmediato —
+            una neutralización DIFERIDA por fallo latente la reporta
+            ``actualizar_riesgo_latente``, no este método).
         """
         if self.estado_salud == EstadoSalud.NEUTRALIZADO:
             return False
 
-        if HPM_MODEL == "friis":
-            probabilidad = calculate_neutralization_probability_friis(
-                potencia_kw=potencia,
-                distancia=distancia,
-                apertura_cono=apertura_cono,
-                angulo_offset=angulo_offset,
-                duty_cycle=duty_cycle,
-                cable_length_m=self.cable_length_m,
-                polarization=self.polarization,
-                frequency_ghz=HPM_FREQUENCY_GHZ,
-            )
-            # Blindaje: reducción proporcional en espacio de momios, no
-            # desplazando el umbral E (ver apply_hardening_odds — desplazar
-            # el umbral colapsaba la probabilidad a ~0 en casi todo el rango
-            # de combate, no la reducía de forma proporcional).
-            probabilidad = apply_hardening_odds(probabilidad, self.e_threshold_mult)
-        else:
+        if HPM_MODEL != "friis":
+            # Modelo "legacy": exponencial ad-hoc, ya etiquetado como tal
+            # (ver hpm_engine.py) y sin pretensión de física real — se
+            # conserva TAL CUAL, aritmética de "puntos de salud" incluida.
+            # P2-D solo reemplaza esa aritmética en la rama "friis", que sí
+            # pretende ser física real (ver docs/AUDITORIA_CHECKLIST.md
+            # §4.5): tocar acá el modelo ad-hoc no aporta rigor, porque
+            # nunca reclamó tenerlo.
             probabilidad = calculate_neutralization_probability(
                 potencia=potencia,
                 distancia=distancia,
                 angulo_offset=angulo_offset,
                 apertura_cono=apertura_cono,
             )
+            self.ultima_probabilidad = probabilidad
+            impacto = float(self._rng().random()) < probabilidad
+            dano = probabilidad * potencia * 0.5
+            self.salud = max(0.0, self.salud - dano)
+            if impacto or self.salud <= 0:
+                self.estado_salud = EstadoSalud.NEUTRALIZADO
+                return True
+            if self.salud < 50:
+                self.estado_salud = EstadoSalud.DANADO
+            return False
 
+        # ── Modelo "friis": daño real + upset/damage + energía absorbida ──
+        kwargs_campo = dict(
+            potencia_kw=potencia,
+            distancia=distancia,
+            apertura_cono=apertura_cono,
+            angulo_offset=angulo_offset,
+            duty_cycle=duty_cycle,
+            pulse_duration_ns=pulse_duration_ns,
+            cable_length_m=self.cable_length_m,
+            polarization=self.polarization,
+            frequency_ghz=HPM_FREQUENCY_GHZ,
+        )
+
+        probabilidad = calculate_neutralization_probability_friis(**kwargs_campo)
+        # Blindaje: reducción proporcional en espacio de momios, no
+        # desplazando el umbral E (ver apply_hardening_odds — desplazar el
+        # umbral colapsaba la probabilidad a ~0 en casi todo el rango de
+        # combate, no la reducía de forma proporcional).
+        probabilidad = apply_hardening_odds(probabilidad, self.e_threshold_mult)
         self.ultima_probabilidad = probabilidad
-        impacto = float(self._rng().random()) < probabilidad
-        dano = probabilidad * potencia * 0.5
-        self.salud = max(0.0, self.salud - dano)
 
-        if impacto or self.salud <= 0:
+        # Umbral de UPSET: mismo campo, umbral más bajo (ver
+        # e50_upset_desde_damage — decisión de modelado, categoría 3, NO
+        # dato del paper). Se le aplica el MISMO factor de blindaje: el
+        # apantallado de un dron blindado protege contra cualquier campo,
+        # no solo contra el que causa daño permanente.
+        p_upset = calculate_neutralization_probability_friis(
+            **{**kwargs_campo, "e50": e50_upset_desde_damage(HPM_LOGLOGISTIC_E50_V_M),
+               "b": HPM_LOGLOGISTIC_B}
+        )
+        p_upset = apply_hardening_odds(p_upset, self.e_threshold_mult)
+        # p_upset >= probabilidad está garantizado matemáticamente (E50 más
+        # bajo ⇒ P mayor a igual campo, log-logística monótona) — no un
+        # invariante que dependa de los valores concretos.
+
+        # Energía absorbida (Parte 2): contabilidad con unidades reales,
+        # reemplaza ``probabilidad·potencia·0.5``. Puramente informativa, no
+        # decide ningún estado.
+        self.energia_absorbida_j += energia_absorbida_j(
+            potencia_kw=potencia,
+            distancia=distancia,
+            apertura_cono=apertura_cono,
+            angulo_offset=angulo_offset,
+            duty_cycle=duty_cycle,
+            cable_length_m=self.cable_length_m,
+            duracion_exposicion_s=HPM_DISPARO_DURACION_S,
+            pulse_duration_ns=pulse_duration_ns,
+        )
+
+        u = float(self._rng().random())
+
+        if u < probabilidad:
+            # DAMAGE: falla permanente, inmediata.
             self.estado_salud = EstadoSalud.NEUTRALIZADO
+            self.riesgo_latente_por_s = 0.0
+            self.subsistema_en_riesgo = None
+            self.salud = 0.0
             return True
 
-        if self.salud < 50:
-            self.estado_salud = EstadoSalud.DANADO
+        if u < p_upset:
+            # UPSET: exposición significativa pero no letal de inmediato.
+            # ``severidad`` es qué tan adentro de la zona [probabilidad,
+            # p_upset) cayó el sorteo — 1.0 justo bajo el umbral de daño
+            # (upset severo, mayor hazard inicial), →0 en el borde de la
+            # zona de upset (roce mínimo, hazard casi nulo).
+            ancho_zona = max(p_upset - probabilidad, 1e-12)
+            severidad = (p_upset - u) / ancho_zona
+            self.entrar_en_riesgo_latente(severidad, distancia)
+            return False
 
+        # Miss limpio: ni daño ni upset. No se toca ningún riesgo latente
+        # que ya estuviera pendiente de una exposición anterior — un miss no
+        # cura nada, la recuperación la gobierna el decaimiento por tick.
         return False
