@@ -61,9 +61,9 @@ cambia de estado. Todo lo de acá tiene el detalle completo en
 
 | Paper | Qué aporta | Estado de aplicación |
 |---|---|---|
-| Chen & Kolokolnikov (2014), arXiv:1403.3250 | Régimen no monótono: fuerza del depredador determina escape/confusión/persecución/captura | Hipótesis testeable con las herramientas ya existentes (barrido de potencia × formación) — no implementado |
+| Chen & Kolokolnikov (2014), arXiv:1403.3250 | Régimen no monótono: fuerza del depredador determina escape/confusión/persecución/captura | ✅ Barrido corrido — ver §6. No apareció la curva de 4 regímenes (el arma no persigue, a diferencia del modelo del paper), pero sí una transición real de meseta baja→alta en formación compacta |
 | Olson et al. (2013), arXiv:1209.3330 | Confusión del depredador basta para evolucionar enjambramiento (algoritmo evolutivo) | Anclaje teórico para P3-B (coevolución), ya implementado — no cambia código |
-| Attanasi et al., Nature Physics / arXiv:1303.7097 | Ondas de agitación en bandadas: la alarma se propaga más rápido que el grupo | Brecha real encontrada: `P2-E` (amenaza) es individual, no se propaga a vecinos — no implementado |
+| Attanasi et al., Nature Physics / arXiv:1303.7097 | Ondas de agitación en bandadas: la alarma se propaga más rápido que el grupo | ✅ **Implementado** — ver §6, `flocking.propagate_alarm` (P2-E, Parte 4) |
 | Nature Communications (raptores, PMC9399121) | Rapaces reales apuntan a un punto fijo del enjambre, no persiguen individuos | Valida una decisión ya tomada: `HPMissileSystem.lanzar` ya apunta al centroide — no requiere cambio |
 
 ---
@@ -291,3 +291,53 @@ generados dinámicamente (dado/ADN en la lista de corridas, cañón/misil en
 el historial de disparos, reloj de arena/check/alerta en badges de
 estado, play/pausa en el reproductor) probados disparando corridas reales
 — consola limpia en todo el recorrido.
+
+---
+
+## 8. Biomimesis — de literatura a código: propagación de alarma + barrido
+
+Las dos piezas de investigación biomimética que quedaban abiertas (§1.5),
+ambas cerradas.
+
+### 8.1 Propagación de alarma entre vecinos — ✅ CERRADO
+
+Brecha real de literatura (Attanasi et al., ondas de agitación en
+bandadas de estorninos) implementada: `src/engine/flocking.py::
+propagate_alarm` (P2-E, Parte 4), nueva constante `BOIDS_ALARM_
+PROPAGATION_GAIN=0.7` en `src/config.py`. Un dron sin amenaza propia
+adopta la del vecino más alarmado dentro de `BOIDS_NEIGHBOR_RADIUS`,
+atenuada por la ganancia — reusa la misma red de vecinos que ya usan
+separación/alineación/cohesión, sin topología nueva. Actualización
+SINCRÓNICA (snapshot de intensidades antes de propagar, no valores ya
+actualizados en la misma llamada): la onda avanza un salto por tick, no
+varios de golpe según el orden de iteración.
+
+`compute_headings` sigue siendo de solo lectura — la mutación de
+`amenaza_*` vive en `propagate_alarm`, llamada desde `Swarm.
+actualizar_amenazas` (mismo método que ya hacía decaer la memoria; orden:
+decaer primero, propagar después, para no "revivir" una amenaza vieja al
+contagiarla a un valor más alto del que le queda a ella misma).
+
+5 tests nuevos en `tests/test_opfor.py::TestPropagacionDeAlarma`,
+incluyendo el central: un dron que **nunca fue impactado directamente**
+—solo contagiado— se dispersa más del punto de impacto que en un control
+idéntico con la ganancia en 0 (mismo patrón falsable que ya usaba P2-E
+Parte 2). 27/27 tests de `test_opfor.py` pasan, sin regresiones.
+
+### 8.2 Barrido depredador-presa (Chen & Kolokolnikov) — ✅ CERRADO
+
+`research/barrido_depredador_presa.py` + `research/
+BARRIDO_DEPREDADOR_PRESA.md` (nota completa con números, IC95% y
+discusión). 540 réplicas reales (18 puntos × 30 réplicas, formación
+cuadrada vs. circular × 9 potencias, 10-100 kW, a `DISTANCIA_COMBATE_M`
+=60m con cañón pulsado — la misma geometría que ya validó P3-B).
+
+**Resultado, honesto**: en formación cuadrada aparece una transición real
+(con IC95% que NO se superponen) de meseta baja (10-40kW, ~0.009-0.016)
+a meseta alta (80-100kW, ~0.031-0.032) — no una rampa lineal simple, pero
+tampoco la curva de 4 regímenes con caída intermedia que predice el paper
+para SU modelo (que tiene un depredador persiguiendo activamente; el
+cañón acá dispara una vez y no persigue — sección 4 de la nota explica
+por qué es razonable no ver esa forma exacta). En formación circular la
+señal es demasiado ruidosa (CV 1.8-5.5) para afirmar nada con 30
+réplicas — reportado como límite de resolución, no como hallazgo.

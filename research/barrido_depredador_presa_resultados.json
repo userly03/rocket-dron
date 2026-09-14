@@ -1,0 +1,128 @@
+[
+  {
+    "formacion": "cuadrada",
+    "potencia_kw": 10,
+    "fraccion_media": 0.013333333333333334,
+    "desviacion_estandar": 0.024132456960019696,
+    "cv": 1.809934272001477
+  },
+  {
+    "formacion": "cuadrada",
+    "potencia_kw": 15,
+    "fraccion_media": 0.013333333333333332,
+    "desviacion_estandar": 0.01877472826583487,
+    "cv": 1.4081046199376153
+  },
+  {
+    "formacion": "cuadrada",
+    "potencia_kw": 20,
+    "fraccion_media": 0.008888888888888889,
+    "desviacion_estandar": 0.01736101532540626,
+    "cv": 1.9531142241082045
+  },
+  {
+    "formacion": "cuadrada",
+    "potencia_kw": 30,
+    "fraccion_media": 0.015555555555555555,
+    "desviacion_estandar": 0.02096034082766188,
+    "cv": 1.3474504817782638
+  },
+  {
+    "formacion": "cuadrada",
+    "potencia_kw": 40,
+    "fraccion_media": 0.013333333333333334,
+    "desviacion_estandar": 0.022488822255440185,
+    "cv": 1.6866616691580139
+  },
+  {
+    "formacion": "cuadrada",
+    "potencia_kw": 50,
+    "fraccion_media": 0.020000000000000004,
+    "desviacion_estandar": 0.028500184848496465,
+    "cv": 1.425009242424823
+  },
+  {
+    "formacion": "cuadrada",
+    "potencia_kw": 65,
+    "fraccion_media": 0.02666666666666667,
+    "desviacion_estandar": 0.02537081317024624,
+    "cv": 0.9514054938842339
+  },
+  {
+    "formacion": "cuadrada",
+    "potencia_kw": 80,
+    "fraccion_media": 0.03222222222222222,
+    "desviacion_estandar": 0.025496349875235254,
+    "cv": 0.7912660306107493
+  },
+  {
+    "formacion": "cuadrada",
+    "potencia_kw": 100,
+    "fraccion_media": 0.03111111111111111,
+    "desviacion_estandar": 0.02758939955982224,
+    "cv": 0.8868021287085721
+  },
+  {
+    "formacion": "circular",
+    "potencia_kw": 10,
+    "fraccion_media": 0.0011111111111111111,
+    "desviacion_estandar": 0.006085806194501846,
+    "cv": 5.477225575051661
+  },
+  {
+    "formacion": "circular",
+    "potencia_kw": 15,
+    "fraccion_media": 0.0011111111111111111,
+    "desviacion_estandar": 0.006085806194501846,
+    "cv": 5.477225575051661
+  },
+  {
+    "formacion": "circular",
+    "potencia_kw": 20,
+    "fraccion_media": 0.0,
+    "desviacion_estandar": 0.0,
+    "cv": null
+  },
+  {
+    "formacion": "circular",
+    "potencia_kw": 30,
+    "fraccion_media": 0.0033333333333333335,
+    "desviacion_estandar": 0.010170952554312156,
+    "cv": 3.0512857662936463
+  },
+  {
+    "formacion": "circular",
+    "potencia_kw": 40,
+    "fraccion_media": 0.0022222222222222222,
+    "desviacion_estandar": 0.008456937723415414,
+    "cv": 3.805621975536936
+  },
+  {
+    "formacion": "circular",
+    "potencia_kw": 50,
+    "fraccion_media": 0.0022222222222222222,
+    "desviacion_estandar": 0.008456937723415412,
+    "cv": 3.8056219755369356
+  },
+  {
+    "formacion": "circular",
+    "potencia_kw": 65,
+    "fraccion_media": 0.0011111111111111111,
+    "desviacion_estandar": 0.006085806194501846,
+    "cv": 5.477225575051661
+  },
+  {
+    "formacion": "circular",
+    "potencia_kw": 80,
+    "fraccion_media": 0.0077777777777777776,
+    "desviacion_estandar": 0.014339435571735877,
+    "cv": 1.8436417163660412
+  },
+  {
+    "formacion": "circular",
+    "potencia_kw": 100,
+    "fraccion_media": 0.005555555555555556,
+    "desviacion_estandar": 0.012634967392981724,
+    "cv": 2.27429413073671
+  }
+]
