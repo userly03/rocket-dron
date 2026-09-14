@@ -252,3 +252,42 @@ No incluido en este alcance (el usuario pidió específicamente la paleta):
 la iconografía sigue en emoji — esa es una pieza más grande (20+ lugares)
 que se evaluó por separado en la propuesta original, pendiente de que el
 usuario la pida.
+
+---
+
+## 7. Iconografía — ✅ CERRADO
+
+Reemplazo de los ~28 emoji distintos de la UI por un set propio de
+iconos de línea (24×24, trazo, sin relleno salvo acentos puntuales) —
+la otra mitad de `docs/propuesta_identidad_visual.html`.
+
+**Arquitectura**: un solo sprite (`<svg><defs><symbol id="i-nombre">`) al
+principio de `frontend/index.html` — una sola fuente de verdad para la
+forma de cada ícono. Se consume con `<use href="#i-nombre">` tanto desde
+HTML estático como desde HTML generado en JS (nuevo
+`frontend/js/icons.js`, expone `Icon(nombre)`); ningún ícono está
+duplicado en dos lugares. `.icon`/`.icon-fill` en `style.css` gobiernan
+tamaño (1em, escala con el texto) y si es trazo o relleno.
+
+**Bug real encontrado y corregido en el camino**: varios botones
+(`runLabButton`, el botón de plan WTA, el de reproducción de réplica)
+guardaban y restauraban su texto con `btn.textContent` para mostrar
+"CALCULANDO..." durante una espera. Con el ícono ahora dentro del botón
+como HTML, `textContent` lo habría descartado silenciosamente — el botón
+habría perdido su ícono para siempre después del primer uso. Se cambiaron
+esos 3 lugares a `.innerHTML` antes de que el bug llegara a verse.
+
+**Segundo problema encontrado (de diseño, no de código)**: los íconos de
+llama y misil, dibujados como un único contorno cerrado "de silueta",
+casi no se veían al quedar sin relleno (el resto del set usa trazo, sin
+relleno, por diseño). Se rediseñaron: la llama como dos curvas anidadas
+(mismo patrón que usa Lucide), el misil como líneas separadas (cono +
+guías + ventana) en vez de un cuerpo cerrado — ambos verificados de nuevo
+en el navegador después del cambio.
+
+Verificado en vivo: sprite carga sin roture, los 48 `<use>` del HTML
+estático resuelven contra un símbolo real (0 faltantes), los íconos
+generados dinámicamente (dado/ADN en la lista de corridas, cañón/misil en
+el historial de disparos, reloj de arena/check/alerta en badges de
+estado, play/pausa en el reproductor) probados disparando corridas reales
+— consola limpia en todo el recorrido.

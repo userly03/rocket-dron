@@ -157,7 +157,7 @@
       }
       shots.slice().reverse().forEach((s) => {
         const li = document.createElement("li");
-        const icon = s.tipo === "misil" ? "🚀" : "🔥";
+        const icon = s.tipo === "misil" ? Icon("rocket") : Icon("flame");
         li.innerHTML = `${icon} #${s.id} · ${s.tipo} · t=${s.tiempo}s · ` +
           `${s.neutralizados}/${s.afectados} neutralizados · ${Math.round(s.tasa_exito * 100)}%`;
         listEl.appendChild(li);

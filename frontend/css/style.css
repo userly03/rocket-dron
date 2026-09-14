@@ -46,6 +46,31 @@ html {
   font-size: 14px;
 }
 
+/* Iconos de línea (reemplazan el emoji — ver el sprite <symbol> al
+   principio de index.html y frontend/js/icons.js para el helper que los
+   genera desde JS). 1em por defecto para que escalen con el texto que
+   los acompaña; vertical-align los alinea con la línea de base del
+   texto en vez de flotar por encima. .icon-fill es la excepción para los
+   tres controles de transporte (play/pausa/detener), que se leen como
+   forma sólida, no como línea — ver los <symbol> i-play/i-pause/i-stop. */
+.icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.15em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+
+.icon-fill {
+  fill: currentColor;
+  stroke: none;
+}
+
 body {
   font-family: var(--font-mono);
   background: var(--bg-primary);

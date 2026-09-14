@@ -154,20 +154,23 @@
   // P3-B, ver frontend/js/replay2d.js): los fotogramas ya están completos
   // cuando llegan acá (la réplica ya terminó de calcularse) — esto solo
   // los recorre con un intervalo fijo, no simula nada en el cliente.
+  const LABEL_PLAY = `${Icon("play", "icon-fill")} Reproducir`;
+  const LABEL_PAUSE = `${Icon("pause", "icon-fill")} Pausar`;
+
   function wireReplayPlayer(player, refs) {
     refs.slider.addEventListener("input", () => {
       player.pause();
-      refs.playBtn.textContent = "▶ Reproducir";
+      refs.playBtn.innerHTML = LABEL_PLAY;
       player.seek(+refs.slider.value);
       refs.frameLabel.textContent = `${player.currentIndex() + 1}/${player.frameCount()}`;
     });
     refs.playBtn.addEventListener("click", () => {
       if (player.isPlaying()) {
         player.pause();
-        refs.playBtn.textContent = "▶ Reproducir";
+        refs.playBtn.innerHTML = LABEL_PLAY;
         return;
       }
-      refs.playBtn.textContent = "⏸ Pausar";
+      refs.playBtn.innerHTML = LABEL_PAUSE;
       player.play(12, (idx, total) => {
         refs.slider.value = idx;
         refs.frameLabel.textContent = `${idx + 1}/${total}`;
@@ -180,7 +183,7 @@
     refs.slider.max = Math.max(0, frames.length - 1);
     refs.slider.value = 0;
     refs.frameLabel.textContent = frames.length ? `1/${frames.length}` : "";
-    refs.playBtn.textContent = "▶ Reproducir";
+    refs.playBtn.innerHTML = LABEL_PLAY;
     wrapEl.classList.remove("hidden");
   }
 
@@ -288,7 +291,7 @@
       grupos.set(key, g);
     }
     ui.wtaList.innerHTML = [...grupos.values()].map((g) => {
-      const arma = g.tipo === "canion" ? "🔥 Cañón" : "🚀 Misil";
+      const arma = g.tipo === "canion" ? `${Icon("flame")} Cañón` : `${Icon("rocket")} Misil`;
       const cuenta = g.n > 1 ? `${g.n}× ` : "";
       return `<li class="wta-${g.tipo}">${cuenta}${arma} → cluster ${g.cluster_id} (${g.cluster_tamano} drones), ~${g.bajas_suma.toFixed(2)} bajas esp.</li>`;
     }).join("");
@@ -308,16 +311,16 @@
   }
 
   async function runLabButton(btn, fn) {
-    const original = btn.textContent;
+    const original = btn.innerHTML;
     btn.disabled = true;
-    btn.textContent = "⏳ CALCULANDO...";
+    btn.innerHTML = `${Icon("hourglass")} CALCULANDO...`;
     try {
       await fn();
     } catch (e) {
       addLog(`Laboratorio: ${e.message}`, "error");
     } finally {
       btn.disabled = false;
-      btn.textContent = original;
+      btn.innerHTML = original;
     }
   }
 
@@ -505,12 +508,12 @@
   // esta sesión, actualizado a mano cuando arranca un job y en cada poll.
   function renderLabRuns() {
     const mc = state.mcRuns.map((r) => ({
-      icon: "🎲", label: `Monte Carlo ${r.id}`,
+      icon: Icon("dice"), label: `Monte Carlo ${r.id}`,
       detail: `${r.config?.arma?.tipo ?? "?"} · ${r.completadas}/${r.replicas} réplicas`,
       status: r.status,
     }));
     const coevo = state.coevoRunsLocal.map((r) => ({
-      icon: "🧬", label: `Coevolución ${r.id}`,
+      icon: Icon("dna"), label: `Coevolución ${r.id}`,
       detail: `${r.n_generaciones} generaciones`,
       status: r.status,
     }));
@@ -520,7 +523,7 @@
       return;
     }
     ui.labRunsList.innerHTML = runs.map((r) => {
-      const badge = { completado: "✅", corriendo: "⏳", error: "⚠" }[r.status] || r.status;
+      const badge = { completado: Icon("check"), corriendo: Icon("hourglass"), error: Icon("alert") }[r.status] || r.status;
       return `<li>${r.icon} ${r.label} — ${r.detail} — ${badge}</li>`;
     }).join("");
   }
@@ -718,8 +721,11 @@
     document.body.classList.add(`view-${mode}`);
     ui.viewButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.view === mode));
 
-    const titles = { tactical: "🗺️ Mapa Táctico 3D", physical: "🌡️ Mapa Físico + Calor 3D" };
-    ui.mapTitle.textContent = titles[mode] || titles.tactical;
+    const titles = {
+      tactical: `${Icon("map")} Mapa Táctico 3D`,
+      physical: `${Icon("thermo")} Mapa Físico + Calor 3D`,
+    };
+    ui.mapTitle.innerHTML = titles[mode] || titles.tactical;
 
     window.Render3D?.setViewMode(mode);
   }
@@ -864,7 +870,7 @@
 
     ui.btnWtaPlan.addEventListener("click", async () => {
       ui.btnWtaPlan.disabled = true;
-      const textoOriginal = ui.btnWtaPlan.textContent;
+      const htmlOriginal = ui.btnWtaPlan.innerHTML;
       // El cálculo es Monte Carlo real (no una heurística instantánea): con
       // muchas opciones de disparo disponibles puede tardar varios
       // segundos — se avisa explícitamente para que no parezca colgado.
@@ -872,7 +878,7 @@
       // trade-off deliberado acá: más rápido para una sugerencia
       // interactiva, a costa de algo más de ruido en la estimación — la
       // ejecución del plan no depende de esta precisión.
-      ui.btnWtaPlan.textContent = "⏳ CALCULANDO...";
+      ui.btnWtaPlan.innerHTML = `${Icon("hourglass")} CALCULANDO...`;
       try {
         const plan = await api("/api/targeting/plan?n_muestras=40");
         renderWtaPlan(plan);
@@ -883,7 +889,7 @@
           "info",
         );
       } catch (e) { addLog(`Error calculando plan: ${e.message}`, "error"); }
-      finally { ui.btnWtaPlan.disabled = false; ui.btnWtaPlan.textContent = textoOriginal; }
+      finally { ui.btnWtaPlan.disabled = false; ui.btnWtaPlan.innerHTML = htmlOriginal; }
     });
 
     ui.btnWtaExecute.addEventListener("click", async () => {
@@ -946,9 +952,9 @@
       ).join("");
       const amenazas = d.amenazas_a_la_validez || [];
       ui.labSensAmenazas.innerHTML = amenazas.length
-        ? `⚠ Domina la incertidumbre y NO está calibrado contra el paper: ` +
+        ? `${Icon("alert")} Domina la incertidumbre y NO está calibrado contra el paper: ` +
           amenazas.map((a) => `<strong>${a.nombre}</strong> (S_T=${a.st.toFixed(3)})`).join(", ")
-        : "✅ Ningún parámetro no calibrado domina la varianza a esta distancia.";
+        : `${Icon("check")} Ningún parámetro no calibrado domina la varianza a esta distancia.`;
       ui.labSensResult.classList.remove("hidden");
       addLog(`Sensibilidad @ ${distancia}m: dominan ${d.dominantes.slice(0, 3).join(", ")}`, "info");
     }));
@@ -957,8 +963,8 @@
       const d = await api("/api/dosis-respuesta?n_por_distancia=150&n_bootstrap=500");
       const a = d.ajuste, c = d.comparacion;
       const badge = c.recupera_la_calibracion
-        ? '<span class="lab-badge-ok">✅ recupera la calibración</span>'
-        : '<span class="lab-badge-bad">⚠ NO recupera la calibración</span>';
+        ? `<span class="lab-badge-ok">${Icon("check")} recupera la calibración</span>`
+        : `<span class="lab-badge-bad">${Icon("alert")} NO recupera la calibración</span>`;
       ui.labDosisResult.innerHTML = `
         <div>Función de enlace: <strong>${a.link_function}</strong></div>
         <div>E₅₀ ajustado: <strong>${a.e50_v_m.toFixed(1)} V/m</strong> (IC95%: ${a.ic95_e50_v_m[0].toFixed(1)}–${a.ic95_e50_v_m[1].toFixed(1)}) — configurado: ${c.e50_configurado.toFixed(1)}</div>

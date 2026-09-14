@@ -15,12 +15,52 @@
   </script>
 </head>
 <body>
+  <!-- Sprite de iconos de línea — reemplaza los emoji (ver
+       docs/propuesta_identidad_visual.html §iconografía). Un solo lugar
+       con la forma de cada símbolo; <use href="#i-nombre"> lo referencia
+       tanto acá como desde el HTML generado en JS (frontend/js/icons.js).
+       Por defecto trazo (stroke), sin relleno — ver .icon/.icon-fill en
+       style.css. Los símbolos filled (play/pause/stop) declaran su propio
+       fill porque representan control transport, no un objeto de línea. -->
+  <svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden" focusable="false">
+    <defs>
+      <symbol viewBox="0 0 24 24" id="i-shield"><path d="M12 2 4 5v6c0 5.5 3.5 9 8 11 4.5-2 8-5.5 8-11V5z"/></symbol>
+      <symbol viewBox="0 0 24 24" id="i-target"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5.2"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></symbol>
+      <symbol viewBox="0 0 24 24" id="i-map"><path d="M3 6.5 8.5 4l7 3 5.5-2.5v14L15.5 21l-7-3L3 20.5z"/><path d="M8.5 4v14M15.5 7v14"/></symbol>
+      <symbol viewBox="0 0 24 24" id="i-thermo"><path d="M14 4a2 2 0 0 0-4 0v9.5a4.5 4.5 0 1 0 4 0V4Z"/></symbol>
+      <symbol viewBox="0 0 24 24" id="i-bar-chart"><path d="M3 3v18h18"/><path d="M8 17V10M13 17V6M18 17v-4"/></symbol>
+      <symbol viewBox="0 0 24 24" id="i-flask"><path d="M9 2h6"/><path d="M10 2v6.2a2 2 0 0 1-.4 1.2L5 16.5A2.5 2.5 0 0 0 7 20.3h10a2.5 2.5 0 0 0 2-4L14.4 9.4a2 2 0 0 1-.4-1.2V2"/><path d="M7.5 14.5h9"/></symbol>
+      <symbol viewBox="0 0 24 24" id="i-camera"><path d="M15 6l-1.5-2h-3L9 6H4.8A1.8 1.8 0 0 0 3 7.8v9.4A1.8 1.8 0 0 0 4.8 19h14.4a1.8 1.8 0 0 0 1.8-1.8V7.8A1.8 1.8 0 0 0 19.2 6z"/><circle cx="12" cy="13" r="3.2"/></symbol>
+      <symbol viewBox="0 0 24 24" id="i-radar"><path d="M12 3v4M8.5 5.8a6.5 6.5 0 0 1 7 0M5.3 3.3a10.5 10.5 0 0 1 13.4 0"/><circle cx="12" cy="14.5" r="1.8" fill="currentColor" stroke="none"/><path d="M12 16.3V21"/></symbol>
+      <symbol viewBox="0 0 24 24" id="i-gear"><circle cx="12" cy="12" r="2.8"/><path d="M12 3v2.2M12 18.8V21M4.9 4.9l1.6 1.6M17.5 17.5l1.6 1.6M3 12h2.2M18.8 12H21M4.9 19.1l1.6-1.6M17.5 6.5l1.6-1.6"/></symbol>
+      <symbol viewBox="0 0 24 24" id="i-flame"><path d="M12 3c-3 4-5 6.3-5 9.5a5 5 0 0 0 10 0C17 9.3 15 7 12 3Z"/><path d="M12 8.3c-1.1 1.4-2 2.5-2 3.9a2 2 0 0 0 4 0c0-1.4-.9-2.5-2-3.9Z"/></symbol>
+      <symbol viewBox="0 0 24 24" id="i-rocket"><path d="M9.5 11 12 3l2.5 8"/><path d="M9.5 11v4l-2.3 3M14.5 11v4l2.3 3"/><path d="M9.5 11h5"/><circle cx="12" cy="7.5" r="1" fill="currentColor" stroke="none"/></symbol>
+      <symbol viewBox="0 0 24 24" id="i-refresh"><path d="M3.5 12a8.5 8.5 0 0 1 14.6-6M20.5 12a8.5 8.5 0 0 1-14.6 6"/><path d="M18 2.5V6h-3.5M6 21.5V18h3.5"/></symbol>
+      <symbol viewBox="0 0 24 24" id="i-folder"><path d="M3.5 6.5a1 1 0 0 1 1-1h5l2 2h8a1 1 0 0 1 1 1v9.5a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z"/></symbol>
+      <symbol viewBox="0 0 24 24" id="i-power"><path d="M12 2.5v8"/><path d="M6.8 6a7.5 7.5 0 1 0 10.4 0"/></symbol>
+      <symbol viewBox="0 0 24 24" id="i-clipboard"><rect x="5" y="3.5" width="14" height="18" rx="2"/><path d="M9 3.5V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v.5"/><path d="M8.5 9h7M8.5 13h7M8.5 17h4.5"/></symbol>
+      <symbol viewBox="0 0 24 24" id="i-bolt"><path d="M12.5 2 4 13h6l-1 9 8.5-11h-6z"/></symbol>
+      <symbol viewBox="0 0 24 24" id="i-alert"><path d="M12 3 2 20h20L12 3Z"/><path d="M12 9.5v4.3"/><circle cx="12" cy="17" r="0.9" fill="currentColor" stroke="none"/></symbol>
+      <symbol viewBox="0 0 24 24" id="i-atom"><ellipse cx="12" cy="12" rx="9.5" ry="3.8"/><ellipse cx="12" cy="12" rx="9.5" ry="3.8" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="9.5" ry="3.8" transform="rotate(120 12 12)"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/></symbol>
+      <symbol viewBox="0 0 24 24" id="i-trend"><path d="M3 17l6-6 4 4 8-9"/><path d="M15 6h6v6"/></symbol>
+      <symbol viewBox="0 0 24 24" id="i-microscope"><path d="M7 21h11"/><path d="M9.5 21v-3.2"/><path d="M5.5 17.8h7.6a3.4 3.4 0 0 0 3.4-3.4v-.2a3.4 3.4 0 0 0-2-3.1l-3-1.4"/><path d="M9 8.5 12.5 7l1.6 3.4-3.5 1.6z"/><path d="M10.3 4.7l3.1 6.7"/><circle cx="17" cy="8" r="1" fill="currentColor" stroke="none"/></symbol>
+      <symbol viewBox="0 0 24 24" id="i-scroll"><path d="M6.5 2.5h9a2 2 0 0 1 2 2v15a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-15a2 2 0 0 1 2-2Z"/><path d="M9 7.5h6M9 11.5h6M9 15.5h4"/></symbol>
+      <symbol viewBox="0 0 24 24" id="i-dice"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><circle cx="8" cy="8" r="1.1" fill="currentColor" stroke="none"/><circle cx="16" cy="8" r="1.1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none"/><circle cx="8" cy="16" r="1.1" fill="currentColor" stroke="none"/><circle cx="16" cy="16" r="1.1" fill="currentColor" stroke="none"/></symbol>
+      <symbol viewBox="0 0 24 24" id="i-dna"><path d="M6 3c0 6 12 3 12 9s-12 3-12 9"/><path d="M7 6.5h10M7 17.5h10M6.5 12h11"/></symbol>
+      <symbol viewBox="0 0 24 24" id="i-play"><path d="M7 4.5v15l13-7.5z" fill="currentColor" stroke="none"/></symbol>
+      <symbol viewBox="0 0 24 24" id="i-pause"><rect x="6" y="4.5" width="4" height="15" rx="1" fill="currentColor" stroke="none"/><rect x="14" y="4.5" width="4" height="15" rx="1" fill="currentColor" stroke="none"/></symbol>
+      <symbol viewBox="0 0 24 24" id="i-stop"><rect x="5.5" y="5.5" width="13" height="13" rx="2" fill="currentColor" stroke="none"/></symbol>
+      <symbol viewBox="0 0 24 24" id="i-hourglass"><path d="M6.5 2.5h11M6.5 21.5h11"/><path d="M7.5 2.5c0 5 4.5 6 4.5 9.5s-4.5 4.5-4.5 9.5M16.5 2.5c0 5-4.5 6-4.5 9.5s4.5 4.5 4.5 9.5"/></symbol>
+      <symbol viewBox="0 0 24 24" id="i-check"><path d="M4.5 12.5 9.5 17.5 19.5 6.5"/></symbol>
+    </defs>
+  </svg>
+
   <div id="demo-banner" class="demo-banner hidden" role="status">¡DEMO EN EJECUCIÓN!</div>
 
   <div class="app">
     <header class="header">
       <div class="header-brand">
-        <span class="header-icon" aria-hidden="true">🛡️</span>
+        <span class="header-icon" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="#i-shield"></use></svg></span>
         <div>
           <h1>Sistema de Guerra Electromagnética</h1>
           <p class="subtitle">HPM Simulator — Panel Táctico</p>
@@ -35,16 +75,16 @@
     </header>
 
     <nav class="nav-tabs" role="tablist" aria-label="Secciones">
-      <button type="button" class="nav-tab active" data-tab="operacion" role="tab" aria-selected="true" title="Simulación en vivo: mapa, tiro, controles">🎯 Operación</button>
-      <button type="button" class="nav-tab" data-tab="planificacion" role="tab" aria-selected="false" title="Decisión táctica: qué blanco atacar primero">🗺️ Planificación</button>
-      <button type="button" class="nav-tab" data-tab="analisis" role="tab" aria-selected="false" title="Diagnóstico instantáneo del modelo físico de daño">📊 Análisis Físico</button>
-      <button type="button" class="nav-tab" data-tab="laboratorio" role="tab" aria-selected="false" title="Corridas en background: Monte Carlo y coevolución">🧪 Laboratorio</button>
+      <button type="button" class="nav-tab active" data-tab="operacion" role="tab" aria-selected="true" title="Simulación en vivo: mapa, tiro, controles"><svg class="icon" aria-hidden="true"><use href="#i-target"></use></svg> Operación</button>
+      <button type="button" class="nav-tab" data-tab="planificacion" role="tab" aria-selected="false" title="Decisión táctica: qué blanco atacar primero"><svg class="icon" aria-hidden="true"><use href="#i-map"></use></svg> Planificación</button>
+      <button type="button" class="nav-tab" data-tab="analisis" role="tab" aria-selected="false" title="Diagnóstico instantáneo del modelo físico de daño"><svg class="icon" aria-hidden="true"><use href="#i-bar-chart"></use></svg> Análisis Físico</button>
+      <button type="button" class="nav-tab" data-tab="laboratorio" role="tab" aria-selected="false" title="Corridas en background: Monte Carlo y coevolución"><svg class="icon" aria-hidden="true"><use href="#i-flask"></use></svg> Laboratorio</button>
     </nav>
 
     <!-- ══════════════════════════ OPERACIÓN ══════════════════════════ -->
     <div class="tab-panel active" id="tab-operacion" role="tabpanel">
       <section class="metrics-panel panel" aria-label="Métricas de simulación">
-        <h2 class="panel-title">📊 Métricas</h2>
+        <h2 class="panel-title"><svg class="icon" aria-hidden="true"><use href="#i-bar-chart"></use></svg> Métricas</h2>
         <div class="metrics-grid">
           <div class="metric-card" title="Cantidad total de drones en el enjambre actual"><span class="metric-label">Drones totales</span><span class="metric-value" id="metric-total">0</span></div>
           <div class="metric-card" title="Drones activos o dañados, todavía en vuelo"><span class="metric-label">Drones activos</span><span class="metric-value metric-active" id="metric-active">0</span></div>
@@ -64,7 +104,7 @@
         <div class="map-column">
           <section class="map-panel panel" aria-label="Mapa táctico">
             <div class="map-header">
-              <h2 class="panel-title" id="map-title">🗺️ Mapa Táctico 3D</h2>
+              <h2 class="panel-title" id="map-title"><svg class="icon" aria-hidden="true"><use href="#i-map"></use></svg> Mapa Táctico 3D</h2>
               <div class="map-legend" id="map-legend">
                 <span class="legend-item"><span class="dot dot-active"></span> Activo</span>
                 <span class="legend-item"><span class="dot dot-hardened"></span> Blindado</span>
@@ -80,9 +120,9 @@
                 <button type="button" class="view-btn active" data-view="tactical" title="Vista 3D del campo de batalla">Táctico</button>
                 <button type="button" class="view-btn" data-view="physical" title="Superpone el mapa de calor de intensidad HPM sobre el terreno">Calor 3D</button>
               </div>
-              <button type="button" id="btn-camera-top" class="btn-camera" title="Restablece la cámara a vista superior (podés arrastrar para rotar libremente)">🎥 Vista superior</button>
+              <button type="button" id="btn-camera-top" class="btn-camera" title="Restablece la cámara a vista superior (podés arrastrar para rotar libremente)"><svg class="icon" aria-hidden="true"><use href="#i-camera"></use></svg> Vista superior</button>
               <label class="checkbox-label checkbox-track-toggle" title="Dibuja una línea entre la posición REAL de cada dron detectado y la posición ESTIMADA por el radar (con la que apunta el misil) — solo se muestra cuando la diferencia es apreciable">
-                <input type="checkbox" id="toggle-tracks"> 📡 Mostrar tracks
+                <input type="checkbox" id="toggle-tracks"> <svg class="icon" aria-hidden="true"><use href="#i-radar"></use></svg> Mostrar tracks
               </label>
             </div>
             <div class="canvas-wrapper">
@@ -103,7 +143,7 @@
 
         <aside class="control-panel panel" aria-label="Panel de control">
           <div class="control-section">
-            <h2 class="panel-title">⚙️ Cañón HPM <span class="panel-tag">Estático</span></h2>
+            <h2 class="panel-title"><svg class="icon" aria-hidden="true"><use href="#i-gear"></use></svg> Cañón HPM <span class="panel-tag">Estático</span></h2>
             <div class="control-group">
               <label for="power-slider">Potencia HPM <span class="control-value"><span id="power-value">45</span> kW</span></label>
               <input type="range" id="power-slider" min="10" max="100" value="45" step="1">
@@ -112,10 +152,10 @@
               <label for="direction-slider">Dirección HPM <span class="control-value"><span id="direction-value">45</span>°</span></label>
               <input type="range" id="direction-slider" min="0" max="359" value="45" step="1">
             </div>
-            <button type="button" id="btn-fire" class="btn btn-fire" title="Dispara el cañón HPM estático en la dirección y potencia configuradas">🔥 DISPARAR CAÑÓN</button>
+            <button type="button" id="btn-fire" class="btn btn-fire" title="Dispara el cañón HPM estático en la dirección y potencia configuradas"><svg class="icon" aria-hidden="true"><use href="#i-flame"></use></svg> DISPARAR CAÑÓN</button>
           </div>
           <div class="control-section control-section-missile">
-            <h2 class="panel-title">🚀 Misil HPM <span class="panel-tag">CHAMP</span></h2>
+            <h2 class="panel-title"><svg class="icon" aria-hidden="true"><use href="#i-rocket"></use></svg> Misil HPM <span class="panel-tag">CHAMP</span></h2>
             <div class="munition-display"><span>Munición:</span><strong id="munition-display">10 / 10</strong></div>
             <div class="control-group">
               <label for="missile-power-slider">Potencia misil <span class="control-value"><span id="missile-power-value">50</span> kW</span></label>
@@ -132,12 +172,12 @@
               <label class="checkbox-label" title="Corrige el rumbo en vuelo persiguiendo al blanco (navegación proporcional). Si se desactiva, vuela balístico en línea recta."><input type="checkbox" id="missile-guiado" checked> Guiado en vuelo (persecución)</label>
             </div>
             <div class="button-group missile-buttons">
-              <button type="button" id="btn-launch-missile" class="btn btn-missile" title="Lanza un misil HPM de efecto de área hacia el enjambre">🚀 LANZAR MISIL</button>
-              <button type="button" id="btn-reload-missile" class="btn btn-reload" title="Recarga 5 misiles HPM">🔄 RECARGAR</button>
+              <button type="button" id="btn-launch-missile" class="btn btn-missile" title="Lanza un misil HPM de efecto de área hacia el enjambre"><svg class="icon" aria-hidden="true"><use href="#i-rocket"></use></svg> LANZAR MISIL</button>
+              <button type="button" id="btn-reload-missile" class="btn btn-reload" title="Recarga 5 misiles HPM"><svg class="icon" aria-hidden="true"><use href="#i-refresh"></use></svg> RECARGAR</button>
             </div>
           </div>
           <div class="control-section">
-            <h2 class="panel-title">📡 Jamming <span class="panel-tag">Continuo</span></h2>
+            <h2 class="panel-title"><svg class="icon" aria-hidden="true"><use href="#i-radar"></use></svg> Jamming <span class="panel-tag">Continuo</span></h2>
             <div class="control-group">
               <label for="jam-power-slider">Potencia jammer <span class="control-value"><span id="jam-power-value">80</span> kW</span></label>
               <input type="range" id="jam-power-slider" min="1" max="100" value="80" step="1">
@@ -151,12 +191,12 @@
               <input type="range" id="jam-aperture-slider" min="5" max="180" value="45" step="5">
             </div>
             <div class="button-group">
-              <button type="button" id="btn-jam-start" class="btn btn-fire" title="Activa el jammer: niega el enlace de control a los drones dentro del cono, sin dañarlos físicamente">📡 ACTIVAR JAMMING</button>
-              <button type="button" id="btn-jam-stop" class="btn btn-reset" title="Desactiva el jammer">⏹️ DETENER JAMMING</button>
+              <button type="button" id="btn-jam-start" class="btn btn-fire" title="Activa el jammer: niega el enlace de control a los drones dentro del cono, sin dañarlos físicamente"><svg class="icon" aria-hidden="true"><use href="#i-radar"></use></svg> ACTIVAR JAMMING</button>
+              <button type="button" id="btn-jam-stop" class="btn btn-reset" title="Desactiva el jammer"><svg class="icon icon-fill" aria-hidden="true"><use href="#i-stop"></use></svg> DETENER JAMMING</button>
             </div>
           </div>
           <div class="control-section">
-            <h2 class="panel-title">🎯 Simulación</h2>
+            <h2 class="panel-title"><svg class="icon" aria-hidden="true"><use href="#i-target"></use></svg> Simulación</h2>
             <div class="control-group">
               <label for="formation-select">Formación</label>
               <select id="formation-select">
@@ -178,7 +218,7 @@
               </select>
             </div>
             <div class="button-group">
-              <button type="button" id="btn-load-scenario" class="btn btn-reset" title="Aplica la formación, cantidad y parámetros HPM del escenario elegido">📂 CARGAR ESCENARIO</button>
+              <button type="button" id="btn-load-scenario" class="btn btn-reset" title="Aplica la formación, cantidad y parámetros HPM del escenario elegido"><svg class="icon" aria-hidden="true"><use href="#i-folder"></use></svg> CARGAR ESCENARIO</button>
             </div>
             <div class="control-group">
               <label>Velocidad de simulación</label>
@@ -190,16 +230,16 @@
               </div>
             </div>
             <div class="button-group">
-              <button type="button" id="btn-start" class="btn btn-start" title="Arranca o reanuda el bucle de simulación">▶️ INICIAR SIMULACIÓN</button>
-              <button type="button" id="btn-stop" class="btn btn-stop" title="Pausa el bucle de simulación sin perder el estado">⏹️ PAUSAR SIMULACIÓN</button>
-              <button type="button" id="btn-reset" class="btn btn-reset" title="Vuelve al estado inicial: drones, misiles y métricas en cero">♻️ REINICIAR</button>
+              <button type="button" id="btn-start" class="btn btn-start" title="Arranca o reanuda el bucle de simulación"><svg class="icon icon-fill" aria-hidden="true"><use href="#i-play"></use></svg> INICIAR SIMULACIÓN</button>
+              <button type="button" id="btn-stop" class="btn btn-stop" title="Pausa el bucle de simulación sin perder el estado"><svg class="icon icon-fill" aria-hidden="true"><use href="#i-stop"></use></svg> PAUSAR SIMULACIÓN</button>
+              <button type="button" id="btn-reset" class="btn btn-reset" title="Vuelve al estado inicial: drones, misiles y métricas en cero"><svg class="icon" aria-hidden="true"><use href="#i-power"></use></svg> REINICIAR</button>
             </div>
           </div>
         </aside>
       </main>
 
       <section class="logs-panel panel" aria-label="Registro de eventos">
-        <h2 class="panel-title">📋 Registro de Eventos</h2>
+        <h2 class="panel-title"><svg class="icon" aria-hidden="true"><use href="#i-clipboard"></use></svg> Registro de Eventos</h2>
         <ul id="log-list" class="log-list" role="log" aria-live="polite"></ul>
       </section>
     </div>
@@ -208,22 +248,22 @@
     <div class="tab-panel" id="tab-planificacion" role="tabpanel" hidden>
       <div class="view-grid-2">
         <section class="panel" id="wta-section">
-          <h2 class="panel-title">🎯 Plan Óptimo <span class="panel-tag">WTA</span></h2>
+          <h2 class="panel-title"><svg class="icon" aria-hidden="true"><use href="#i-target"></use></svg> Plan Óptimo <span class="panel-tag">WTA</span></h2>
           <p class="wta-hint">Agrupa los blancos detectados por el radar (tracks, no la posición real) y calcula qué disparo conviene a cuál grupo, dado el presupuesto real de energía y munición. Es Monte Carlo real, no una heurística instantánea — con muchas opciones disponibles puede tardar varios segundos.</p>
           <div class="button-group">
-            <button type="button" id="btn-wta-plan" class="btn btn-reset" title="Calcula la asignación óptima arma-blanco (greedy + búsqueda local, validado contra fuerza bruta)">🎯 SUGERIR PLAN ÓPTIMO</button>
+            <button type="button" id="btn-wta-plan" class="btn btn-reset" title="Calcula la asignación óptima arma-blanco (greedy + búsqueda local, validado contra fuerza bruta)"><svg class="icon" aria-hidden="true"><use href="#i-target"></use></svg> SUGERIR PLAN ÓPTIMO</button>
           </div>
           <div id="wta-summary" class="wta-summary hidden">
             <span>Bajas esperadas totales: <strong id="wta-total">—</strong></span>
           </div>
           <ul id="wta-list" class="shot-history-list wta-list"></ul>
           <div class="button-group">
-            <button type="button" id="btn-wta-execute" class="btn btn-fire hidden" title="Ejecuta cada disparo del plan en orden (cañón espera recarga si hace falta)">⚡ EJECUTAR PLAN</button>
+            <button type="button" id="btn-wta-execute" class="btn btn-fire hidden" title="Ejecuta cada disparo del plan en orden (cañón espera recarga si hace falta)"><svg class="icon" aria-hidden="true"><use href="#i-bolt"></use></svg> EJECUTAR PLAN</button>
           </div>
         </section>
 
         <section class="panel chart-box-risk">
-          <h2 class="panel-title">⚠ En riesgo latente <span class="control-value"><span id="risk-count">0</span></span></h2>
+          <h2 class="panel-title"><svg class="icon" aria-hidden="true"><use href="#i-alert"></use></svg> En riesgo latente <span class="control-value"><span id="risk-count">0</span></span></h2>
           <p class="wta-hint">Drones impactados que todavía no cayeron — pueden recuperarse o fallar más tarde. Candidatos a rematar antes de que se recuperen.</p>
           <ul id="risk-list" class="shot-history-list risk-list">
             <li class="shot-empty">Ningún dron en ventana de riesgo</li>
@@ -235,7 +275,7 @@
     <!-- ═══════════════════════ ANÁLISIS FÍSICO ═══════════════════════ -->
     <div class="tab-panel" id="tab-analisis" role="tabpanel" hidden>
       <details class="collapsible" id="physics-panel">
-        <summary class="panel-title">⚛️ Modelo Físico <span class="collapsible-hint">avanzado</span></summary>
+        <summary class="panel-title"><svg class="icon" aria-hidden="true"><use href="#i-atom"></use></svg> Modelo Físico <span class="collapsible-hint">avanzado</span></summary>
         <div class="physics-formula" id="physics-formula">—</div>
         <div class="physics-grid">
           <div class="physics-item"><span>Potencia</span><strong id="phys-power">— kW</strong></div>
@@ -266,7 +306,7 @@
         <p class="wta-hint">Qué parámetro domina la incertidumbre del modelo de daño a una distancia dada — y si ese parámetro está calibrado contra el paper o no.</p>
         <div class="lab-controls">
           <label>Distancia <input type="number" id="lab-sens-distancia" value="30" min="1" max="2000" step="1"> m</label>
-          <button type="button" id="btn-lab-sensibilidad" class="btn btn-reset">📊 CALCULAR SENSIBILIDAD</button>
+          <button type="button" id="btn-lab-sensibilidad" class="btn btn-reset"><svg class="icon" aria-hidden="true"><use href="#i-bar-chart"></use></svg> CALCULAR SENSIBILIDAD</button>
         </div>
         <div id="lab-sens-result" class="lab-result hidden">
           <div id="lab-sens-bars" class="lab-bars"></div>
@@ -278,7 +318,7 @@
         <h3>Curva dosis-respuesta (P2-B)</h3>
         <p class="wta-hint">Ajusta por máxima verosimilitud la curva que el motor REAL produce (con blindaje, duty cycle, huella de susceptibilidad) y la compara contra los parámetros configurados.</p>
         <div class="lab-controls">
-          <button type="button" id="btn-lab-dosis" class="btn btn-reset">📈 AJUSTAR CURVA</button>
+          <button type="button" id="btn-lab-dosis" class="btn btn-reset"><svg class="icon" aria-hidden="true"><use href="#i-trend"></use></svg> AJUSTAR CURVA</button>
         </div>
         <div id="lab-dosis-result" class="lab-result hidden"></div>
       </div>
@@ -288,7 +328,7 @@
         <p class="wta-hint">A este campo, ¿qué subsistema falla primero? Usa la Tabla 1 del paper — informativo, el motor en vivo sigue con el modelo agregado.</p>
         <div class="lab-controls">
           <label>Distancia <input type="number" id="lab-subs-distancia" value="30" min="1" max="2000" step="1"> m</label>
-          <button type="button" id="btn-lab-subsistemas" class="btn btn-reset">🔬 CALCULAR DESGLOSE</button>
+          <button type="button" id="btn-lab-subsistemas" class="btn btn-reset"><svg class="icon" aria-hidden="true"><use href="#i-microscope"></use></svg> CALCULAR DESGLOSE</button>
         </div>
         <div id="lab-subs-result" class="lab-result hidden"></div>
       </div>
@@ -297,14 +337,14 @@
     <!-- ═══════════════════════ LABORATORIO ═══════════════════════ -->
     <div class="tab-panel" id="tab-laboratorio" role="tabpanel" hidden>
       <section class="panel">
-        <h2 class="panel-title">📜 Corridas <span class="collapsible-hint">Monte Carlo + coevolución, esta sesión de backend</span></h2>
+        <h2 class="panel-title"><svg class="icon" aria-hidden="true"><use href="#i-scroll"></use></svg> Corridas <span class="collapsible-hint">Monte Carlo + coevolución, esta sesión de backend</span></h2>
         <ul id="lab-runs-list" class="shot-history-list">
           <li class="shot-empty">Sin corridas todavía</li>
         </ul>
       </section>
 
       <div class="lab-block">
-        <h3>🎲 Experimentos Monte Carlo (P1-A)</h3>
+        <h3><svg class="icon" aria-hidden="true"><use href="#i-dice"></use></svg> Experimentos Monte Carlo (P1-A)</h3>
         <p class="wta-hint">El estimador corregido: fracción media de drones neutralizados por réplica, con intervalo de confianza por bootstrap — no "¿se aniquiló el 100%?", que vale 0 en casi todo el rango de combate. Corre en background sobre el motor real, no la simulación en vivo.</p>
         <div class="lab-controls">
           <label>Formación
@@ -327,7 +367,7 @@
           <label>Réplicas <input type="number" id="exp-replicas" value="20" min="2" max="200" step="1"></label>
           <label>t_max (s) <input type="number" id="exp-tmax" value="20" min="1" max="120" step="1"></label>
           <label class="lab-checkbox"><input type="checkbox" id="exp-con-preview" checked> Capturar réplica 0 para reproducirla</label>
-          <button type="button" id="btn-exp-start" class="btn btn-reset">🎲 CORRER EXPERIMENTO</button>
+          <button type="button" id="btn-exp-start" class="btn btn-reset"><svg class="icon" aria-hidden="true"><use href="#i-dice"></use></svg> CORRER EXPERIMENTO</button>
         </div>
         <div id="exp-progress" class="lab-result hidden">
           <div id="exp-status-line"></div>
@@ -335,25 +375,25 @@
         <div id="exp-result" class="lab-result hidden"></div>
         <div id="exp-replay" class="replay-wrap hidden">
           <div class="replay-head">
-            <span>▶ Réplica 0 — así fue, no una aproximación</span>
+            <span><svg class="icon icon-fill" aria-hidden="true"><use href="#i-play"></use></svg> Réplica 0 — así fue, no una aproximación</span>
             <span id="exp-replay-frame" class="replay-frame-label"></span>
           </div>
           <div class="chart-box replay-chart-box"><canvas id="exp-replay-canvas" height="220"></canvas></div>
           <div class="replay-controls">
-            <button type="button" id="exp-replay-play" class="btn btn-mini">▶ Reproducir</button>
+            <button type="button" id="exp-replay-play" class="btn btn-mini"><svg class="icon icon-fill" aria-hidden="true"><use href="#i-play"></use></svg> Reproducir</button>
             <input type="range" id="exp-replay-slider" min="0" max="0" value="0" step="1">
           </div>
         </div>
       </div>
 
       <div class="lab-block">
-        <h3>🧬 Coevolución genética arma↔enjambre (P3-B)</h3>
+        <h3><svg class="icon" aria-hidden="true"><use href="#i-dna"></use></svg> Coevolución genética arma↔enjambre (P3-B)</h3>
         <p class="wta-hint">El arma y la defensa evolucionan una CONTRA la otra, generación tras generación, con el runner Monte Carlo real como fitness — no una heurística. Corre en background: tarda de decenas de segundos a un par de minutos según los parámetros.</p>
         <div class="lab-controls">
           <label>Generaciones <input type="number" id="coevo-generaciones" value="6" min="1" max="15" step="1"></label>
           <label>Población <input type="number" id="coevo-poblacion" value="8" min="2" max="20" step="1"></label>
           <label>Réplicas <input type="number" id="coevo-replicas" value="4" min="1" max="10" step="1"></label>
-          <button type="button" id="btn-coevo-start" class="btn btn-reset">🧬 CORRER COEVOLUCIÓN</button>
+          <button type="button" id="btn-coevo-start" class="btn btn-reset"><svg class="icon" aria-hidden="true"><use href="#i-dna"></use></svg> CORRER COEVOLUCIÓN</button>
         </div>
         <div id="coevo-progress" class="lab-result hidden">
           <div id="coevo-status-line"></div>
@@ -362,12 +402,12 @@
         <div id="coevo-result" class="lab-result hidden"></div>
         <div id="coevo-replay" class="replay-wrap hidden">
           <div class="replay-head">
-            <span>▶ Mejor arma vs. mejor defensa — el enfrentamiento que el GA encontró</span>
+            <span><svg class="icon icon-fill" aria-hidden="true"><use href="#i-play"></use></svg> Mejor arma vs. mejor defensa — el enfrentamiento que el GA encontró</span>
             <span id="coevo-replay-frame" class="replay-frame-label"></span>
           </div>
           <div class="chart-box replay-chart-box"><canvas id="coevo-replay-canvas" height="220"></canvas></div>
           <div class="replay-controls">
-            <button type="button" id="coevo-replay-play" class="btn btn-mini">▶ Reproducir</button>
+            <button type="button" id="coevo-replay-play" class="btn btn-mini"><svg class="icon icon-fill" aria-hidden="true"><use href="#i-play"></use></svg> Reproducir</button>
             <input type="range" id="coevo-replay-slider" min="0" max="0" value="0" step="1">
           </div>
         </div>
@@ -377,6 +417,7 @@
 
   </div>
 
+  <script src="js/icons.js"></script>
   <script type="module" src="js/render3d.js"></script>
   <script src="js/charts.js"></script>
   <script src="js/replay2d.js"></script>
