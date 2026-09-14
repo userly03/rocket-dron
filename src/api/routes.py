@@ -25,6 +25,7 @@ from src.api.coevolucion_jobs import (
     MAX_T_MAX_S,
     iniciar_job,
     obtener_job,
+    obtener_preview,
 )
 from src.engine.simulation import SimulationEngine
 from src.engine.sensitivity import informe_sensibilidad
@@ -95,6 +96,10 @@ class ExperimentRequest(BaseModel):
     direccion: float | None = Field(default=None, ge=0, lt=360, description="Azimut (None = auto/valor por defecto)")
     misil_potencia: float | None = Field(default=None, ge=10, le=100, description="Potencia HPM del misil (kW)")
     misil_radio: float | None = Field(default=None, ge=50, le=200, description="Radio de efecto del misil (m)")
+    con_preview: bool = Field(
+        default=False,
+        description="Captura fotogramas de la réplica 0 para reproducirla luego (GET .../preview)",
+    )
 
 
 def get_simulation() -> SimulationEngine:
@@ -325,7 +330,7 @@ def start_experiment(body: ExperimentRequest) -> dict:
             misil_radio=body.misil_radio,
         ),
     )
-    exp_id = experiment_manager.start(cfg)
+    exp_id = experiment_manager.start(cfg, con_preview=body.con_preview)
     return {"experiment_id": exp_id, "status": "corriendo"}
 
 
@@ -366,6 +371,22 @@ def get_experiment(exp_id: str) -> dict:
     if registro is None:
         raise HTTPException(status_code=404, detail=f"Experimento '{exp_id}' no encontrado")
     return registro
+
+
+@router.get("/experiments/{exp_id}/preview")
+def get_experiment_preview(exp_id: str) -> dict:
+    """Fotogramas de la réplica 0 (solo si se lanzó con ``con_preview=true``).
+
+    Cada fotograma es un ``_build_snapshot()`` completo — mismo formato que
+    ``/ws`` en vivo — pensado para reproducirse client-side con el mismo
+    código de render que usa la pestaña Operación, no para verse en tiempo
+    real: la réplica ya terminó de calcularse (dura milisegundos) para
+    cuando este endpoint tiene algo que devolver.
+    """
+    preview = experiment_manager.get_preview(exp_id)
+    if preview is None:
+        raise HTTPException(status_code=404, detail=f"Experimento '{exp_id}' no encontrado")
+    return preview
 
 
 @router.get("/sensibilidad")
@@ -511,6 +532,21 @@ def get_coevolucion_status(job_id: str) -> dict:
     if job is None:
         raise HTTPException(status_code=404, detail="Job de coevolución no encontrado")
     return job
+
+
+@router.get("/coevolucion/preview/{job_id}")
+def get_coevolucion_preview(job_id: str) -> dict:
+    """Fotogramas del enfrentamiento final campeón-vs-campeón (mejor arma
+    encontrada vs. mejor defensa encontrada), UNA réplica, capturada después
+    de que el job termina — mismo mecanismo y mismo formato de fotograma que
+    ``GET /experiments/{id}/preview``. Puede tardar unos segundos en estar
+    ``disponible`` incluso con ``estado == "completado"``: es una corrida
+    extra que se dispara al final, no bloquea el resultado en sí.
+    """
+    preview = obtener_preview(job_id)
+    if preview is None:
+        raise HTTPException(status_code=404, detail="Job de coevolución no encontrado")
+    return preview
 
 
 @router.get("/targeting/plan")

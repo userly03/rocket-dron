@@ -760,6 +760,45 @@ body {
   color: var(--text-primary);
 }
 
+.lab-checkbox {
+  font-size: 0.72rem !important;
+  color: var(--text-muted);
+}
+
+.lab-checkbox input { accent-color: var(--accent-green); }
+
+/* Reproductor de réplica capturada (Monte Carlo P1-A / coevolución P3-B) —
+   ver frontend/js/replay2d.js. Mismo lenguaje visual que .chart-box, con
+   controles de reproducción propios. */
+.replay-wrap { margin-top: 10px; }
+
+.replay-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.replay-frame-label {
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+.replay-chart-box { padding: 0; overflow: hidden; }
+
+.replay-chart-box canvas { width: 100%; display: block; }
+
+.replay-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.replay-controls input[type="range"] { flex: 1; accent-color: var(--accent-green); }
+
 .lab-bar-row {
   display: grid;
   grid-template-columns: 170px 1fr 60px;
@@ -1071,6 +1110,18 @@ input[type="number"]:focus {
 .btn-reset:hover:not(:disabled) {
   background: rgba(184, 212, 184, 0.14);
   box-shadow: 0 0 16px rgba(61, 107, 61, 0.35);
+}
+
+.btn-mini {
+  padding: 4px 10px;
+  font-size: 0.7rem;
+  background: rgba(184, 212, 184, 0.06);
+  border-color: var(--border-glow);
+  color: var(--text-primary);
+}
+
+.btn-mini:hover:not(:disabled) {
+  background: rgba(184, 212, 184, 0.14);
 }
 
 /* Logs */

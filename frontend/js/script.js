@@ -89,6 +89,12 @@
     expProgress: document.getElementById("exp-progress"),
     expStatusLine: document.getElementById("exp-status-line"),
     expResult: document.getElementById("exp-result"),
+    expConPreview: document.getElementById("exp-con-preview"),
+    expReplay: document.getElementById("exp-replay"),
+    expReplayFrame: document.getElementById("exp-replay-frame"),
+    expReplayCanvas: document.getElementById("exp-replay-canvas"),
+    expReplayPlay: document.getElementById("exp-replay-play"),
+    expReplaySlider: document.getElementById("exp-replay-slider"),
     coevoGeneraciones: document.getElementById("coevo-generaciones"),
     coevoPoblacion: document.getElementById("coevo-poblacion"),
     coevoReplicas: document.getElementById("coevo-replicas"),
@@ -97,6 +103,12 @@
     coevoStatusLine: document.getElementById("coevo-status-line"),
     coevoGenBars: document.getElementById("coevo-gen-bars"),
     coevoResult: document.getElementById("coevo-result"),
+    coevoReplay: document.getElementById("coevo-replay"),
+    coevoReplayFrame: document.getElementById("coevo-replay-frame"),
+    coevoReplayCanvas: document.getElementById("coevo-replay-canvas"),
+    coevoReplayPlay: document.getElementById("coevo-replay-play"),
+    coevoReplaySlider: document.getElementById("coevo-replay-slider"),
+    coevoReplayWait: document.getElementById("coevo-replay-wait"),
     labRunsList: document.getElementById("lab-runs-list"),
     btnStart: document.getElementById("btn-start"),
     btnStop: document.getElementById("btn-stop"),
@@ -129,11 +141,48 @@
     expPollTimer: null,
     coevoJobId: null,
     coevoPollTimer: null,
+    coevoPreviewPollTimer: null,
     mcRuns: [],
     coevoRunsLocal: [],
   };
 
   let wsClient = null;
+  let mcReplay = null;
+  let coevoReplay = null;
+
+  // Reproductor de una réplica capturada (Monte Carlo P1-A / coevolución
+  // P3-B, ver frontend/js/replay2d.js): los fotogramas ya están completos
+  // cuando llegan acá (la réplica ya terminó de calcularse) — esto solo
+  // los recorre con un intervalo fijo, no simula nada en el cliente.
+  function wireReplayPlayer(player, refs) {
+    refs.slider.addEventListener("input", () => {
+      player.pause();
+      refs.playBtn.textContent = "▶ Reproducir";
+      player.seek(+refs.slider.value);
+      refs.frameLabel.textContent = `${player.currentIndex() + 1}/${player.frameCount()}`;
+    });
+    refs.playBtn.addEventListener("click", () => {
+      if (player.isPlaying()) {
+        player.pause();
+        refs.playBtn.textContent = "▶ Reproducir";
+        return;
+      }
+      refs.playBtn.textContent = "⏸ Pausar";
+      player.play(12, (idx, total) => {
+        refs.slider.value = idx;
+        refs.frameLabel.textContent = `${idx + 1}/${total}`;
+      });
+    });
+  }
+
+  function loadReplay(player, refs, wrapEl, frames) {
+    player.load(frames);
+    refs.slider.max = Math.max(0, frames.length - 1);
+    refs.slider.value = 0;
+    refs.frameLabel.textContent = frames.length ? `1/${frames.length}` : "";
+    refs.playBtn.textContent = "▶ Reproducir";
+    wrapEl.classList.remove("hidden");
+  }
 
   function updateMunitionUI() {
     const { total, restante } = state.munition;
@@ -338,6 +387,7 @@
         addLog("Coevolución: corrida completada", "info");
         ui.btnCoevoStart.disabled = false;
         updateCoevoRunLocal(jobId, "completado");
+        pollCoevoPreview(jobId);
       } else if (job.estado === "error") {
         clearInterval(state.coevoPollTimer);
         ui.coevoStatusLine.textContent = `Error: ${job.error}`;
@@ -346,6 +396,41 @@
         updateCoevoRunLocal(jobId, "error");
       }
     }, 1500);
+  }
+
+  // La réplica de muestra (mejor arma vs. mejor defensa) se dispara DESPUÉS
+  // de que el job de coevolución marca "completado" (ver
+  // src/api/coevolucion_jobs.py) — no bloquea el resultado en sí, así que
+  // puede tardar un par de segundos más en estar disponible. Poll corto y
+  // acotado, no indefinido: si nunca aparece (p.ej. la corrida terminó sin
+  // ningún individuo válido) no vale la pena seguir preguntando para siempre.
+  function pollCoevoPreview(jobId) {
+    if (state.coevoPreviewPollTimer) clearInterval(state.coevoPreviewPollTimer);
+    ui.coevoReplayWait.classList.remove("hidden");
+    let intentos = 0;
+    state.coevoPreviewPollTimer = setInterval(async () => {
+      intentos += 1;
+      let preview;
+      try {
+        preview = await api(`/api/coevolucion/preview/${jobId}`);
+      } catch (e) {
+        clearInterval(state.coevoPreviewPollTimer);
+        ui.coevoReplayWait.classList.add("hidden");
+        return;
+      }
+      if (preview.disponible && preview.frames.length) {
+        clearInterval(state.coevoPreviewPollTimer);
+        ui.coevoReplayWait.classList.add("hidden");
+        loadReplay(coevoReplay, {
+          slider: ui.coevoReplaySlider, playBtn: ui.coevoReplayPlay, frameLabel: ui.coevoReplayFrame,
+        }, ui.coevoReplay, preview.frames);
+        addLog(`Coevolución: réplica del enfrentamiento final reproducible (${preview.frames.length} fotogramas)`, "info");
+      } else if (intentos >= 20) {
+        clearInterval(state.coevoPreviewPollTimer);
+        ui.coevoReplayWait.classList.add("hidden");
+        addLog("Coevolución: no se pudo generar la réplica de muestra (el resultado en sí quedó completo e intacto)", "error");
+      }
+    }, 1000);
   }
 
   // Experimentos Monte Carlo (P1-A): mismo patrón de job en background que
@@ -393,6 +478,17 @@
         renderExpResultado(job.resumen);
         addLog("Experimento Monte Carlo: corrida completada", "info");
         ui.btnExpStart.disabled = false;
+        if (job.previa_disponible) {
+          try {
+            const preview = await api(`/api/experiments/${expId}/preview`);
+            if (preview.disponible && preview.frames.length) {
+              loadReplay(mcReplay, {
+                slider: ui.expReplaySlider, playBtn: ui.expReplayPlay, frameLabel: ui.expReplayFrame,
+              }, ui.expReplay, preview.frames);
+              addLog(`Experimento Monte Carlo: réplica 0 reproducible (${preview.frames.length} fotogramas)`, "info");
+            }
+          } catch (e) { addLog(`Réplica de muestra: ${e.message}`, "error"); }
+        }
       } else if (job.status === "error") {
         clearInterval(state.expPollTimer);
         ui.expStatusLine.textContent = `Error: ${job.error}`;
@@ -890,6 +986,8 @@
     ui.btnExpStart.addEventListener("click", async () => {
       ui.btnExpStart.disabled = true;
       ui.expResult.classList.add("hidden");
+      ui.expReplay.classList.add("hidden");
+      mcReplay.clear();
       ui.expProgress.classList.remove("hidden");
       ui.expStatusLine.textContent = "Arrancando...";
       try {
@@ -899,6 +997,7 @@
           cantidad: +ui.expCantidad.value || 30,
           replicas: +ui.expReplicas.value || 20,
           t_max_s: +ui.expTmax.value || 20,
+          con_preview: ui.expConPreview.checked,
         };
         const r = await api("/api/experiments", { method: "POST", body: JSON.stringify(body) });
         addLog(`Experimento Monte Carlo: ${r.experiment_id} arrancado (${body.replicas} réplicas, ${body.arma_tipo})`, "info");
@@ -915,6 +1014,10 @@
       ui.btnCoevoStart.disabled = true;
       ui.coevoResult.classList.add("hidden");
       ui.coevoGenBars.innerHTML = "";
+      ui.coevoReplay.classList.add("hidden");
+      ui.coevoReplayWait.classList.add("hidden");
+      if (state.coevoPreviewPollTimer) clearInterval(state.coevoPreviewPollTimer);
+      coevoReplay.clear();
       ui.coevoProgress.classList.remove("hidden");
       ui.coevoStatusLine.textContent = "Arrancando...";
       try {
@@ -970,6 +1073,10 @@
 
   function init() {
     window.Render3D.init(canvas3d, state.field);
+    mcReplay = window.Replay2D.crear(ui.expReplayCanvas);
+    coevoReplay = window.Replay2D.crear(ui.coevoReplayCanvas);
+    wireReplayPlayer(mcReplay, { slider: ui.expReplaySlider, playBtn: ui.expReplayPlay, frameLabel: ui.expReplayFrame });
+    wireReplayPlayer(coevoReplay, { slider: ui.coevoReplaySlider, playBtn: ui.coevoReplayPlay, frameLabel: ui.coevoReplayFrame });
     bindControls();
     wsClient = new SimulationWebSocket({
       url: WS_URL,

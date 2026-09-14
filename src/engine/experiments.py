@@ -255,13 +255,31 @@ class ExperimentConfig:
     arma: WeaponPolicy = field(default_factory=WeaponPolicy)
 
 
-def run_replica(cfg: ExperimentConfig, replica_idx: int) -> dict[str, Any]:
+def run_replica(
+    cfg: ExperimentConfig,
+    replica_idx: int,
+    frames_out: list[dict[str, Any]] | None = None,
+    frame_stride: int = 3,
+) -> dict[str, Any]:
     """Ejecuta una réplica completa y devuelve su métrica primaria.
 
     Crea un generador NUEVO con ``nuevo_generador(cfg.semilla + replica_idx)``
     y se lo inyecta al motor: la réplica i es reproducible de forma aislada
     sin tocar (ni depender de) el generador global — así puede correr en
     paralelo con la simulación interactiva o con otras réplicas/experimentos.
+
+    ``frames_out`` (opcional): si se pasa una lista, cada ``frame_stride``
+    ticks se le agrega ``sim._build_snapshot()`` — el mismo formato que ya
+    consume el frontend en vivo (drones/misiles/hpm/jammer), para poder
+    REPRODUCIR después esta réplica exacta como una animación. Es un efecto
+    secundario puramente de lectura (``_build_snapshot`` no muta estado, no
+    consume el generador): no cambia ni un bit del resultado numérico de la
+    réplica. Pensado para usarse solo en UNA réplica por corrida (ver
+    ``ExperimentManager._run``) — capturar las N réplicas de un experimento
+    grande sería memoria desperdiciada para algo que es diagnóstico, no
+    reportable. ``frame_stride=3`` a ``dt`` por defecto (1/30 s) da ~10
+    fotogramas/s, de sobra para que una reproducción se vea fluida sin
+    guardar cada tick.
     """
     gen = nuevo_generador(cfg.semilla + replica_idx)
 
@@ -273,6 +291,9 @@ def run_replica(cfg: ExperimentConfig, replica_idx: int) -> dict[str, Any]:
         sim.hpm.origen_y = cfg.arma.origen_y
 
     disparado = False
+    tick_n = 0
+    if frames_out is not None:
+        frames_out.append(sim._build_snapshot())
     while sim.tiempo < cfg.t_max_s:
         if (
             not disparado
@@ -311,9 +332,19 @@ def run_replica(cfg: ExperimentConfig, replica_idx: int) -> dict[str, Any]:
         if eventos_jamming:
             sim._process_jamming_events(eventos_jamming)
 
+        tick_n += 1
+        if frames_out is not None and tick_n % frame_stride == 0:
+            frames_out.append(sim._build_snapshot())
+
         conteo = sim.swarm.contar_por_estado()
         if conteo["neutralizado"] >= len(sim.swarm.drones):
             break
+
+    if frames_out is not None:
+        # Fotograma final siempre, aunque no calce con el stride — para que
+        # la reproducción no corte antes del desenlace (aniquilación total o
+        # fin del tiempo simulado).
+        frames_out.append(sim._build_snapshot())
 
     conteo = sim.swarm.contar_por_estado()
     total = len(sim.swarm.drones)
@@ -344,6 +375,13 @@ class ExperimentRecord:
     resultados: list[dict[str, Any]] = field(default_factory=list)
     resumen: dict[str, Any] | None = None
     error: str | None = None
+    # Fotogramas de la réplica 0, solo si se pidió con ``con_preview=True``
+    # (ver ExperimentManager.start). Separado de ``resultados`` a propósito:
+    # ese campo lo consume GET /experiments/{id} en cada poll (cada 1s desde
+    # el frontend) y no debería arrastrar cientos de snapshots completos en
+    # cada respuesta — se sirve aparte, una sola vez, por
+    # GET /experiments/{id}/preview.
+    frames_previa: list[dict[str, Any]] | None = None
 
 
 class ExperimentManager:
@@ -353,7 +391,7 @@ class ExperimentManager:
         self._records: dict[str, ExperimentRecord] = {}
         self._lock = threading.Lock()
 
-    def start(self, cfg: ExperimentConfig) -> str:
+    def start(self, cfg: ExperimentConfig, con_preview: bool = False) -> str:
         exp_id = f"exp-{uuid.uuid4().hex[:8]}"
         record = ExperimentRecord(
             id=exp_id,
@@ -380,17 +418,28 @@ class ExperimentManager:
 
         hilo = threading.Thread(
             target=self._run,
-            args=(record, cfg),
+            args=(record, cfg, con_preview),
             daemon=True,
             name=f"experiment-{exp_id}",
         )
         hilo.start()
         return exp_id
 
-    def _run(self, record: ExperimentRecord, cfg: ExperimentConfig) -> None:
+    def _run(
+        self, record: ExperimentRecord, cfg: ExperimentConfig, con_preview: bool = False
+    ) -> None:
         try:
             for i in range(cfg.replicas):
-                resultado = run_replica(cfg, i)
+                if con_preview and i == 0:
+                    # Solo la réplica 0 se captura fotograma a fotograma — el
+                    # resto corre exactamente igual que sin preview (mismo
+                    # costo, mismos números).
+                    frames: list[dict[str, Any]] = []
+                    resultado = run_replica(cfg, i, frames_out=frames)
+                    with self._lock:
+                        record.frames_previa = frames
+                else:
+                    resultado = run_replica(cfg, i)
                 with self._lock:
                     record.resultados.append(resultado)
                     record.completadas = i + 1
@@ -500,6 +549,29 @@ class ExperimentManager:
                 "resultados": record.resultados,
                 "error": record.error,
                 "manifest": record.manifest,
+                # Bandera liviana (no los fotogramas en sí — eso es
+                # GET /experiments/{id}/preview): permite al frontend saber
+                # cuándo mostrar el botón de reproducción sin descargar nada
+                # pesado en cada poll de 1s.
+                "previa_disponible": record.frames_previa is not None,
+            }
+
+    def get_preview(self, exp_id: str) -> dict[str, Any] | None:
+        """Fotogramas de la réplica 0, si el experimento se lanzó con
+        ``con_preview=True``. Formato de cada fotograma: el mismo
+        ``_build_snapshot()`` que ya consume el render en vivo
+        (drones/misiles/hpm/jammer/field) — reproducirlos con el mismo
+        código de dibujo del frontend reconstruye la réplica exacta, no una
+        aproximación."""
+        with self._lock:
+            record = self._records.get(exp_id)
+            if record is None:
+                return None
+            return {
+                "id": record.id,
+                "disponible": record.frames_previa is not None,
+                "status": record.status,
+                "frames": record.frames_previa or [],
             }
 
     def list(self) -> list[dict[str, Any]]:

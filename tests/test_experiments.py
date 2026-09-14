@@ -89,6 +89,30 @@ class TestReplica:
         assert r1 == r2
         assert r1["neutralizados"] <= r1["total"]
 
+    def test_captura_de_frames_no_altera_el_resultado(self):
+        # La captura (frontend/js/replay2d.js consume estos fotogramas para
+        # reproducir la réplica) tiene que ser un efecto puramente aditivo:
+        # misma semilla, con o sin frames_out, mismo resultado numérico. Si
+        # esto fallara sería porque _build_snapshot() muta algo (no debería:
+        # solo lee bajo lock) o porque capturar consume el generador (no
+        # debería: no lo toca).
+        cfg = ExperimentConfig(
+            formacion="circular", cantidad=10, replicas=1, t_max_s=3.0,
+            semilla=42, arma=WeaponPolicy(tipo="canion", delay_s=0.5, potencia=80),
+        )
+        sin_captura = run_replica(cfg, 0)
+        frames: list = []
+        con_captura = run_replica(cfg, 0, frames_out=frames)
+        assert sin_captura == con_captura
+        assert len(frames) > 1
+        # El primer fotograma es el estado inicial (antes de que el cañón
+        # dispare); el último es siempre el estado final, sin importar el
+        # stride — así la reproducción nunca corta antes del desenlace.
+        assert frames[0]["tiempo"] == 0.0
+        assert frames[-1]["tiempo"] == con_captura["t_sim"]
+        assert len(frames[0]["drones"]) == 10
+        assert "hpm" in frames[0] and "missiles" in frames[0]
+
     def test_ic_contiene_probabilidad_teorica(self, monkeypatch):
         """
         Caso de referencia con probabilidad teórica exacta: formación circular
@@ -196,6 +220,39 @@ class TestExperimentManager:
     def test_get_desconocido_devuelve_none(self):
         mgr = ExperimentManager()
         assert mgr.get("exp-inexistente") is None
+
+    def test_con_preview_captura_solo_la_replica_0(self):
+        mgr = ExperimentManager()
+        cfg = ExperimentConfig(
+            formacion="cuadrada", cantidad=6, replicas=3, t_max_s=2.0,
+            semilla=3, arma=WeaponPolicy(tipo="canion", delay_s=0.5, potencia=80),
+        )
+        exp_id = mgr.start(cfg, con_preview=True)
+        registro = self._esperar(mgr, exp_id)
+        assert registro["status"] == "completado"
+        assert registro["previa_disponible"] is True
+
+        preview = mgr.get_preview(exp_id)
+        assert preview["disponible"] is True
+        assert len(preview["frames"]) > 1
+        # La bandera es liviana (booleana); los fotogramas viven solo en
+        # get_preview() — GET /experiments/{id} se pollea cada 1s desde el
+        # frontend y no debe arrastrar cientos de snapshots en cada poll.
+        assert "frames_previa" not in registro
+        assert "frames" not in registro
+
+    def test_sin_con_preview_no_hay_frames(self):
+        mgr = ExperimentManager()
+        cfg = ExperimentConfig(formacion="cuadrada", cantidad=5, replicas=2, t_max_s=1.5, semilla=4)
+        exp_id = mgr.start(cfg)
+        registro = self._esperar(mgr, exp_id)
+        assert registro["previa_disponible"] is False
+        assert mgr.get_preview(exp_id)["disponible"] is False
+        assert mgr.get_preview(exp_id)["frames"] == []
+
+    def test_get_preview_desconocido_devuelve_none(self):
+        mgr = ExperimentManager()
+        assert mgr.get_preview("exp-inexistente") is None
 
 
 class TestExperimentRoutes:

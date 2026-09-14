@@ -146,3 +146,52 @@ salto automático a Operación al ejecutar.
 Verificado en vivo en el navegador: consola limpia en las 4 vistas, todas
 las transiciones de tab, el toggle Táctico/Calor 3D, y un disparo de
 cañón real de punta a punta.
+
+---
+
+## 5. Reproducción visual de una réplica (Monte Carlo + coevolución) — ✅ CERRADO
+
+Pedido del usuario: que Laboratorio no se sienta "una terminal" — no solo
+números, sino ver drones/misiles/cañón moviéndose, igual que en Operación,
+pero de una corrida ya calculada (Monte Carlo P1-A o el enfrentamiento
+final de la coevolución P3-B).
+
+**Backend** (`src/engine/experiments.py::run_replica`): flag opcional
+`frames_out` — cada `frame_stride` ticks agrega un `_build_snapshot()` (el
+mismo formato que ya usa `/ws` en vivo) a la lista. Efecto puramente
+aditivo: no toca el generador aleatorio ni el resultado numérico de la
+réplica (verificado con test: misma semilla, con y sin captura, resultado
+idéntico byte a byte). Se aplica SOLO a la réplica 0 de cada corrida, el
+resto sigue corriendo exactamente igual de rápido que antes.
+
+- Monte Carlo (`ExperimentManager`): nuevo flag `con_preview` en
+  `POST /api/experiments`, nuevo `GET /api/experiments/{id}/preview`.
+- Coevolución (`coevolucion_jobs.py`): apenas el job marca "completado",
+  se dispara UNA réplica extra (mejor arma vs. mejor defensa encontradas)
+  con captura — "así pelea lo que el GA encontró", no una de las réplicas
+  de fitness internas. Nuevo `GET /api/coevolucion/preview/{job_id}`.
+  Puede tardar unos segundos más en estar `disponible` que el job en sí
+  (es una corrida posterior, no bloquea el resultado).
+
+**Frontend**: `frontend/js/replay2d.js`, nuevo — canvas 2D liviano
+(fábrica, no singleton: dos instancias independientes, una por motor).
+Deliberadamente NO reusa el motor 3D de Operación (`render3d.js`): ese es
+un singleton de Three.js atado a un solo canvas — reusarlo exigiría
+refactorizarlo primero a algo instanciable. Colores calcados de
+`render3d.js::COLOR` para consistencia visual con el mapa en vivo actual;
+se migran juntos si más adelante cambia la paleta de la app. Reproductor
+con play/pausa + slider, recorre fotogramas ya calculados (no simula nada
+en el cliente).
+
+Verificado en vivo en el navegador de punta a punta para AMBOS motores:
+Monte Carlo (cañón, formación circular, se ve el cono naranja del disparo)
+y coevolución (formación evolucionada, marcador de origen HPM) — consola
+sin errores en ninguno de los dos. Tests nuevos:
+`tests/test_experiments.py::TestReplica::test_captura_de_frames_no_altera_el_resultado`,
+`TestExperimentManager::test_con_preview_captura_solo_la_replica_0`,
+`tests/test_coevolution.py::TestJobDeCoevolucionEnBackground::test_status_no_arrastra_frames_pero_preview_si`.
+
+Pendiente, no bloqueante: si más adelante el 2D se siente pobre al lado
+del mapa 3D real, evaluar refactorizar `render3d.js` a instanciable y
+reusarlo acá — decisión que se dejó para después de verlo andar, tal como
+se planteó.

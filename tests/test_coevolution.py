@@ -390,6 +390,47 @@ class TestJobDeCoevolucionEnBackground:
             assert "frontera_pareto_arma" in d["resultado"]
             assert "frontera_pareto_defensa" in d["resultado"]
 
+    def test_status_no_arrastra_frames_pero_preview_si(self):
+        # La réplica de muestra (campeón vs. campeón, ver el bloque al final
+        # de _run en coevolucion_jobs.py) es una corrida EXTRA después de
+        # que el job marca "completado" — puede tardar un pelín más en
+        # estar disponible. GET status nunca debe traer los fotogramas (se
+        # pollea cada 1.5s mientras el job corre); GET preview sí, una vez
+        # listos.
+        from fastapi.testclient import TestClient
+
+        from src.main import app
+
+        with TestClient(app) as client:
+            job_id = client.post("/api/coevolucion/start", json=self.PARAMS_RAPIDOS).json()["job_id"]
+            d = self._esperar_job(client, job_id)
+            assert d["estado"] == "completado"
+            assert "frames_previa" not in d
+            assert "frames" not in d
+            assert isinstance(d["previa_disponible"], bool)
+
+            import time
+
+            limite = time.monotonic() + 20
+            preview = None
+            while time.monotonic() < limite:
+                preview = client.get(f"/api/coevolucion/preview/{job_id}").json()
+                if preview["disponible"]:
+                    break
+                time.sleep(0.3)
+            assert preview is not None and preview["disponible"] is True
+            assert len(preview["frames"]) > 1
+            assert preview["frames"][0]["drones"]
+
+    def test_preview_job_id_inexistente_da_404(self):
+        from fastapi.testclient import TestClient
+
+        from src.main import app
+
+        with TestClient(app) as client:
+            resp = client.get("/api/coevolucion/preview/no-existe-este-id")
+            assert resp.status_code == 404
+
     def test_job_id_inexistente_da_404(self):
         from fastapi.testclient import TestClient
 

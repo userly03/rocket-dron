@@ -20,11 +20,15 @@ producción — eso está fuera del alcance de este ítem).
 
 from __future__ import annotations
 
+import logging
 import threading
 import uuid
 from typing import Any
 
 from src.engine.coevolution import coevolucionar, resumen_json
+from src.engine.experiments import ExperimentConfig, run_replica
+
+logger = logging.getLogger("simulador.coevolucion")
 
 _jobs: dict[str, dict[str, Any]] = {}
 _lock = threading.Lock()
@@ -63,6 +67,11 @@ def iniciar_job(
             "progreso": [],
             "resultado": None,
             "error": None,
+            # Fotogramas del enfrentamiento campeón-vs-campeón final, si se
+            # pudo re-simular (ver el bloque al final de _run) — mismo
+            # mecanismo de captura que Monte Carlo (P1-A). Separado de
+            # "resultado" para no arrastrarlo en cada poll de progreso.
+            "frames_previa": None,
         }
 
     def _on_generacion(generacion_idx: int, resultado_parcial) -> None:
@@ -94,6 +103,37 @@ def iniciar_job(
                 if job is not None:
                     job["estado"] = "completado"
                     job["resultado"] = resumen_json(resultado)
+
+            # Réplica de muestra: el enfrentamiento final campeón-vs-campeón,
+            # UNA vez, con captura de fotogramas — para poder VER cómo pelea
+            # lo que el GA encontró, no solo leer sus genes. No es una de las
+            # réplicas de fitness de la evolución (esas ya terminaron y no se
+            # tocan): es una corrida extra, después, con los genomas ya
+            # fijos — no cambia ni un número de "resultado".
+            if resultado.mejor_arma_por_generacion and resultado.mejor_defensa_por_generacion:
+                try:
+                    campeon_arma = resultado.mejor_arma_por_generacion[-1]
+                    campeon_defensa = resultado.mejor_defensa_por_generacion[-1]
+                    cfg_preview = ExperimentConfig(
+                        formacion=campeon_defensa.formacion,
+                        cantidad=int(round(campeon_defensa.cantidad)),
+                        replicas=1,
+                        t_max_s=t_max_s,
+                        semilla=seed,
+                        arma=campeon_arma.a_weapon_policy(),
+                    )
+                    frames: list[dict[str, Any]] = []
+                    run_replica(cfg_preview, 0, frames_out=frames)
+                    with _lock:
+                        job = _jobs.get(job_id)
+                        if job is not None:
+                            job["frames_previa"] = frames
+                except Exception:
+                    logger.exception(
+                        "No se pudo generar la réplica de muestra del job %s "
+                        "(el resultado de la coevolución en sí quedó completo e intacto)",
+                        job_id,
+                    )
         except Exception as exc:  # noqa: BLE001 — un job roto debe reportarse, no tumbar el hilo en silencio
             with _lock:
                 job = _jobs.get(job_id)
@@ -109,7 +149,31 @@ def iniciar_job(
 def obtener_job(job_id: str) -> dict[str, Any] | None:
     with _lock:
         job = _jobs.get(job_id)
+        if job is None:
+            return None
         # Copia superficial: progreso/resultado son listas/dicts que no se
         # mutan más una vez escritos (se reemplazan enteros), así que una
         # copia superficial alcanza para no exponer el dict interno vivo.
-        return dict(job) if job is not None else None
+        copia = dict(job)
+        # frames_previa puede tener cientos de snapshots completos — este
+        # endpoint se pollea cada 1-2s mientras el job corre, así que acá
+        # solo viaja la bandera; los fotogramas se piden aparte, una vez,
+        # con obtener_preview().
+        copia["previa_disponible"] = job["frames_previa"] is not None
+        del copia["frames_previa"]
+        return copia
+
+
+def obtener_preview(job_id: str) -> dict[str, Any] | None:
+    """Fotogramas del enfrentamiento final campeón-vs-campeón, si ya están
+    listos (ver el bloque de captura al final de ``_run``)."""
+    with _lock:
+        job = _jobs.get(job_id)
+        if job is None:
+            return None
+        return {
+            "job_id": job_id,
+            "disponible": job["frames_previa"] is not None,
+            "estado": job["estado"],
+            "frames": job["frames_previa"] or [],
+        }
