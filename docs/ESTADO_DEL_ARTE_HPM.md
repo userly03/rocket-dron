@@ -297,6 +297,60 @@ específicamente el umbral de disrupción del **flight controller** de un
 UAV bajo onda continua — ninguno de los papers de este catálogo lo hace
 exactamente así.
 
+### 5.4 Barrido de los otros 4 subsistemas del modelo
+
+Mismo ejercicio que con el ESC (§5.1): buscar literatura independiente por
+subsistema. Resultado desigual — dos confirmaciones reales, una alerta de
+circularidad descartada, y un hueco genuino.
+
+- **GPS/GNSS LNA — alerta de circularidad encontrada y descartada.** Una
+  búsqueda inicial devolvió "umbral de quemado LNA de GPS ≈ 150 V/m" — el
+  mismo valor exacto que la Tabla 1 de arXiv:2602.08477 (el paper
+  cuestionado). Verificado: ese número salía del resumen del propio paper
+  cuestionado apareciendo en los resultados de búsqueda, no de una fuente
+  aparte. **No se cuenta como confirmación independiente.** Sí se confirmó
+  un paper real y distinto sobre el mismo tipo de componente (LNA de RF en
+  general, no específico de GPS): *"Mechanisms of Degradation and Damage in
+  GaAs PHEMT Low-Noise Amplifier Under Ultra-Short Microwave Pulses"*,
+  Micromachines 17(9):1054 (2025) — quemado bajo la compuerta en 43 ns con
+  un pulso de 45 dBm a 2 GHz.
+- **Cámara CMOS — confirmado, independiente.** Yang, Wen, Li, Zhou, Wang,
+  Ding, Zhong, Meng, Fang, Guo (2024), *"Analysis of the Interference
+  Effects in CMOS Image Sensors Caused by Strong Electromagnetic Pulses"*,
+  Journal of Electromagnetic Engineering and Science 24(2). Umbral de
+  interrupción funcional (95% de probabilidad de falla): **40.4 kV/m**,
+  pulso de 71.2 ns de ancho, 1 Hz de repetición. Grupo de investigación
+  distinto (instituciones chinas de física/microondas), sin relación con
+  el paper cuestionado.
+- **Flight controller — sin literatura específica nueva.** El upset de
+  lógica de vuelo ya está cubierto conceptualmente por Lee et al. (§5.1,
+  corrupción de PWM) — no se encontró un segundo estudio independiente
+  específico de umbral de disrupción de un flight controller genérico bajo
+  onda continua (que es, precisamente, lo que haría falta para recalibrar
+  P2-D con datos en vez de con la convención de -10dB).
+- **BMS/MOSFET — hueco real, sin resultado útil.** La búsqueda no encontró
+  ningún paper que mida un umbral de daño por HPM/EMP específico para un
+  MOSFET de gestión de batería. Sí aparece literatura sobre modos de falla
+  general de MOSFET (fallo en cortocircuito, ruptura por avalancha) y sobre
+  ataques IEMI que distorsionan la *estimación* de la batería (el paper de
+  Tao et al. de §5.2), pero nada que mida un campo/potencia de quemado
+  físico real para este componente específico. **Este es el subsistema
+  candidato más claro para que el usuario busque por su cuenta** —
+  probablemente en literatura de electrónica de potencia/automotriz sobre
+  endurecimiento ante EMP o descargas transitorias, no en literatura de
+  guerra electrónica per se.
+
+**Patrón que se repite y vale la pena anotar**: los tres mecanismos de
+"upset por pulso" confirmados hasta ahora en fuentes independientes (Lee
+et al. 55 kV/m, Yang et al. 40.4 kV/m, y el umbral dBm de Xing et al.
+convertido a través de la cadena de acoplamiento) caen consistentemente
+uno o dos órdenes de magnitud por encima de los umbrales de daño/upset que
+usa este proyecto (150-487 V/m). No es evidencia de que el proyecto esté
+mal calibrado — al contrario, es una señal débil pero repetida de que el
+rango de campo donde opera el arma modelada (cientos de V/m) es
+consistente con destrucción térmica, no con estos mecanismos de upset por
+pulso ultra-corto, que requieren mucho más campo.
+
 ---
 
 ## 6. Relación con este simulador — qué representa y qué no
