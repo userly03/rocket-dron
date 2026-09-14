@@ -147,59 +147,125 @@ haberlo verificado.
   Microwave Pulse-Induced Failure on Unmanned Aerial Vehicle System"*,
   IEEE Transactions on Plasma Science 51(7):1885–1893,
   DOI [10.1109/TPS.2023.3236300](https://doi.org/10.1109/TPS.2023.3236300).
-  **El más valioso encontrado hasta ahora**: experimento real, con hardware
-  —drones comerciales de verdad irradiados con HPM, no simulación—, que
-  confirma que los componentes que fallan son **el motor del rotor y el
-  ESC**. Coincide exactamente con el subsistema "ESC gate oxide" que ya usa
-  el modelo de 5 subsistemas del proyecto (`docs/FISICA_Y_MATEMATICA.md`
-  §3.6.1). Es independiente del paper cuestionado: otro grupo, otro año,
-  otro método (hardware vs. simulación).
+  **El más valioso identificado hasta ahora, todavía sin conseguir el PDF
+  completo** (paywall de IEEE Xplore). Experimento real con hardware —drones
+  comerciales de verdad irradiados con HPM, no simulación— que confirma que
+  los componentes que fallan son **el motor del rotor y el ESC**. Coincide
+  exactamente con el subsistema "ESC gate oxide" que ya usa el modelo de 5
+  subsistemas del proyecto (`docs/FISICA_Y_MATEMATICA.md` §3.6.1). Vía la
+  tabla comparativa de Lee et al. (2026, ver abajo), que sí lo cita con
+  detalle, se sabe además que usa excitación **HPM banda-C y banda-L**, con
+  acoplamiento de puerta trasera por las líneas ESC-motor — pero su umbral
+  numérico de campo no se pudo extraer de esa cita secundaria con
+  confianza. Sigue pendiente conseguir el original.
 - **Xing, Liu, Su, Liu, Liu (2025)**, *"Degradation and Damage Effects in
   GaN HEMTs Induced by Low-Duty-Cycle High-Power Microwave Pulses"*,
-  Micromachines 16(10):1137. Experimento real a nivel de **componente**
-  (el GaN HEMT que efectivamente se usa en los ESC de un dron): a 42.5 dBm
-  el dispositivo sobrevive 800 pulsos; a 43 dBm falla en 10 — una
-  transición muy abrupta. Es potencia inyectada en el dispositivo (dBm),
-  no campo incidente (V/m): compararlo contra el modelo requiere pasar por
-  la misma cadena de acoplamiento cable→voltaje que el proyecto ya modela
-  en `hpm_engine.py`. Punto de calibración real y específico del
-  subsistema ESC, no un ajuste a dos puntos agregados.
-- **Khalil, Wang, Choi**, arXiv:[2510.16495](https://arxiv.org/abs/2510.16495),
-  *"Performance Evaluation of High Power Microwave Systems Against UAVs: A
-  Probabilistic Antenna Propagation Framework with Sensitivity Analysis"*.
-  Framework de simulación independiente (no el mismo grupo que
-  arXiv:2602.08477), con umbrales en **energía de pulso** (10⁻²–10⁻¹ J) en
-  vez de campo eléctrico, y un análisis de sensibilidad propio que
-  identifica el alcance (*slant range*) como el factor dominante
-  (elasticidad ≈ −2). Otra parametrización del mismo fenómeno — útil como
-  contraste metodológico, requiere conversión de unidades para comparar
-  cifra a cifra.
-- **Zhao, Chen, Chen, Chen, Liu, Zhao (2022)**, *"Interference effects in
-  GaN high electron mobility transistor power amplifier induced by
-  microwave pulses"*, Scientific Reports.
-  ([PMC](https://pmc.ncbi.nlm.nih.gov/articles/PMC9547885/))
-  Corrección sobre la entrada anterior de este documento: es de **2022**,
-  no 2025, y **no es específico de drones** — es física de componente GaN
-  general (también relevante a radares/ECM). Se mantiene por su relación
-  con `HPM_FREQUENCY_GHZ`, pero no debe citarse como estudio de UAV.
+  Micromachines 16(10):1137 (PDF completo verificado). Experimento real a
+  nivel de **componente** (el GaN HEMT que efectivamente se usa en los ESC
+  de un dron): a 42.5 dBm el dispositivo sobrevive 800 pulsos; a 43 dBm
+  falla en 10 — una transición muy abrupta. Es potencia inyectada en el
+  dispositivo (dBm), no campo incidente (V/m): compararlo contra el modelo
+  requiere pasar por la misma cadena de acoplamiento cable→voltaje que el
+  proyecto ya modela en `hpm_engine.py`.
+- **Zhao, J., Zhao, G., Chen, Chen, Cao, Feng, Liu, Chen (2025)**,
+  *"Damage effects in GaN high electron mobility transistor power amplifier
+  induced by high power microwave pulses"*, Scientific Reports (PDF completo
+  verificado). **Hallazgo nuevo, no en el catálogo anterior**: mismo grupo
+  que el paper de 2022 de abajo, ahora describiendo un mecanismo de
+  **quemado catastrófico** (no solo interferencia): a partir de ~53 dBm
+  (~200 W) de potencia pico inyectada, ocurre ruptura por avalancha cerca
+  de la compuerta que forma un canal de fuga y termina en quemado extenso
+  del dispositivo. Segundo punto de calibración real e independiente para
+  el subsistema ESC, distinto del de Xing et al. (mecanismo de falla
+  diferente: avalancha/quemado vs. degradación gradual).
+- **Khalil, Wang, Choi**, arXiv:[2510.16495](https://arxiv.org/abs/2510.16495)
+  (PDF completo verificado, v2). **Corrección de título**: la v2 (jul-2026)
+  cambió el título a *"Uncertainty-Aware Performance Modeling of
+  High-Power Microwave Counter-UAV Engagements"* — el título anterior,
+  citado antes en este documento, era el de una versión previa. Framework
+  de simulación independiente (no el mismo grupo que arXiv:2602.08477), con
+  umbrales en **energía de pulso** (10⁻²–10⁻¹ J) en vez de campo eléctrico,
+  y un análisis de sensibilidad propio que identifica el alcance (*slant
+  range*) como el factor dominante (elasticidad ≈ −2). Requiere conversión
+  de unidades para comparar cifra a cifra contra el modelo del proyecto.
+- **Zhao, J., Chen, Chen, Chen, Liu, Zhao, G. (2022)**, *"Interference
+  effects in GaN high electron mobility transistor power amplifier induced
+  by microwave pulses"*, Scientific Reports (PDF completo verificado —
+  corrección sobre la entrada anterior de este documento, que la fechaba
+  2025). **No es específico de drones** — física de componente GaN general
+  (también relevante a radares/ECM), del mismo grupo que el paper de 2025
+  de arriba pero describiendo un efecto previo, no destructivo
+  (interferencia/corrimiento de umbral de compuerta, no quemado).
+- **Lee, Kang, Park, Kim, Woo (2026)**, *"Analysis of High-Power
+  Electromagnetic Pulses Effect on Unmanned Aerial Vehicles"*, Drones
+  10(4):272 (PDF completo verificado — pasa de "no verificado" a
+  verificado). **El hallazgo más importante de toda esta ronda de
+  literatura, y no estaba anotado como hipótesis antes de leerlo**: el
+  mecanismo de falla dominante que describen NO es destrucción de hardware
+  ("hard-kill", lo único que el proyecto modela hoy), sino un **"soft-kill"
+  por corrupción de la señal lógica PWM** que controla los motores — el
+  pulso EMP distorsiona el nivel lógico de la señal PWM en las líneas del
+  ESC, el enjambre pierde control de vuelo y cae, pero el drone **se
+  recupera con un ciclo de apagado/encendido** — no hay daño permanente. Su
+  umbral medido para ese efecto: **55 kV/m** con un pulso UWB de doble
+  exponencial a 5 Hz de repetición. El paper además compara explícitamente
+  contra Mao et al. (2023) y otro estudio, y concluye que **"los umbrales de
+  disrupción pueden estar por debajo de los umbrales de destrucción"** — es
+  decir, hay un régimen de falla temporal a un campo distinto (y, según la
+  literatura EMC de más abajo, probablemente mucho menor) que el de daño
+  permanente. **El proyecto no modela ningún régimen de "soft-kill"
+  recuperable — solo probabilidad de daño permanente.** Ver §5.3.
+- **Kubacki, Przesmycki, Bugaj (2025)**, *"Investigation on Electromagnetic
+  Immunity of Unmanned Aerial Vehicles in Electromagnetic Environment"*,
+  Electronics 14(21):4332 (PDF completo verificado — pasa de "no
+  verificado" a verificado). Recopila umbrales de **inmunidad EMC real**
+  para drones, muy por debajo del rango de daño del proyecto (150-350 V/m):
+  **10 V/m** es el umbral EMC estándar para drones comerciales típicos
+  (80 MHz–6 GHz); **15–30 V/m** ya produce retrasos de transmisión,
+  inestabilidad del bus de comunicación y errores de posicionamiento;
+  **20–60 V/m** causa interferencia significativa según la fuente que
+  citan; **200 V/m** es el nivel de inmunidad exigido a equipos militares
+  por el estándar Mil-Std-461G (procedimiento RS103); y citan un estudio
+  de vuelo real donde **7.5 kV/m** causó interrupción funcional. Ver §5.3.
 
 ### 5.2 Encontrados, no verificados (paywall o bloqueo anti-bot al intentar leerlos)
 
-Se listan para no perder el rastro, **no para citarlos como confirmados**:
-*"Investigation on Electromagnetic Immunity of Unmanned Aerial Vehicles in
-Electromagnetic Environment"* (MDPI Electronics 14(21):4332), *"Analysis of
-High-Power Electromagnetic Pulses Effect on Unmanned Aerial Vehicles"*
-(MDPI Drones 10(4):272), *"Investigation on Falling and Damage Mechanisms
-of UAV Illuminated by HPM Pulses"* (ResearchGate). Antes de citar
-cualquiera de estos con números concretos, hay que conseguir el texto
-completo y leerlo — el mismo estándar que se aplicó al paper principal
-del proyecto.
+*"Investigation on Falling and Damage Mechanisms of UAV Illuminated by HPM
+Pulses"* (ResearchGate) sigue sin poder leerse completo. Se lista para no
+perder el rastro, **no para citarlo como confirmado**.
+
+**Bonus, fuera del dominio drones pero relacionado**: Tao et al. (2025),
+*"Revealing the Intentional Electromagnetic Interference Impact on
+State-of-Charge Estimation in Electric Vehicles"* (IEEE APEMC 2025, PDF
+completo). Trata IEMI contra la estimación de carga de batería en
+vehículos eléctricos — mismo dominio de amenaza (interferencia
+electromagnética intencional) que el subsistema "BMS MOSFET" del modelo,
+pero un mecanismo de ataque distinto (manipulación de la *estimación* de
+estado de carga, no daño físico al MOSFET). No se usa como fuente de
+calibración; se anota porque el usuario lo encontró buscando y podría
+ser relevante si el proyecto alguna vez modela ataques a la lógica del BMS
+en vez de solo su hardware.
 
 **Señal de alerta encontrada y descartada**: un resultado sobre EMP en
 drones publicado en el *Iranian Journal of Chemical and Chemical
 Engineering* — un paper de física/EW en una revista de química es
 indicio de revista de bajo estándar o fuera de su campo. No se usa como
 fuente.
+
+### 5.3 Hallazgo transversal: un régimen entero que el proyecto no modela
+
+Cruzando Lee et al. (§5.1, soft-kill a 55 kV/m pulsado) contra los umbrales
+EMC de Kubacki et al. (§5.1, disrupción ya a 10–60 V/m continuo) aparece un
+patrón consistente entre **dos fuentes independientes, con métodos
+distintos** (simulación EM + medición en banco, y recopilación de normas
+EMC + medición en vuelo, respectivamente): existe un régimen de
+**interferencia/pérdida de control temporal y recuperable**, a un campo
+muy por debajo del que el modelo de 5 subsistemas del proyecto usa para
+"daño" (150-350 V/m, permanente). El proyecto hoy solo tiene una curva de
+probabilidad de daño permanente; no distingue "el drone pierde el control
+un instante y se recupera" de "el drone queda destruido". Es una brecha de
+modelo real, con más de una fuente que la respalda — candidato fuerte para
+una fase futura, no incorporado todavía.
 
 Estas líneas de investigación son exactamente las que sustentarían, con
 más rigor, los ítems ya anotados en el roadmap de `FISICA_Y_MATEMATICA.md`
