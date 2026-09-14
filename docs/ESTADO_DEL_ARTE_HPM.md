@@ -132,25 +132,81 @@ Fuente: [GlobeNewswire — informe de mercado HPM 2026](https://www.globenewswir
 
 ## 5. Investigación académica reciente (más allá del paper ya citado)
 
-Además de arXiv:2602.08477 (ver `FISICA_Y_MATEMATICA.md` §6), hay líneas de
-investigación activas relevantes:
+**Toda la calibración de daño del proyecto hoy cuelga de un solo paper**
+(arXiv:2602.08477, y éste con una inconsistencia interna propia — ver
+`docs/HALLAZGO_TABLA1_VS_TABLA3.md`). Lo que sigue es una búsqueda
+deliberada de **fuentes independientes** para reducir ese riesgo de fuente
+única. Cada entrada dice explícitamente si el contenido fue verificado
+leyendo el paper/abstract, o si solo se encontró la referencia sin poder
+leerla (paywall/bloqueo anti-bot) — no se cita nada como confirmado sin
+haberlo verificado.
 
-- **Efectos de pulso electromagnético en componentes específicos**: estudios
-  2025 sobre daño inducido por microondas en amplificadores de potencia GaN
-  HEMT (publicado en *Scientific Reports*) — directamente relevante a
-  `HPM_FREQUENCY_GHZ` y la idea de acoplamiento resonante por tipo de
-  componente que quedó anotada como mejora futura.
-  ([PMC](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9547885/))
-- **Efectos de HPM banda-C sobre sistemas UAV**: publicado en el *Journal of
-  Electromagnetic Waves and Applications* (2025).
-- **Fundamentos tecnológicos de efectos HPM para guerra electromagnética de
-  próxima generación** — cobertura de *Military Aerospace* sobre el estado
-  de la investigación en efectos de armas HPM.
-  ([Military Aerospace](https://www.militaryaerospace.com/power/article/14276116/electromagnetic-warfare-high-power-microwave-weapons-effects))
+### 5.1 Verificados — candidatos reales a segunda/tercera fuente de calibración
+
+- **Mao, Xiang, Huang, Meng, Wang, Yang, Cui (2023)**, *"High-Power
+  Microwave Pulse-Induced Failure on Unmanned Aerial Vehicle System"*,
+  IEEE Transactions on Plasma Science 51(7):1885–1893,
+  DOI [10.1109/TPS.2023.3236300](https://doi.org/10.1109/TPS.2023.3236300).
+  **El más valioso encontrado hasta ahora**: experimento real, con hardware
+  —drones comerciales de verdad irradiados con HPM, no simulación—, que
+  confirma que los componentes que fallan son **el motor del rotor y el
+  ESC**. Coincide exactamente con el subsistema "ESC gate oxide" que ya usa
+  el modelo de 5 subsistemas del proyecto (`docs/FISICA_Y_MATEMATICA.md`
+  §3.6.1). Es independiente del paper cuestionado: otro grupo, otro año,
+  otro método (hardware vs. simulación).
+- **Xing, Liu, Su, Liu, Liu (2025)**, *"Degradation and Damage Effects in
+  GaN HEMTs Induced by Low-Duty-Cycle High-Power Microwave Pulses"*,
+  Micromachines 16(10):1137. Experimento real a nivel de **componente**
+  (el GaN HEMT que efectivamente se usa en los ESC de un dron): a 42.5 dBm
+  el dispositivo sobrevive 800 pulsos; a 43 dBm falla en 10 — una
+  transición muy abrupta. Es potencia inyectada en el dispositivo (dBm),
+  no campo incidente (V/m): compararlo contra el modelo requiere pasar por
+  la misma cadena de acoplamiento cable→voltaje que el proyecto ya modela
+  en `hpm_engine.py`. Punto de calibración real y específico del
+  subsistema ESC, no un ajuste a dos puntos agregados.
+- **Khalil, Wang, Choi**, arXiv:[2510.16495](https://arxiv.org/abs/2510.16495),
+  *"Performance Evaluation of High Power Microwave Systems Against UAVs: A
+  Probabilistic Antenna Propagation Framework with Sensitivity Analysis"*.
+  Framework de simulación independiente (no el mismo grupo que
+  arXiv:2602.08477), con umbrales en **energía de pulso** (10⁻²–10⁻¹ J) en
+  vez de campo eléctrico, y un análisis de sensibilidad propio que
+  identifica el alcance (*slant range*) como el factor dominante
+  (elasticidad ≈ −2). Otra parametrización del mismo fenómeno — útil como
+  contraste metodológico, requiere conversión de unidades para comparar
+  cifra a cifra.
+- **Zhao, Chen, Chen, Chen, Liu, Zhao (2022)**, *"Interference effects in
+  GaN high electron mobility transistor power amplifier induced by
+  microwave pulses"*, Scientific Reports.
+  ([PMC](https://pmc.ncbi.nlm.nih.gov/articles/PMC9547885/))
+  Corrección sobre la entrada anterior de este documento: es de **2022**,
+  no 2025, y **no es específico de drones** — es física de componente GaN
+  general (también relevante a radares/ECM). Se mantiene por su relación
+  con `HPM_FREQUENCY_GHZ`, pero no debe citarse como estudio de UAV.
+
+### 5.2 Encontrados, no verificados (paywall o bloqueo anti-bot al intentar leerlos)
+
+Se listan para no perder el rastro, **no para citarlos como confirmados**:
+*"Investigation on Electromagnetic Immunity of Unmanned Aerial Vehicles in
+Electromagnetic Environment"* (MDPI Electronics 14(21):4332), *"Analysis of
+High-Power Electromagnetic Pulses Effect on Unmanned Aerial Vehicles"*
+(MDPI Drones 10(4):272), *"Investigation on Falling and Damage Mechanisms
+of UAV Illuminated by HPM Pulses"* (ResearchGate). Antes de citar
+cualquiera de estos con números concretos, hay que conseguir el texto
+completo y leerlo — el mismo estándar que se aplicó al paper principal
+del proyecto.
+
+**Señal de alerta encontrada y descartada**: un resultado sobre EMP en
+drones publicado en el *Iranian Journal of Chemical and Chemical
+Engineering* — un paper de física/EW en una revista de química es
+indicio de revista de bajo estándar o fuera de su campo. No se usa como
+fuente.
 
 Estas líneas de investigación son exactamente las que sustentarían, con
 más rigor, los ítems ya anotados en el roadmap de `FISICA_Y_MATEMATICA.md`
-§7 (acoplamiento resonante por frecuencia, potencia pico vs. promedio).
+§7 (acoplamiento resonante por frecuencia, potencia pico vs. promedio), y
+en particular el de Mao et al. (2023) es el candidato más fuerte para
+algún día contrastar el umbral del subsistema ESC contra un dato que no
+venga del mismo paper que ya mostró una inconsistencia interna.
 
 ---
 
