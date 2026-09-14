@@ -25,26 +25,35 @@ const LIGHTNING_FLICKER_COUNT = 3;
 // puramente visual, no recalcula la ecuación de radar en el cliente.
 const RADAR_RANGE_M = 600;
 
+// Paleta de sala de operaciones (migrada desde el verde neón original —
+// ver docs/propuesta_identidad_visual.html y frontend/css/style.css para
+// el racional completo). Los estados del dron conservan el MISMO mapeo
+// semántico de antes (activo=verde, neutralizado=rojo, riesgo=ámbar,
+// interferido=violeta, misil/pista=verde azulado) — lo que cambia es que
+// están desaturados/atenuados a un registro serio en vez de neón, y que
+// hpmOrigin ya no comparte el verde de "activo": es NUESTRO sistema, así
+// que usa el mismo azul de acento que la interfaz (nav, botones), no un
+// color de estado del enjambre.
 const COLOR = {
-  activo: 0x00ff41,
-  activoBlindado: 0x00c8ff,
-  riesgoLatente: 0xffb000,
-  track: 0x6699bb,
-  danado: 0xffd000,
-  neutralizado: 0x992222,
-  neutralizadoBlink: 0xff3333,
-  interferido: 0x9955ff,
-  noDetectado: 0x1a3d24,
-  missile: 0xff3b1f,
-  trailNear: 0x00d4ff,
-  trailFar: 0x063542,
-  hpmCone: 0xff6600,
-  hpmOrigin: 0x00ff41,
-  detonationOuter: 0xaa66ff,
-  detonationInner: 0x00d4ff,
-  ground: 0x020804,
-  grid: 0x0c3d18,
-  gridCenter: 0x18a24a,
+  activo: 0x4caf6e,
+  activoBlindado: 0x5bb3c7,
+  riesgoLatente: 0xe0a23d,
+  track: 0x6f93b0,
+  danado: 0xd9a53d,
+  neutralizado: 0x8f3a34,
+  neutralizadoBlink: 0xe0574f,
+  interferido: 0x9a7fd1,
+  noDetectado: 0x1c2128,
+  missile: 0xd9573a,
+  trailNear: 0x3fb8ae,
+  trailFar: 0x0d2a2c,
+  hpmCone: 0xd9772e,
+  hpmOrigin: 0x4f8fc4,
+  detonationOuter: 0x9a7fd1,
+  detonationInner: 0x3fb8ae,
+  ground: 0x0a0d11,
+  grid: 0x1c232b,
+  gridCenter: 0x2d4a63,
 };
 
 function worldToThree(field, wx, wy, altitude = 0) {
@@ -170,8 +179,12 @@ const Render3D = (() => {
     controls.minDistance = maxDim * 0.15;
     controls.maxDistance = maxDim * 2.5;
 
-    scene.add(new THREE.AmbientLight(0x445544, 1.2));
-    const sun = new THREE.DirectionalLight(0xbfffcf, 0.6);
+    // Antes tenían tinte verde (0x445544/0xbfffcf) — se filtraba a CADA
+    // material de la escena, no solo a los que ya son verdes a propósito
+    // (activo/pasto). Neutro/frío en su lugar, consistente con el resto
+    // de la migración de paleta.
+    scene.add(new THREE.AmbientLight(0x454b54, 1.2));
+    const sun = new THREE.DirectionalLight(0xdce8f2, 0.6);
     sun.position.set(field.width * 0.3, maxDim * 0.6, field.height * 0.2);
     scene.add(sun);
 
@@ -477,7 +490,7 @@ const Render3D = (() => {
 
       if (rec.estado !== "neutralizado" && d.estado === "neutralizado") {
         rec.fx = { state: "falling", start: now, fallFromZ: rec._smoothZ ?? d.z ?? FALLBACK_DRONE_ALTITUDE };
-        spawnParticleBurst(worldToThree(field, d.x, d.y, d.z ?? FALLBACK_DRONE_ALTITUDE), 0xff3333);
+        spawnParticleBurst(worldToThree(field, d.x, d.y, d.z ?? FALLBACK_DRONE_ALTITUDE), COLOR.neutralizadoBlink);
       }
       rec.estado = d.estado;
       rec.blindaje = d.blindaje;
@@ -713,7 +726,7 @@ const Render3D = (() => {
     const pos = worldToThree(field, wx, wy, 1.0);
     const ring = new THREE.Mesh(
       new THREE.RingGeometry(0.1, 55, 32),
-      new THREE.MeshBasicMaterial({ color: 0xff8800, transparent: true, opacity: 0.75, side: THREE.DoubleSide, depthWrite: false })
+      new THREE.MeshBasicMaterial({ color: COLOR.hpmCone, transparent: true, opacity: 0.75, side: THREE.DoubleSide, depthWrite: false })
     );
     ring.rotation.x = -Math.PI / 2;
     ring.position.copy(pos);

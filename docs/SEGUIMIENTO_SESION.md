@@ -195,3 +195,60 @@ Pendiente, no bloqueante: si más adelante el 2D se siente pobre al lado
 del mapa 3D real, evaluar refactorizar `render3d.js` a instanciable y
 reusarlo acá — decisión que se dejó para después de verlo andar, tal como
 se planteó.
+
+---
+
+## 6. Migración de paleta — ✅ CERRADO
+
+Implementación de `docs/propuesta_identidad_visual.html` (la propuesta que
+ya se le había mostrado al usuario). Separa dos roles que antes competían
+por el mismo verde neón:
+
+- **Acento de interfaz** (`--accent`, azul #4F8FC4): navegación, botones
+  de sistema, foco, sliders — "esto es lo que opero yo".
+- **Colores de ESTADO** (`--status-*`): activo=verde `#4CAF6E`,
+  neutralizado=rojo `#E0574F`, riesgo/dañado/pausado=ámbar `#E0A23D`,
+  misil/pista/física=verde azulado `#3FB8AE` — mismo mapeo semántico de
+  antes (no se tocó qué significa cada color de dron), solo desaturado de
+  neón a un registro serio.
+
+Se migró TODO junto, no solo `style.css` — si no, hubiera quedado una
+mezcla rara (chrome nuevo, mapa 3D viejo):
+- `frontend/css/style.css` — tokens de `:root` renombrados/redefinidos,
+  cada uso de `var(--accent-green)` reclasificado a mano como interfaz o
+  estado (no fue un find-replace ciego).
+- `frontend/js/render3d.js` — paleta `COLOR` del mapa táctico 3D (lo que
+  el usuario más tiempo mira). Además: `hpmOrigin` pasó de verde-estado a
+  azul-interfaz (es NUESTRO sistema, no un estado del enjambre).
+- `frontend/js/charts.js` y `frontend/js/replay2d.js` — mismos tokens.
+
+**Bugs/inconsistencias reales encontrados en la auditoría (no en el plan
+original), corregidos en el camino:**
+- La luz ambiental y direccional de la escena 3D (`AmbientLight`/
+  `DirectionalLight`) tenían tinte verde (`0x445544`/`0xbfffcf`) — se
+  filtraba a CADA material de la escena, no solo a los que son verdes a
+  propósito. Neutralizado.
+- `.metric-energy` tenía un color hardcodeado (`#ffaa00`) que no usaba
+  ninguna variable — habría quedado desincronizado del resto de la
+  paleta. Ahora usa `var(--accent-orange)`.
+- Dos tokens casi duplicados para "advertencia" (`--accent-yellow` y
+  `--accent-amber`, dos amarillos casi idénticos para conceptos distintos
+  pero nunca mostrados en conflicto) — unificados en un solo
+  `--status-warn`.
+- Tres lugares con `rgba(42, 74, 42, 0.3)` hardcodeado (el equivalente
+  RGB del viejo `--border-color`, no una referencia a la variable) que
+  habrían quedado con un borde verde fantasma tras la migración.
+- Dos partículas/efectos del mapa 3D (quemado de dron, pulso del cañón)
+  usaban hex sueltos en vez de referenciar `COLOR.*` — ahora apuntan a
+  `COLOR.neutralizadoBlink`/`COLOR.hpmCone`, una sola fuente de verdad.
+
+Verificado en vivo en el navegador: Operación (mapa 3D, panel de
+control completo, botones cañón/misil/recarga/start/stop con
+`getComputedStyle` confirmando cada color nuevo), Análisis Físico (los 3
+charts), Laboratorio (paneles + reproductor de réplica con la paleta
+nueva) — consola limpia en las tres pestañas.
+
+No incluido en este alcance (el usuario pidió específicamente la paleta):
+la iconografía sigue en emoji — esa es una pieza más grande (20+ lugares)
+que se evaluó por separado en la propuesta original, pendiente de que el
+usuario la pida.

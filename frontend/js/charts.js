@@ -4,6 +4,18 @@
 (function (global) {
   "use strict";
 
+  // Misma paleta que frontend/css/style.css y render3d.js — ver el
+  // comentario de :root en style.css para el racional completo. Canvas 2D
+  // no lee custom properties de CSS directamente, así que se repite acá
+  // como constantes (mismo patrón que ya usaba render3d.js).
+  const COLOR = {
+    textMuted: "#838f9b",
+    textBright: "#e9edf1",
+    statusGoodLight: "#4caf6e",
+    statusGoodDark: "#2d6b45",
+    statusTrack: "#3fb8ae",
+  };
+
   const Charts = {
     resizeCanvas(canvas) {
       const parent = canvas.parentElement;
@@ -25,7 +37,7 @@
       ctx.clearRect(0, 0, w, h);
 
       if (!data?.length) {
-        ctx.fillStyle = "#6a8f6a";
+        ctx.fillStyle = COLOR.textMuted;
         ctx.font = "11px Courier New";
         ctx.fillText("Sin datos de disparos", 10, h / 2);
         return;
@@ -40,15 +52,15 @@
         const x = 30 + i * barW;
         const y = h - 20 - barH;
         const grad = ctx.createLinearGradient(0, y, 0, h - 20);
-        grad.addColorStop(0, "#00ff41");
-        grad.addColorStop(1, "#006622");
+        grad.addColorStop(0, COLOR.statusGoodLight);
+        grad.addColorStop(1, COLOR.statusGoodDark);
         ctx.fillStyle = grad;
         ctx.fillRect(x + 4, y, barW - 8, barH);
-        ctx.fillStyle = "#6a8f6a";
+        ctx.fillStyle = COLOR.textMuted;
         ctx.font = "9px Courier New";
         ctx.textAlign = "center";
         ctx.fillText(d.distancia, x + barW / 2, h - 6);
-        ctx.fillStyle = "#d4ffd4";
+        ctx.fillStyle = COLOR.textBright;
         ctx.fillText(`${d.tasa_exito}%`, x + barW / 2, y - 4);
       });
     },
@@ -72,7 +84,7 @@
       // igual que un canvas roto. Un estado vacío explícito, mismo patrón
       // que drawEffectiveness.
       if (!heatmapData.max) {
-        ctx.fillStyle = "#6a8f6a";
+        ctx.fillStyle = COLOR.textMuted;
         ctx.font = "11px Courier New";
         ctx.fillText("Sin datos suficientes todavía — hace falta disparar", 10, h / 2);
         return;
@@ -108,7 +120,7 @@
       const chartW = w - pad * 2;
       const chartH = h - 30;
 
-      ctx.strokeStyle = "rgba(0, 212, 255, 0.3)";
+      ctx.strokeStyle = "rgba(63, 184, 174, 0.3)";
       ctx.beginPath();
       freqs.forEach((f, i) => {
         const x = pad + (i / (freqs.length - 1)) * chartW;
@@ -123,16 +135,16 @@
       ctx.lineTo(pad, h - 20);
       ctx.closePath();
       const grad = ctx.createLinearGradient(0, 0, 0, h);
-      grad.addColorStop(0, "rgba(0, 212, 255, 0.3)");
-      grad.addColorStop(1, "rgba(0, 212, 255, 0)");
+      grad.addColorStop(0, "rgba(63, 184, 174, 0.3)");
+      grad.addColorStop(1, "rgba(63, 184, 174, 0)");
       ctx.fillStyle = grad;
       ctx.fill();
 
-      ctx.fillStyle = "#6a8f6a";
+      ctx.fillStyle = COLOR.textMuted;
       ctx.font = "9px Courier New";
       ctx.fillText(`${freqs[0]} GHz`, pad, h - 4);
       ctx.fillText(`${freqs[freqs.length - 1]} GHz`, w - pad - 30, h - 4);
-      ctx.fillStyle = "#00d4ff";
+      ctx.fillStyle = COLOR.statusTrack;
       ctx.fillText(`Δ ${spectrumData.center_ghz} GHz`, w / 2 - 20, 14);
     },
 

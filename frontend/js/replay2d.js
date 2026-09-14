@@ -11,27 +11,26 @@
  * Montar un segundo panel de mapa ahí exigiría refactorizarlo primero a
  * algo instanciable — evaluamos esto después de ver si el 2D alcanza.
  *
- * Colores calcados de render3d.js::COLOR (el mapa táctico en vivo actual)
- * para que la reproducción se vea consistente con lo que ya existe — si
- * más adelante se migra la paleta de la app, este archivo se actualiza
- * en el mismo paso.
+ * Colores calcados de render3d.js::COLOR y frontend/css/style.css (ver el
+ * comentario de :root ahí para el racional completo) — se migraron juntos,
+ * como estaba previsto acá desde que se escribió este archivo.
  */
 (function (global) {
   "use strict";
 
   const COLOR = {
-    bg: "#020804",
-    grid: "#0c3d18",
-    activo: "#00ff41",
-    danado: "#ffd000",
-    neutralizado: "#992222",
-    interferido: "#9955ff",
-    riesgo: "#ffb000",
-    missile: "#ff3b1f",
-    hpmCone: "#ff6600",
-    hpmOrigin: "#00ff41",
-    text: "#6a8f6a",
-    textBright: "#d4ffd4",
+    bg: "#0a0d11",
+    grid: "#1c232b",
+    activo: "#4caf6e",
+    danado: "#d9a53d",
+    neutralizado: "#8f3a34",
+    interferido: "#9a7fd1",
+    riesgo: "#e0a23d",
+    missile: "#d9573a",
+    hpmCone: "#d9772e",
+    hpmOrigin: "#4f8fc4",
+    text: "#838f9b",
+    textBright: "#e9edf1",
   };
 
   const MARGIN = 22;
@@ -179,7 +178,7 @@
         const largo = Math.max(w, h);
         const a1 = dirRad - aperturaRad / 2;
         const a2 = dirRad + aperturaRad / 2;
-        ctx.fillStyle = "rgba(255, 102, 0, 0.12)";
+        ctx.fillStyle = "rgba(217, 119, 46, 0.15)";
         ctx.beginPath();
         ctx.moveTo(ox, oy);
         ctx.lineTo(ox + Math.cos(a1) * largo, oy + Math.sin(a1) * largo);

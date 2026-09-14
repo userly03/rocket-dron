@@ -1,24 +1,37 @@
-/* Tema táctico militar — HPM Simulator */
+/* Tema de sala de operaciones — HPM Simulator
+   Paleta migrada desde el verde neón original (ver
+   docs/propuesta_identidad_visual.html para el racional completo):
+   separa el ACENTO de interfaz (--accent, azul — navegación, botones de
+   sistema, foco, sliders: "esto es lo que opero yo") de los colores de
+   ESTADO (--status-*, semánticos — activo/neutralizado/riesgo/pista de
+   un dron o sistema: "esto es lo que estoy leyendo"). Antes ambos roles
+   compartían el mismo verde y competían entre sí. render3d.js, charts.js
+   y replay2d.js migran en el mismo cambio — ver sus propios comentarios
+   de color. */
 
 :root {
-  --bg-primary: #0a0f0a;
-  --bg-panel: #0d1410;
-  --bg-panel-alt: #111a14;
-  --border-color: #2a4a2a;
-  --border-glow: #3d6b3d;
-  --text-primary: #b8d4b8;
-  --text-muted: #6a8f6a;
-  --text-bright: #d4ffd4;
-  --accent-green: #00ff41;
-  --accent-yellow: #ffd000;
-  --accent-red: #ff3333;
-  --accent-orange: #ff6600;
-  --accent-cyan: #00d4ff;
-  --accent-purple: #aa66ff;
-  --accent-amber: #ffb000;
+  --bg-primary: #0a0d11;
+  --bg-panel: #12161b;
+  --bg-panel-alt: #181d24;
+  --border-color: #262e37;
+  --border-glow: #3a4451;
+  --text-primary: #c7ced5;
+  --text-muted: #838f9b;
+  --text-bright: #e9edf1;
+  /* Acento de INTERFAZ (chrome): navegación, botones de sistema, foco,
+     sliders — nunca el estado de un dron. */
+  --accent: #4f8fc4;
+  --accent-dim: #223648;
+  /* Colores de ESTADO (semánticos, no de interfaz): */
+  --status-good: #4caf6e;   /* dron activo, conexión ok, sim corriendo */
+  --status-bad: #e0574f;    /* neutralizado, error, desconectado */
+  --status-warn: #e0a23d;   /* dañado, riesgo latente, pausado, munición baja, no calibrado */
+  --status-track: #3fb8ae;  /* misil, radar, subsistema físico (antes "cyan") */
+  --accent-orange: #d9772e; /* cañón / energía HPM */
+  --accent-purple: #9a7fd1; /* recarga / interferido */
   --font-mono: "Courier New", "Lucida Console", "Consolas", monospace;
   --panel-radius: 4px;
-  --shadow-inset: inset 0 0 20px rgba(0, 255, 65, 0.03);
+  --shadow-inset: inset 0 0 20px rgba(79, 143, 196, 0.03);
 }
 
 *,
@@ -37,8 +50,8 @@ body {
   font-family: var(--font-mono);
   background: var(--bg-primary);
   background-image:
-    radial-gradient(ellipse at 50% 0%, rgba(0, 80, 30, 0.15) 0%, transparent 60%),
-    linear-gradient(180deg, #050805 0%, #0a120a 100%);
+    radial-gradient(ellipse at 50% 0%, rgba(79, 143, 196, 0.10) 0%, transparent 60%),
+    linear-gradient(180deg, #05070a 0%, #0d1117 100%);
   color: var(--text-primary);
   min-height: 100vh;
   line-height: 1.5;
@@ -85,9 +98,9 @@ body {
 .nav-tab:hover { color: var(--text-primary); background: var(--bg-panel-alt); }
 
 .nav-tab.active {
-  background: rgba(0, 255, 65, 0.15);
-  color: var(--accent-green);
-  box-shadow: inset 0 0 0 1px rgba(0, 255, 65, 0.3);
+  background: var(--accent-dim);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px rgba(79, 143, 196, 0.35);
 }
 
 .tab-panel {
@@ -132,7 +145,7 @@ body {
   left: 0;
   right: 0;
   height: 2px;
-  background: linear-gradient(90deg, transparent, var(--accent-green), transparent);
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
   opacity: 0.5;
 }
 
@@ -144,7 +157,7 @@ body {
 
 .header-icon {
   font-size: 2rem;
-  filter: drop-shadow(0 0 8px rgba(0, 255, 65, 0.4));
+  filter: drop-shadow(0 0 8px rgba(79, 143, 196, 0.4));
 }
 
 .header h1 {
@@ -191,8 +204,8 @@ body {
 .view-btn:hover { color: var(--text-primary); }
 
 .view-btn.active {
-  background: rgba(0, 255, 65, 0.15);
-  color: var(--accent-green);
+  background: var(--accent-dim);
+  color: var(--accent);
 }
 
 /* Control del MAPA (qué renderiza el canvas 3D) — vive en el header del
@@ -217,13 +230,17 @@ body {
   z-index: 9999;
   text-align: center;
   padding: 10px;
-  background: linear-gradient(90deg, rgba(0, 80, 30, 0.95), rgba(0, 120, 50, 0.95));
-  color: var(--accent-green);
+  /* Ámbar deliberado, no el acento ni un color de estado ya asignado:
+     un aviso de "esto es automático, no lo disparaste vos" se lee mejor
+     como una franja de alerta distinta que como una reutilización de
+     algún otro color con otro significado en la misma pantalla. */
+  background: linear-gradient(90deg, rgba(90, 62, 10, 0.95), rgba(130, 90, 15, 0.95));
+  color: var(--status-warn);
   font-weight: bold;
   letter-spacing: 0.2em;
   text-transform: uppercase;
   font-size: 0.85rem;
-  border-bottom: 2px solid var(--accent-green);
+  border-bottom: 2px solid var(--status-warn);
   animation: demo-pulse 1.5s ease-in-out infinite;
 }
 
@@ -235,12 +252,12 @@ body {
 .demo-banner.hidden { display: none; }
 
 @keyframes demo-pulse {
-  0%, 100% { box-shadow: 0 0 8px rgba(0, 255, 65, 0.3); }
-  50% { box-shadow: 0 0 24px rgba(0, 255, 65, 0.6); }
+  0%, 100% { box-shadow: 0 0 8px rgba(224, 162, 61, 0.3); }
+  50% { box-shadow: 0 0 24px rgba(224, 162, 61, 0.6); }
 }
 
-.metric-energy { color: #ffaa00; }
-.metric-peak { color: var(--accent-cyan); }
+.metric-energy { color: var(--accent-orange); }
+.metric-peak { color: var(--status-track); }
 
 .connection-status {
   display: flex;
@@ -262,19 +279,19 @@ body {
 }
 
 .status-connected {
-  background: var(--accent-green);
-  box-shadow: 0 0 8px var(--accent-green);
+  background: var(--status-good);
+  box-shadow: 0 0 8px var(--status-good);
 }
 
 .status-disconnected {
-  background: var(--accent-red);
-  box-shadow: 0 0 8px var(--accent-red);
+  background: var(--status-bad);
+  box-shadow: 0 0 8px var(--status-bad);
   animation: none;
 }
 
 .status-connecting {
-  background: var(--accent-yellow);
-  box-shadow: 0 0 8px var(--accent-yellow);
+  background: var(--status-warn);
+  box-shadow: 0 0 8px var(--status-warn);
 }
 
 @keyframes pulse-dot {
@@ -344,9 +361,9 @@ body {
   color: var(--text-bright);
 }
 
-.metric-active { color: var(--accent-green); }
-.metric-neutralized { color: var(--accent-red); }
-.metric-riesgo { color: var(--accent-amber); }
+.metric-active { color: var(--status-good); }
+.metric-neutralized { color: var(--status-bad); }
+.metric-riesgo { color: var(--status-warn); }
 
 /* Main layout */
 .main-content {
@@ -388,7 +405,7 @@ body {
   content: "▸";
   display: inline-block;
   margin-right: 6px;
-  color: var(--accent-green);
+  color: var(--accent);
   transition: transform 0.15s ease;
 }
 
@@ -418,7 +435,7 @@ body {
 
 .physics-formula {
   font-size: 0.75rem;
-  color: var(--accent-cyan);
+  color: var(--status-track);
   padding: 8px 10px;
   background: rgba(0, 0, 0, 0.3);
   border: 1px solid var(--border-color);
@@ -488,13 +505,13 @@ body {
 }
 
 .shot-history-list li {
-  border-bottom: 1px solid rgba(42, 74, 42, 0.3);
+  border-bottom: 1px solid rgba(38, 46, 55, 0.5);
   padding: 2px 0;
 }
 
 .shot-empty { color: var(--text-muted); font-style: italic; }
 
-.risk-list li { color: var(--accent-amber); }
+.risk-list li { color: var(--status-warn); }
 
 /* Map */
 .map-panel {
@@ -539,8 +556,8 @@ body {
 }
 
 .btn-camera:hover {
-  background: rgba(0, 255, 65, 0.12);
-  box-shadow: 0 0 10px rgba(0, 255, 65, 0.2);
+  background: rgba(79, 143, 196, 0.12);
+  box-shadow: 0 0 10px rgba(79, 143, 196, 0.2);
   border-color: var(--border-glow);
 }
 
@@ -556,14 +573,14 @@ body {
   border-radius: 50%;
 }
 
-.dot-active { background: var(--accent-green); box-shadow: 0 0 6px var(--accent-green); }
-.dot-hardened { background: var(--accent-cyan); box-shadow: 0 0 6px var(--accent-cyan); }
-.dot-damaged { background: var(--accent-yellow); box-shadow: 0 0 6px var(--accent-yellow); }
+.dot-active { background: var(--status-good); box-shadow: 0 0 6px var(--status-good); }
+.dot-hardened { background: var(--status-track); box-shadow: 0 0 6px var(--status-track); }
+.dot-damaged { background: var(--status-warn); box-shadow: 0 0 6px var(--status-warn); }
 .dot-jammed { background: var(--accent-purple); box-shadow: 0 0 6px var(--accent-purple); }
-.dot-neutralized { background: var(--accent-red); box-shadow: 0 0 6px var(--accent-red); }
-.dot-undetected { background: #2a4a2a; box-shadow: none; }
-.dot-missile { background: var(--accent-cyan); box-shadow: 0 0 6px var(--accent-cyan); }
-.dot-track { background: #6699bb; box-shadow: 0 0 6px #6699bb; }
+.dot-neutralized { background: var(--status-bad); box-shadow: 0 0 6px var(--status-bad); }
+.dot-undetected { background: var(--border-glow); box-shadow: none; }
+.dot-missile { background: var(--status-track); box-shadow: 0 0 6px var(--status-track); }
+.dot-track { background: #6f93b0; box-shadow: 0 0 6px #6f93b0; }
 .checkbox-track-toggle {
   margin-left: 12px;
   font-size: 0.72rem;
@@ -571,8 +588,8 @@ body {
   white-space: nowrap;
 }
 .dot-riesgo {
-  background: var(--accent-amber);
-  box-shadow: 0 0 6px var(--accent-amber);
+  background: var(--status-warn);
+  box-shadow: 0 0 6px var(--status-warn);
   animation: pulse-riesgo 0.9s ease-in-out infinite;
 }
 
@@ -581,7 +598,7 @@ body {
   50% { opacity: 0.35; }
 }
 
-.metric-missile { color: var(--accent-cyan); }
+.metric-missile { color: var(--status-track); }
 
 .canvas-wrapper {
   position: relative;
@@ -589,7 +606,7 @@ body {
   border: 1px solid var(--border-glow);
   border-radius: var(--panel-radius);
   overflow: hidden;
-  background: #020804;
+  background: #05070a;
 }
 
 #tactical-map-3d {
@@ -623,21 +640,21 @@ body {
 }
 
 .sim-running {
-  color: var(--accent-green);
-  border-color: var(--accent-green);
-  background: rgba(0, 40, 10, 0.7);
+  color: var(--status-good);
+  border-color: var(--status-good);
+  background: rgba(15, 35, 24, 0.75);
   animation: badge-pulse 1.5s ease-in-out infinite;
 }
 
 .sim-paused {
-  color: var(--accent-yellow);
-  border-color: var(--accent-yellow);
-  background: rgba(40, 30, 0, 0.7);
+  color: var(--status-warn);
+  border-color: var(--status-warn);
+  background: rgba(40, 30, 8, 0.75);
 }
 
 @keyframes badge-pulse {
-  0%, 100% { box-shadow: 0 0 4px rgba(0, 255, 65, 0.3); }
-  50% { box-shadow: 0 0 12px rgba(0, 255, 65, 0.6); }
+  0%, 100% { box-shadow: 0 0 4px rgba(76, 175, 110, 0.3); }
+  50% { box-shadow: 0 0 12px rgba(76, 175, 110, 0.6); }
 }
 
 /* Control panel */
@@ -660,8 +677,8 @@ body {
 }
 
 .control-section-missile {
-  border-color: rgba(0, 212, 255, 0.35);
-  box-shadow: inset 0 0 16px rgba(0, 212, 255, 0.04);
+  border-color: rgba(63, 184, 174, 0.35);
+  box-shadow: inset 0 0 16px rgba(63, 184, 174, 0.04);
 }
 
 .control-section .panel-title {
@@ -681,8 +698,8 @@ body {
 }
 
 .control-section-missile .panel-tag {
-  border-color: rgba(0, 212, 255, 0.4);
-  color: var(--accent-cyan);
+  border-color: rgba(63, 184, 174, 0.4);
+  color: var(--status-track);
 }
 
 .munition-display {
@@ -698,20 +715,20 @@ body {
 }
 
 .munition-display strong {
-  color: var(--accent-cyan);
+  color: var(--status-track);
   font-size: 1rem;
 }
 
 .munition-display.munition-low strong {
-  color: var(--accent-yellow);
+  color: var(--status-warn);
 }
 
 .munition-display.munition-empty strong {
-  color: var(--accent-red);
+  color: var(--status-bad);
 }
 
-#metric-munition.munition-low { color: var(--accent-yellow); }
-#metric-munition.munition-empty { color: var(--accent-red); }
+#metric-munition.munition-low { color: var(--status-warn); }
+#metric-munition.munition-empty { color: var(--status-bad); }
 
 .lab-block {
   margin-bottom: 16px;
@@ -723,7 +740,7 @@ body {
 
 .lab-block h3 {
   font-size: 0.78rem;
-  color: var(--accent-green);
+  color: var(--accent);
   margin: 0 0 4px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -765,7 +782,7 @@ body {
   color: var(--text-muted);
 }
 
-.lab-checkbox input { accent-color: var(--accent-green); }
+.lab-checkbox input { accent-color: var(--accent); }
 
 /* Reproductor de réplica capturada (Monte Carlo P1-A / coevolución P3-B) —
    ver frontend/js/replay2d.js. Mismo lenguaje visual que .chart-box, con
@@ -797,7 +814,7 @@ body {
   margin-top: 8px;
 }
 
-.replay-controls input[type="range"] { flex: 1; accent-color: var(--accent-green); }
+.replay-controls input[type="range"] { flex: 1; accent-color: var(--accent); }
 
 .lab-bar-row {
   display: grid;
@@ -815,7 +832,7 @@ body {
   white-space: nowrap;
 }
 
-.lab-bar-row.no-calibrado .lab-bar-label { color: var(--accent-yellow); }
+.lab-bar-row.no-calibrado .lab-bar-label { color: var(--status-warn); }
 
 .lab-bar-track {
   background: var(--bg-panel-alt);
@@ -827,10 +844,10 @@ body {
 .lab-bar-fill {
   display: block;
   height: 100%;
-  background: var(--accent-green);
+  background: var(--accent);
 }
 
-.lab-bar-row.no-calibrado .lab-bar-fill { background: var(--accent-yellow); }
+.lab-bar-row.no-calibrado .lab-bar-fill { background: var(--status-warn); }
 
 .lab-bar-value {
   font-size: 0.68rem;
@@ -841,12 +858,12 @@ body {
 .lab-amenazas {
   margin-top: 8px;
   font-size: 0.68rem;
-  color: var(--accent-yellow);
+  color: var(--status-warn);
   line-height: 1.5;
 }
 
-.lab-badge-ok { color: var(--accent-green); font-weight: bold; }
-.lab-badge-bad { color: var(--accent-red); font-weight: bold; }
+.lab-badge-ok { color: var(--status-good); font-weight: bold; }
+.lab-badge-bad { color: var(--status-bad); font-weight: bold; }
 
 .coevo-gen-row {
   display: flex;
@@ -854,10 +871,10 @@ body {
   font-size: 0.7rem;
   color: var(--text-primary);
   padding: 3px 0;
-  border-bottom: 1px solid rgba(42, 74, 42, 0.3);
+  border-bottom: 1px solid rgba(38, 46, 55, 0.5);
 }
 
-.coevo-gen-row .lab-bar-label { width: 60px; color: var(--accent-green); }
+.coevo-gen-row .lab-bar-label { width: 60px; color: var(--accent); }
 
 .wta-hint {
   font-size: 0.68rem;
@@ -884,7 +901,7 @@ body {
 }
 
 .wta-list li.wta-canion { color: var(--accent-orange); }
-.wta-list li.wta-misil { color: var(--accent-cyan); }
+.wta-list li.wta-misil { color: var(--status-track); }
 
 .checkbox-label {
   display: flex !important;
@@ -897,7 +914,7 @@ body {
 }
 
 .checkbox-label input[type="checkbox"] {
-  accent-color: var(--accent-cyan);
+  accent-color: var(--accent);
   width: 14px;
   height: 14px;
 }
@@ -927,21 +944,21 @@ body {
 .speed-btn:hover { color: var(--text-primary); }
 
 .speed-btn.active {
-  background: rgba(0, 255, 65, 0.15);
-  color: var(--accent-green);
+  background: var(--accent-dim);
+  color: var(--accent);
 }
 
 .control-section-missile input[type="range"]::-webkit-slider-thumb {
-  background: var(--accent-cyan);
-  box-shadow: 0 0 8px rgba(0, 212, 255, 0.5);
+  background: var(--status-track);
+  box-shadow: 0 0 8px rgba(63, 184, 174, 0.5);
 }
 
 .control-section-missile input[type="range"]::-moz-range-thumb {
-  background: var(--accent-cyan);
+  background: var(--status-track);
 }
 
 .control-section-missile .control-value {
-  color: var(--accent-cyan);
+  color: var(--status-track);
 }
 
 .missile-buttons {
@@ -964,7 +981,7 @@ body {
 }
 
 .control-value {
-  color: var(--accent-green);
+  color: var(--accent);
   font-weight: bold;
 }
 
@@ -983,17 +1000,17 @@ input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   width: 16px;
   height: 16px;
-  background: var(--accent-green);
+  background: var(--accent);
   border: 2px solid var(--bg-primary);
   border-radius: 2px;
   cursor: pointer;
-  box-shadow: 0 0 8px rgba(0, 255, 65, 0.5);
+  box-shadow: 0 0 8px rgba(79, 143, 196, 0.5);
 }
 
 input[type="range"]::-moz-range-thumb {
   width: 16px;
   height: 16px;
-  background: var(--accent-green);
+  background: var(--accent);
   border: 2px solid var(--bg-primary);
   border-radius: 2px;
   cursor: pointer;
@@ -1014,7 +1031,7 @@ input[type="number"] {
 select:focus,
 input[type="number"]:focus {
   border-color: var(--border-glow);
-  box-shadow: 0 0 8px rgba(0, 255, 65, 0.15);
+  box-shadow: 0 0 8px rgba(79, 143, 196, 0.15);
 }
 
 .button-group {
@@ -1047,81 +1064,81 @@ input[type="number"]:focus {
 }
 
 .btn-fire {
-  background: rgba(255, 102, 0, 0.15);
+  background: rgba(217, 119, 46, 0.15);
   border-color: var(--accent-orange);
   color: var(--accent-orange);
 }
 
 .btn-fire:hover:not(:disabled) {
-  background: rgba(255, 102, 0, 0.3);
-  box-shadow: 0 0 16px rgba(255, 102, 0, 0.3);
+  background: rgba(217, 119, 46, 0.3);
+  box-shadow: 0 0 16px rgba(217, 119, 46, 0.3);
 }
 
 .btn-start {
-  background: rgba(0, 255, 65, 0.1);
-  border-color: var(--accent-green);
-  color: var(--accent-green);
+  background: rgba(76, 175, 110, 0.1);
+  border-color: var(--status-good);
+  color: var(--status-good);
 }
 
 .btn-start:hover:not(:disabled) {
-  background: rgba(0, 255, 65, 0.2);
-  box-shadow: 0 0 16px rgba(0, 255, 65, 0.25);
+  background: rgba(76, 175, 110, 0.2);
+  box-shadow: 0 0 16px rgba(76, 175, 110, 0.25);
 }
 
 .btn-stop {
-  background: rgba(255, 51, 51, 0.1);
-  border-color: var(--accent-red);
-  color: var(--accent-red);
+  background: rgba(224, 87, 79, 0.1);
+  border-color: var(--status-bad);
+  color: var(--status-bad);
 }
 
 .btn-stop:hover:not(:disabled) {
-  background: rgba(255, 51, 51, 0.2);
-  box-shadow: 0 0 16px rgba(255, 51, 51, 0.25);
+  background: rgba(224, 87, 79, 0.2);
+  box-shadow: 0 0 16px rgba(224, 87, 79, 0.25);
 }
 
 .btn-missile {
-  background: rgba(0, 212, 255, 0.1);
-  border-color: var(--accent-cyan);
-  color: var(--accent-cyan);
+  background: rgba(63, 184, 174, 0.1);
+  border-color: var(--status-track);
+  color: var(--status-track);
 }
 
 .btn-missile:hover:not(:disabled) {
-  background: rgba(0, 212, 255, 0.2);
-  box-shadow: 0 0 16px rgba(0, 212, 255, 0.3);
+  background: rgba(63, 184, 174, 0.2);
+  box-shadow: 0 0 16px rgba(63, 184, 174, 0.3);
 }
 
 .btn-reload {
-  background: rgba(170, 102, 255, 0.1);
+  background: rgba(154, 127, 209, 0.1);
   border-color: var(--accent-purple);
   color: var(--accent-purple);
 }
 
 .btn-reload:hover:not(:disabled) {
-  background: rgba(170, 102, 255, 0.2);
-  box-shadow: 0 0 16px rgba(170, 102, 255, 0.25);
+  background: rgba(154, 127, 209, 0.2);
+  box-shadow: 0 0 16px rgba(154, 127, 209, 0.25);
 }
 
 .btn-reset {
-  background: rgba(184, 212, 184, 0.06);
+  background: rgba(199, 206, 213, 0.06);
   border-color: var(--border-glow);
   color: var(--text-primary);
 }
 
 .btn-reset:hover:not(:disabled) {
-  background: rgba(184, 212, 184, 0.14);
-  box-shadow: 0 0 16px rgba(61, 107, 61, 0.35);
+  background: rgba(199, 206, 213, 0.14);
+  box-shadow: 0 0 16px rgba(58, 68, 81, 0.5);
 }
 
 .btn-mini {
   padding: 4px 10px;
   font-size: 0.7rem;
-  background: rgba(184, 212, 184, 0.06);
+  background: rgba(199, 206, 213, 0.06);
   border-color: var(--border-glow);
   color: var(--text-primary);
 }
 
 .btn-mini:hover:not(:disabled) {
-  background: rgba(184, 212, 184, 0.14);
+  background: rgba(199, 206, 213, 0.14);
 }
 
 /* Logs */
@@ -1159,7 +1176,7 @@ input[type="number"]:focus {
 
 .log-entry {
   padding: 3px 0;
-  border-bottom: 1px solid rgba(42, 74, 42, 0.3);
+  border-bottom: 1px solid rgba(38, 46, 55, 0.5);
   color: var(--text-primary);
 }
 
@@ -1168,12 +1185,12 @@ input[type="number"]:focus {
 }
 
 .log-entry.log-fire { color: var(--accent-orange); }
-.log-entry.log-missile { color: var(--accent-cyan); }
-.log-entry.log-neutralize { color: var(--accent-red); }
-.log-entry.log-start { color: var(--accent-green); }
-.log-entry.log-stop { color: var(--accent-yellow); }
+.log-entry.log-missile { color: var(--status-track); }
+.log-entry.log-neutralize { color: var(--status-bad); }
+.log-entry.log-start { color: var(--status-good); }
+.log-entry.log-stop { color: var(--status-warn); }
 .log-entry.log-info { color: var(--text-primary); }
-.log-entry.log-error { color: var(--accent-red); }
+.log-entry.log-error { color: var(--status-bad); }
 
 /* Responsive */
 @media (max-width: 960px) {
