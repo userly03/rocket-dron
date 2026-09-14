@@ -27,9 +27,10 @@ propia hecha antes de leer el código:
   empuja al dron lejos del punto — misma forma funcional que la separación,
   aplicada a un punto en memoria en vez de a un vecino. Es condicional (pesa
   cero sin impactos previos) y transitorio (vuelve a cero solo).
-- **Punto importante, verificado ahora**: `registrar_impacto` se llama sobre
-  el dron que efectivamente recibió el disparo — **la memoria de amenaza NO
-  se propaga a los vecinos**. Cada dron solo sabe de su propio impacto.
+- **Punto verificado en el momento de escribir esto** (§2.1 más abajo cambió
+  esto — ver la nota de implementación): `registrar_impacto` se llamaba solo
+  sobre el dron que efectivamente recibió el disparo — la memoria de amenaza
+  NO se propagaba a los vecinos. Cada dron solo sabía de su propio impacto.
 
 Esto cambia lo que vale la pena buscar: no hace falta "agregar evasión" —ya
 existe—, sino evaluar si el modelo de evasión actual (reactivo, individual,
@@ -58,14 +59,28 @@ independientes sobre *Sturnus vulgaris*:
 - *"Propagating waves in starling flocks under predation"* (mismo campo,
   grupo de Hemelrijk).
 
-**Esto es precisamente lo que el modelo actual NO tiene**: hoy, un dron que
-no fue impactado directamente no se entera de que su vecino sí lo fue hasta
-que el atacante lo alcanza a él también. Es una brecha concreta y acotada
-—no un rediseño—, porque la maquinaria de decaimiento (P2-E) ya existe; lo
-que falta es que `registrar_impacto` (o un paso posterior en
-`Swarm.actualizar_amenazas`) también deposite una versión atenuada de la
-misma amenaza en los vecinos cercanos, con retardo/atenuación por distancia
-— literalmente la definición de una onda.
+**Esto era precisamente lo que el modelo NO tenía** — ya no. Implementado
+(`src/engine/flocking.py::propagate_alarm`, P2-E Parte 4, `BOIDS_ALARM_
+PROPAGATION_GAIN` en `src/config.py`): un dron sin memoria propia adopta la
+intensidad del vecino más alarmado dentro de `BOIDS_NEIGHBOR_RADIUS`,
+atenuada por una ganancia < 1 por salto — misma red de vecinos que ya usan
+separación/alineación/cohesión, ninguna topología nueva. La actualización es
+SINCRÓNICA (a partir de un snapshot de intensidades antes de propagar, no de
+valores ya actualizados en la misma llamada): la onda avanza exactamente un
+salto por tick, no varios de golpe según el orden de iteración — eso es lo
+que la hace una onda con velocidad de propagación explícita y no un
+artefacto de implementación.
+
+Verificado con un test falsable del mismo tipo que ya usa P2-E Parte 2
+(`tests/test_opfor.py::TestPropagacionDeAlarma::
+test_vecino_no_impactado_tambien_se_dispersa_mas_que_sin_propagacion`): un
+dron que **nunca fue impactado directamente**, solo contagiado por
+propagación, se aleja más del punto de impacto que en un control idéntico
+con la ganancia de propagación en 0 — si no lo hiciera, sería decorativo (el
+vecino ya se movía algo por separación/cohesión de todos modos) y el test lo
+detectaría. 5 tests nuevos en total, cubren: contagio al vecino, no-contagio
+fuera de radio, que un dron no pierde su propia memoria más fuerte, y que un
+solo salto por llamada no salta dos vecinos de una vez.
 
 ### 2.2 Régimen del enjambre según la fuerza del atacante (dinámica no lineal)
 
@@ -126,11 +141,11 @@ solo con la lógica de ingeniería que la motivó originalmente.
 
 | Fuente | Tipo de aporte | Acción concreta |
 |---|---|---|
-| Ondas de agitación (starlings) | Brecha real encontrada | Propagar amenaza a vecinos con atenuación — extensión acotada de P2-E, no implementada aún |
-| Chen & Kolokolnikov 2014 | Hipótesis testeable | Barrido de potencia × formación con el estimador ya corregido — experimento, no código nuevo |
+| Ondas de agitación (starlings) | Brecha real encontrada | ✅ **Implementado** — `flocking.propagate_alarm`, P2-E Parte 4, 5 tests nuevos |
+| Chen & Kolokolnikov 2014 | Hipótesis testeable | Barrido de potencia × formación con el estimador ya corregido — ver `research/BARRIDO_DEPREDADOR_PRESA.md` |
 | Olson et al. 2013 | Anclaje teórico | Cita para cuando P3-B se documente como hallazgo propio — no cambia código |
 | Raptores / punto fijo | Validación retroactiva | Anotar en `FISICA_Y_MATEMATICA.md` que el targeting por centroide coincide con estrategia de caza real — no cambia código |
 
-Nada de esto se implementó todavía. Es exactamente lo que pediste: literatura
-real, verificada, catalogada, para decidir con criterio qué vale la pena
-portar al proyecto — no una lista de ideas sueltas.
+La propagación de alarma quedó implementada y verificada. El barrido de
+Chen & Kolokolnikov es el siguiente paso natural — es un experimento con las
+herramientas existentes, no código nuevo.

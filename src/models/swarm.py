@@ -25,7 +25,7 @@ from src.config import (
     RADAR_RCS_M2,
     RADAR_TX_POWER_W,
 )
-from src.engine.flocking import compute_headings
+from src.engine.flocking import compute_headings, propagate_alarm
 from src.engine.physics import check_boundary_collision, reflect_angle
 from src.engine.radar_engine import TrackManager
 from src.models.drone import Drone, DroneEstado, EstadoEnlace, EstadoSalud
@@ -300,13 +300,21 @@ class Swarm:
     def actualizar_amenazas(self, dt: float) -> None:
         """
         Decae la memoria de amenaza de todos los drones un paso ``dt``
-        (P2-E, Parte 2) — ver ``Drone.actualizar_amenaza`` y el término de
-        repulsión en ``compute_headings``. Se llama desde
+        (P2-E, Parte 2) y después la propaga a los vecinos inmediatos
+        (P2-E, Parte 4 — ver ``flocking.propagate_alarm``). Se llama desde
         ``SimulationEngine._tick`` independientemente de si el enjambre se
         mueve por flocking este tick.
+
+        Orden deliberado — decaer ANTES de propagar: la propagación debe
+        contagiar la intensidad YA decaída de hoy, no la de ayer. Si se
+        propagara antes de decaer, una amenaza vieja y casi apagada podría
+        "revivir" en sus vecinos a un valor más alto del que le queda a
+        ella misma — inconsistente con que nadie puede propagar más
+        intensidad de la que efectivamente tiene en este instante.
         """
         for drone in self.drones:
             drone.actualizar_amenaza(dt)
+        propagate_alarm(self.drones)
 
     def actualizar_riesgos_latentes(self, dt: float) -> list[dict]:
         """

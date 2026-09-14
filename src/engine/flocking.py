@@ -51,6 +51,21 @@ vez de otro boid) y no un parche porque:
    debe aumentar más que en un control idéntico (misma semilla, mismo
    escenario) con el término desactivado — si no lo hiciera, sería un
    parche decorativo y el test lo detectaría.
+
+Nota de diseño — propagación de la memoria de amenaza (P2-E, Parte 4, ver
+``propagate_alarm``): hasta acá, la memoria de amenaza solo la sembraba
+``registrar_impacto`` en el dron IMPACTADO DIRECTAMENTE — un enjambre bajo
+ataque real, salvo ESE dron, volaba exactamente igual que uno en patrulla.
+Es un hueco real de literatura encontrado en el barrido de biomimesis (ver
+docs/ESTADO_DEL_ARTE_BIOMIMESIS.md §2): Attanasi et al. miden que en
+bandadas reales la alarma se propaga de vecino a vecino MÁS RÁPIDO que el
+reposicionamiento físico del grupo — un estornino reacciona al ver a su
+vecino asustarse, no al depredador en sí. ``propagate_alarm`` no es un
+término nuevo en ``compute_headings`` (que sigue leyendo, nunca escribiendo,
+``amenaza_*``): es una nueva operación del ciclo de vida de la memoria
+existente (sembrar → **propagar** → decaer), reutilizando la misma red de
+vecinos de ``BOIDS_NEIGHBOR_RADIUS`` que ya usan separación/alineación/
+cohesión.
 """
 
 from __future__ import annotations
@@ -60,6 +75,7 @@ import math
 import numpy as np
 
 from src.config import (
+    BOIDS_ALARM_PROPAGATION_GAIN,
     BOIDS_ALIGNMENT_WEIGHT,
     BOIDS_COHESION_WEIGHT,
     BOIDS_HOME_RADIUS,
@@ -116,6 +132,80 @@ def _threat_vector(drone: Drone) -> tuple[float, float]:
 
     escala = BOIDS_NEIGHBOR_RADIUS / dist
     return dx * escala * intensidad, dy * escala * intensidad
+
+
+def propagate_alarm(drones: list[Drone]) -> None:
+    """
+    Propaga la memoria de amenaza a los vecinos inmediatos (P2-E, Parte 4
+    — biomimesis, ver ``BOIDS_ALARM_PROPAGATION_GAIN`` en ``src/config.py``
+    para el hallazgo de literatura y el racional completo de la ganancia).
+
+    A diferencia de ``compute_headings`` (de lectura pura: nunca escribe
+    ``amenaza_*``), esta función MUTA ``Drone.amenaza_x/y/intensidad``
+    directamente — mismo patrón que ``Drone.actualizar_amenaza`` (decaimiento)
+    y ``Drone.registrar_impacto`` (siembra): la memoria de amenaza tiene tres
+    operaciones de ciclo de vida (sembrar, decaer, propagar), todas mutan
+    estado, y ``compute_headings``/``_threat_vector`` solo LEEN el resultado
+    para convertirlo en fuerza de repulsión.
+
+    Un dron sin amenaza propia (o con una más débil que la de su vecino)
+    ADOPTA la posición y una fracción (``BOIDS_ALARM_PROPAGATION_GAIN``) de
+    la intensidad del vecino MÁS alarmado dentro de ``BOIDS_NEIGHBOR_RADIUS``
+    — la misma red de vecinos que ya usa ``compute_headings`` para
+    separación/alineación/cohesión, no una topología nueva.
+
+    Actualización SINCRÓNICA, no secuencial: todas las intensidades nuevas
+    se calculan a partir de un snapshot de las intensidades ANTES de llamar
+    a esta función, y se aplican recién al final. Si se aplicaran una por
+    una a medida que se recorre la lista, la alarma podría saltar varios
+    vecinos en una sola llamada según el orden de iteración — un artefacto
+    del código, no una propiedad del modelo. Con la actualización sincrónica,
+    la onda avanza exactamente UN salto por llamada (una por tick, ver
+    ``Swarm.actualizar_amenazas``): la velocidad de propagación depende solo
+    de ``BOIDS_NEIGHBOR_RADIUS`` y de cada cuánto se llama, ambos explícitos.
+
+    Un dron nunca pierde SU PROPIA amenaza por esto (siempre
+    ``max(propia, contagiada)``): el dron impactado directamente sigue
+    siendo el epicentro real de la onda que ven sus vecinos, no un nodo más
+    que la propagación podría sobrescribir con un valor menor.
+    """
+    n = len(drones)
+    if n < 2:
+        return
+
+    intensidad0 = np.array([d.amenaza_intensidad for d in drones])
+    if not np.any(intensidad0 > 0.0):
+        return  # nadie tiene amenaza activa: nada que propagar, salida barata
+
+    x0 = np.array([d.amenaza_x for d in drones])
+    y0 = np.array([d.amenaza_y for d in drones])
+
+    xs = np.array([d.x for d in drones])
+    ys = np.array([d.y for d in drones])
+    dist = np.hypot(xs[:, None] - xs[None, :], ys[:, None] - ys[None, :])
+    np.fill_diagonal(dist, np.inf)
+    vecinos = dist < BOIDS_NEIGHBOR_RADIUS
+
+    nueva_intensidad = intensidad0.copy()
+    nueva_x = x0.copy()
+    nueva_y = y0.copy()
+
+    for i in range(n):
+        idx_vecinos = np.where(vecinos[i])[0]
+        if idx_vecinos.size == 0:
+            continue
+        j = idx_vecinos[int(np.argmax(intensidad0[idx_vecinos]))]
+        contagiada = intensidad0[j] * BOIDS_ALARM_PROPAGATION_GAIN
+        if contagiada > nueva_intensidad[i]:
+            nueva_intensidad[i] = contagiada
+            nueva_x[i] = x0[j]
+            nueva_y[i] = y0[j]
+
+    for i, drone in enumerate(drones):
+        if nueva_intensidad[i] > intensidad0[i]:
+            drone.amenaza_x = float(nueva_x[i])
+            drone.amenaza_y = float(nueva_y[i])
+            drone.amenaza_intensidad = float(nueva_intensidad[i])
 
 
 def compute_headings(

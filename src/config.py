@@ -669,6 +669,32 @@ THREAT_MEMORY_DECAY_TAU_S: float = float(os.getenv("THREAT_MEMORY_DECAY_TAU_S", 
 # vez de seguir volando en formación ordenada).
 BOIDS_THREAT_WEIGHT: float = float(os.getenv("BOIDS_THREAT_WEIGHT", "2.5"))
 
+# Propagación de alarma entre vecinos (P2-E, Parte 4 — biomimesis).
+# Hallazgo real de literatura, antes NO implementado (ver
+# docs/ESTADO_DEL_ARTE_BIOMIMESIS.md §2): Attanasi et al. (Nature Physics /
+# arXiv:1303.7097) miden que en bandadas reales la alarma se propaga de
+# vecino a vecino MÁS RÁPIDO que el reposicionamiento físico del grupo —
+# un estornino ve a su vecino asustarse y reacciona él mismo, sin haber
+# visto al depredador. Hasta este ítem, `_threat_vector` solo sembraba
+# memoria de amenaza en el dron IMPACTADO DIRECTAMENTE (P2-E, Parte 2) —
+# un enjambre bajo ataque real, salvo el dron golpeado, volaba exactamente
+# igual que uno en patrulla tranquila.
+#
+# Ganancia de atenuación por salto: un dron SIN amenaza propia adopta la
+# intensidad del vecino más alarmado, multiplicada por esta ganancia (< 1).
+# < 1 es la condición que hace de esto una ONDA que se apaga, no una
+# reacción en cadena que satura el enjambre entero a intensidad 1.0 en
+# cualquier ataque puntual: con ganancia g y N saltos, la intensidad en el
+# salto N es como mucho g^N — con g=0.7, al 5to salto ya está por debajo
+# de 0.17, y un dron nunca puede tener MÁS intensidad que el que se la
+# contagió (ver `flocking.propagate_alarm`: siempre `max(propia,
+# vecino*ganancia)`, nunca al revés). 0.7 es deliberadamente alto (no
+# 0.3-0.4): con una ganancia baja la propagación se apaga en 1-2 saltos y
+# el efecto sería indistinguible de "solo el dron impactado reacciona" —
+# el punto del ítem es que la onda alcance a varios vecinos más allá del
+# punto de impacto, no solo al primero.
+BOIDS_ALARM_PROPAGATION_GAIN: float = float(os.getenv("BOIDS_ALARM_PROPAGATION_GAIN", "0.7"))
+
 # --- OPFOR reactivo: perfiles de pérdida de enlace (P2-E) ---
 # Antes, perder el enlace (jammer) "congelaba" al dron (Drone.mover
 # retornaba temprano) — no es lo que hace un dron real: ejecuta un

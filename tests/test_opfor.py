@@ -460,3 +460,109 @@ class TestIntegracionSimulationEngine:
 
         assert 0.0 < drone.amenaza_intensidad < 1.0
         sim.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# Parte 4: propagación de la memoria de amenaza entre vecinos (biomimesis)
+# ---------------------------------------------------------------------------
+
+
+class TestPropagacionDeAlarma:
+    def test_propaga_al_vecino_sin_amenaza_propia(self):
+        golpeado = Drone(0, x=0.0, y=0.0)
+        golpeado.registrar_impacto(100.0, 200.0, intensidad=1.0)
+        vecino = Drone(1, x=10.0, y=0.0)  # bien dentro de BOIDS_NEIGHBOR_RADIUS (80)
+        assert vecino.amenaza_intensidad == 0.0
+
+        flocking.propagate_alarm([golpeado, vecino])
+
+        assert vecino.amenaza_intensidad == pytest.approx(1.0 * flocking.BOIDS_ALARM_PROPAGATION_GAIN)
+        assert (vecino.amenaza_x, vecino.amenaza_y) == (100.0, 200.0)
+        # El dron impactado directamente no pierde su propia memoria.
+        assert golpeado.amenaza_intensidad == pytest.approx(1.0)
+
+    def test_no_propaga_mas_alla_del_radio_de_vecinos(self):
+        golpeado = Drone(0, x=0.0, y=0.0)
+        golpeado.registrar_impacto(0.0, 0.0, intensidad=1.0)
+        lejano = Drone(1, x=1000.0, y=1000.0)  # muy fuera de BOIDS_NEIGHBOR_RADIUS
+
+        flocking.propagate_alarm([golpeado, lejano])
+
+        assert lejano.amenaza_intensidad == 0.0
+
+    def test_no_reduce_una_amenaza_propia_mas_fuerte(self):
+        """Un dron con memoria propia más intensa que lo que le contagiaría
+        un vecino más débil no la pierde — max(propia, contagiada), nunca
+        al revés."""
+        fuerte = Drone(0, x=0.0, y=0.0)
+        fuerte.registrar_impacto(5.0, 5.0, intensidad=1.0)
+        debil = Drone(1, x=10.0, y=0.0)
+        debil.registrar_impacto(500.0, 500.0, intensidad=0.1)
+
+        flocking.propagate_alarm([fuerte, debil])
+
+        assert fuerte.amenaza_intensidad == pytest.approx(1.0)
+        assert (fuerte.amenaza_x, fuerte.amenaza_y) == (5.0, 5.0)
+
+    def test_un_salto_por_llamada_no_varios_de_una_vez(self):
+        """Núcleo del diseño (ver la nota de 'actualización sincrónica' en
+        el docstring de propagate_alarm): A-B-C en línea, separados 20m
+        entre consecutivos (vecinos directos: A-B y B-C, pero A y C NO son
+        vecinos entre sí a 40m de distancia si BOIDS_NEIGHBOR_RADIUS < 40 —
+        se fuerza con monkeypatch para que el test no dependa del valor por
+        defecto). Con A impactado, UNA llamada debe alarmar a B pero NO
+        a C todavía — si C se alarmara en la misma llamada, la propagación
+        estaría saltando dos vecinos de una vez, un artefacto de orden de
+        iteración, no del modelo."""
+        import src.config as config_mod
+
+        radio_original = flocking.BOIDS_NEIGHBOR_RADIUS
+        try:
+            flocking.BOIDS_NEIGHBOR_RADIUS = 25.0  # A-B y B-C vecinos; A-C no
+            a = Drone(0, x=0.0, y=0.0)
+            b = Drone(1, x=20.0, y=0.0)
+            c = Drone(2, x=40.0, y=0.0)
+            a.registrar_impacto(0.0, 0.0, intensidad=1.0)
+
+            flocking.propagate_alarm([a, b, c])
+            assert b.amenaza_intensidad > 0.0
+            assert c.amenaza_intensidad == 0.0, "la alarma saltó dos vecinos en una sola llamada"
+
+            # Segunda llamada (próximo tick): ahora sí, desde B (ya alarmado).
+            flocking.propagate_alarm([a, b, c])
+            assert c.amenaza_intensidad > 0.0
+        finally:
+            flocking.BOIDS_NEIGHBOR_RADIUS = radio_original
+
+    def test_vecino_no_impactado_tambien_se_dispersa_mas_que_sin_propagacion(
+        self, monkeypatch
+    ):
+        """El test biomimeticamente relevante: un VECINO que nunca fue
+        impactado directamente (solo contagiado por propagación) debe
+        dispersarse más del punto de impacto que en un control idéntico con
+        la propagación anulada — si no, la 'onda de agitación' sería
+        decorativa (el vecino se movería igual de todos modos por
+        separación/cohesión, sin que la memoria de amenaza propagada
+        aportara nada)."""
+        centro_impacto = (500.0, 500.0)
+        dt = 0.3
+        pasos = 15
+
+        def _correr_con_un_impactado(ganancia: float) -> float:
+            monkeypatch.setattr(flocking, "BOIDS_ALARM_PROPAGATION_GAIN", ganancia)
+            drones = _formacion_compacta(centro_impacto)
+            drones[0].registrar_impacto(*centro_impacto, intensidad=1.0)
+            swarm = Swarm(centro_x=centro_impacto[0], centro_y=centro_impacto[1])
+            swarm.drones = drones
+            for _ in range(pasos):
+                swarm.actualizar(dt)
+                swarm.actualizar_amenazas(dt)
+            vecino = drones[1]  # nunca impactado directamente, solo contagiado
+            return distance(vecino.x, vecino.y, *centro_impacto)
+
+        dist_con_propagacion = _correr_con_un_impactado(flocking.BOIDS_ALARM_PROPAGATION_GAIN)
+        dist_sin_propagacion = _correr_con_un_impactado(0.0)
+
+        assert dist_con_propagacion > dist_sin_propagacion
+
+
