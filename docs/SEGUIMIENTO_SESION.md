@@ -117,7 +117,32 @@ es la propagación de alarma entre drones (§1.5, brecha real de
 `P2-E`) — pero no está implementado, es una idea evaluada, no una función
 existente sin exponer.
 
-**Pendiente de decisión, no de investigación**: ¿arrancamos con el panel
-de Experimentos Monte Carlo (código ya existe, solo falta la UI), o
-priorizamos que el usuario consiga el BMS/MOSFET y Mao et al. antes de
-tocar más frontend?
+**Pendiente de decisión, no de investigación**: BMS/MOSFET y Mao et al.
+siguen abiertos (§1.4), sin bloquear nada — quedan a la espera de que el
+usuario consiga algo nuevo.
+
+---
+
+## 4. Reordenamiento UI/UX — ✅ CERRADO
+
+Auditoría, propuesta y navegación real en 4 vistas
+(Operación/Planificación/Análisis Físico/Laboratorio), todo implementado.
+Detalle completo en `docs/PROPUESTA_UI_REORDENAMIENTO.html` (la propuesta
+original) y el commit `c767a73` (la implementación).
+
+Dos bugs reales aparecieron al reorganizar y se corrigieron en el camino,
+ninguno estaba en el plan original:
+- `charts.js::resizeCanvas` daba ancho negativo cuando la pestaña de
+  Análisis Físico estaba oculta (los charts se actualizan en vivo sin
+  importar qué tab está activo).
+- `drawHeatmap` no distinguía "sin datos todavía" de datos reales — ahora
+  muestra un mensaje explícito.
+
+Y una consecuencia de UX detectada y resuelta: mover el plan WTA a
+Planificación significaba que "Ejecutar Plan" (dispara tiros reales) ya
+no estaba en la misma pantalla que la animación del cañón — se agregó un
+salto automático a Operación al ejecutar.
+
+Verificado en vivo en el navegador: consola limpia en las 4 vistas, todas
+las transiciones de tab, el toggle Táctico/Calor 3D, y un disparo de
+cañón real de punta a punta.
