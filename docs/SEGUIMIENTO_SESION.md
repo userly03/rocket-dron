@@ -99,16 +99,15 @@ vale la pena portar.
 
 ## 3. Frontend — qué falta exponer
 
-De todo el trabajo de esta sesión, hay **una sola pieza con código ya
-funcionando en el backend y cero interfaz**:
-
-- **Panel "Experimentos Monte Carlo"** — expone `/api/experiments`, que es
-  literalmente el estimador que corregimos y documentamos
-  (`fraccion_media` + IC por bootstrap, CV, percentiles, y el indicador
-  viejo `aniquilación total` al lado para que se vea la diferencia en
-  vivo). Hoy es invisible en la app — el usuario configuraría arma,
-  réplicas y cantidad de drones, y vería el resultado con su intervalo,
-  igual que en la nota técnica pero interactivo.
+- **Panel "Experimentos Monte Carlo"** — ✅ **CERRADO.** Expone
+  `/api/experiments` (el estimador corregido: `fraccion_media` + IC por
+  bootstrap, CV, percentiles, con la métrica vieja `aniquilación total` al
+  lado para que se vea la diferencia). Backend sin cambios, solo UI nueva
+  (`.lab-block` en el panel Laboratorio + polling cada 1s, mismo patrón que
+  la coevolución). Verificado en vivo en el navegador: 20 réplicas con
+  misil dieron `fraccion_media=0.0233` (IC 0.0133-0.0333) mientras la
+  métrica vieja seguía en `0.0000` (IC Wilson 0-0.1611) — la misma corrida,
+  la diferencia es solo qué se decide medir.
 
 Nada de lo investigado sobre papers (HPM de otras fuentes, biomimesis)
 tiene todavía una pieza de código que mostrar en el frontend — son
