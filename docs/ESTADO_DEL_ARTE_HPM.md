@@ -252,27 +252,50 @@ Engineering* — un paper de física/EW en una revista de química es
 indicio de revista de bajo estándar o fuera de su campo. No se usa como
 fuente.
 
-### 5.3 Hallazgo transversal: un régimen entero que el proyecto no modela
+### 5.3 Corrección propia: NO es una brecha nueva — es el ítem `P2-D`, ya cerrado
 
-Cruzando Lee et al. (§5.1, soft-kill a 55 kV/m pulsado) contra los umbrales
-EMC de Kubacki et al. (§5.1, disrupción ya a 10–60 V/m continuo) aparece un
-patrón consistente entre **dos fuentes independientes, con métodos
-distintos** (simulación EM + medición en banco, y recopilación de normas
-EMC + medición en vuelo, respectivamente): existe un régimen de
-**interferencia/pérdida de control temporal y recuperable**, a un campo
-muy por debajo del que el modelo de 5 subsistemas del proyecto usa para
-"daño" (150-350 V/m, permanente). El proyecto hoy solo tiene una curva de
-probabilidad de daño permanente; no distingue "el drone pierde el control
-un instante y se recupera" de "el drone queda destruido". Es una brecha de
-modelo real, con más de una fuente que la respalda — candidato fuerte para
-una fase futura, no incorporado todavía.
+**Esta subsección reemplaza una afirmación anterior de este documento**, que
+decía que el proyecto "no modela ningún régimen de soft-kill" y que dos
+fuentes independientes mostraban "el mismo patrón". Al revisar el código
+antes de actuar sobre eso, encontré que es **falso en la primera parte y un
+error de comparación de escalas en la segunda**:
 
-Estas líneas de investigación son exactamente las que sustentarían, con
-más rigor, los ítems ya anotados en el roadmap de `FISICA_Y_MATEMATICA.md`
-§7 (acoplamiento resonante por frecuencia, potencia pico vs. promedio), y
-en particular el de Mao et al. (2023) es el candidato más fuerte para
-algún día contrastar el umbral del subsistema ESC contra un dato que no
-venga del mismo paper que ya mostró una inconsistencia interna.
+- El proyecto **ya tiene** un modelo upset (recuperable) vs. damage
+  (permanente): ítem `P2-D`, cerrado 2026-09-12, 38 tests
+  (`tests/test_upset_damage.py`). El umbral de upset se deriva del de daño
+  ya calibrado con una brecha de **-10 dB** (`e50_upset_desde_damage`,
+  `src/engine/hpm_engine.py`): `E50_upset = E50_damage / 10^(10/20) ≈
+  487.389 / 3.162 ≈ 154.13 V/m`. Está documentado explícitamente en
+  `src/config.py` como **decisión de modelado** (categoría 3), tomada del
+  extremo conservador de una convención general de literatura EMI/IEMI
+  (rango 10-20 dB), sin una fuente numérica específica.
+- Comparé mal las tres fuentes por no fijarme en la magnitud: **Lee et al.
+  miden su soft-kill (crash por corrupción de PWM) a 55.000 V/m** — dos
+  órdenes de magnitud POR ENCIMA del umbral de *daño* del proyecto
+  (487 V/m), no por debajo. A los campos donde el arma del simulador ya
+  destruye un dron, ese mecanismo específico de Lee et al. ni siquiera
+  entra en juego — el dron ya está destruido por el mecanismo térmico
+  mucho antes de llegar a ese campo. Es un hallazgo real, pero **fuera del
+  rango de operación que este simulador modela**, no una brecha a llenar.
+- Los umbrales de Kubacki et al. (10-60 V/m onda continua, hasta 200 V/m
+  para el estándar militar) sí caen en el mismo orden de magnitud que el
+  upset ya calibrado del proyecto (154 V/m) — pero miden un fenómeno
+  distinto (degradación de comunicación/posicionamiento bajo onda
+  continua, no el congelamiento de rumbo/degradación de RTH que modela
+  `P2-D`). Sirven como **chequeo de orden de magnitud**, no como dato para
+  recalibrar el número exacto: la brecha de -10dB, sin ser un dato citado
+  de esta literatura específica, al menos aterriza en un rango
+  real-mundo plausible (10-200 V/m) en vez de ser un número arbitrario.
+
+**Conclusión honesta**: no hay nada que implementar acá. El upset ya
+existe, su calibración sigue siendo una decisión de modelado declarada
+como tal (no un dato validado), y la literatura nueva la sitúa en un rango
+razonable sin poder reemplazarla por un número medido específico para
+*este* comportamiento (congelamiento de rumbo). Si se quisiera cerrar esa
+brecha de calibración con más rigor, haría falta un estudio que mida
+específicamente el umbral de disrupción del **flight controller** de un
+UAV bajo onda continua — ninguno de los papers de este catálogo lo hace
+exactamente así.
 
 ---
 
