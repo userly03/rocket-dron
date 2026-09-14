@@ -22,6 +22,7 @@ cambia de estado. Todo lo de acá tiene el detalle completo en
 | Kubacki et al. (2025), Electronics (MDPI) | Umbrales EMC reales: 10 V/m (estándar), 15-30 V/m (disrupción), 200 V/m (militar) | Chequeo de orden de magnitud del umbral de *upset* ya calibrado del proyecto (154 V/m) — no lo recalibra con precisión, pero confirma que no es descabellado |
 | Yang et al. (2024), J. Electromagnetic Eng. and Science | Cámara CMOS: 40.4 kV/m para 95% interrupción funcional, pulso corto | Mismo patrón que Lee et al. — mecanismo real, campo muy por encima del rango del proyecto |
 | Micromachines 17(9):1054 (2025) | LNA de RF (GaAs pHEMT, no específico de GPS): quemado a 45 dBm/2GHz/43ns | Componente análogo al de GPS/GNSS LNA, mecanismo similar al de ESC |
+| Du, Xia, Huang, Mao, Cui, Fang, Nie (2022), Energies | LNA de RF bajo inyección de corriente HEMP: umbral de daño por norma vectorial, validado con microscopía óptica | Tercer punto de calibración para la línea GPS/GNSS LNA — metodología de equivalencia entre pulso de inyección y HEMP real |
 
 ### 1.2 Descartados o marcados como alerta
 
@@ -35,7 +36,24 @@ cambia de estado. Todo lo de acá tiene el detalle completo en
 
 ### 1.4 Huecos reales — todavía sin buen paper
 
-- **BMS/MOSFET**: ningún resultado de daño físico por HPM/EMP específico para MOSFET de gestión de batería. Candidato: literatura de electrónica de potencia/automotriz sobre endurecimiento ante EMP o transitorios — **pendiente que el usuario busque, dominio distinto al de guerra electrónica**.
+- **BMS/MOSFET**: sigue sin cerrar tras una segunda ronda. El usuario bajó 5
+  PDFs candidatos; ninguno sirve como umbral de calibración:
+  - `energies-15-01409.pdf` (Du et al. 2022) — real, pero es sobre un LNA de
+    RF, no un MOSFET de potencia. Se suma a la línea de GPS/GNSS (§1.1) en
+    vez de a BMS.
+  - `electronics-13-01414-v3.pdf` (Grome & Ji, RPI/LLNL) — MOSFET de
+    potencia SiC, pero el mecanismo de falla es radiación espacial (rayos
+    cósmicos), no campo electromagnético. Mismo componente, amenaza
+    distinta — no calibra nada, pero da contexto de la física de
+    avalancha/quemado si algún día se modela.
+  - `energies-18-05915.pdf`, `irps_full_length.pdf`, `P2_2.pdf` —
+    descartados: clasificación de baterías con IA, recuperación inversa
+    bajo conmutación normal, y caracterización RF de MOSFET para modelado
+    de circuitos, respectivamente. Ninguno mide daño por HPM/EMP.
+  - **Conclusión**: dos rondas de búsqueda (web + PDFs bajados a mano) no
+    encontraron literatura de daño por HPM/EMP específica para MOSFET de
+    BMS. Es un hueco de la literatura en sí, no de la búsqueda — se declara
+    como límite conocido y no bloquea nada del trabajo de frontend.
 - **Flight controller** bajo onda continua: nada más allá del mecanismo de Lee et al. (pulsado).
 - **Mao et al. 2023 completo**: seguimos sin el PDF (paywall IEEE Xplore).
 
