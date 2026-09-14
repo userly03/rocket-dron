@@ -1,0 +1,678 @@
+<title>Reordenar el Panel</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+:root {
+  --bg: #0b1016;
+  --surface: #12181f;
+  --surface-2: #1a222b;
+  --line: #263141;
+  --ink: #dde4ec;
+  --ink-dim: #8895a3;
+  --ink-faint: #5c6a78;
+  --accent: #4fc7dd;
+  --accent-dim: #2c5560;
+  --flag: #e8a33d;
+  --flag-dim: #4a3c22;
+  --good: #52b788;
+  --bad: #e0685f;
+  --font-display: 'Big Shoulders Display', 'Arial Narrow', sans-serif;
+  --font-body: 'IBM Plex Sans', -apple-system, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="light"]) {
+    --bg: #f2f4f6;
+    --surface: #ffffff;
+    --surface-2: #eaeef1;
+    --line: #d5dbe1;
+    --ink: #1a2129;
+    --ink-dim: #566270;
+    --accent: #0e7c93;
+    --accent-dim: #d3edf1;
+    --flag: #a8650f;
+    --flag-dim: #f6e6cf;
+    --good: #1f7a4d;
+    --bad: #b5342b;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #f2f4f6;
+  --surface: #ffffff;
+  --surface-2: #eaeef1;
+  --line: #d5dbe1;
+  --ink: #1a2129;
+  --ink-dim: #566270;
+  --accent: #0e7c93;
+  --accent-dim: #d3edf1;
+  --flag: #a8650f;
+  --flag-dim: #f6e6cf;
+  --good: #1f7a4d;
+  --bad: #b5342b;
+}
+:root[data-theme="dark"] {
+  --bg: #0b1016;
+  --surface: #12181f;
+  --surface-2: #1a222b;
+  --line: #263141;
+  --ink: #dde4ec;
+  --ink-dim: #8895a3;
+  --accent: #4fc7dd;
+  --accent-dim: #2c5560;
+  --flag: #e8a33d;
+  --flag-dim: #4a3c22;
+  --good: #52b788;
+  --bad: #e0685f;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  line-height: 1.55;
+  margin: 0;
+}
+.wrap {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 56px 28px 100px;
+}
+
+/* ---- header / verdict ---- */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 10px;
+}
+h1 {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(2.4rem, 5vw, 3.6rem);
+  line-height: 0.98;
+  letter-spacing: 0.01em;
+  margin: 0 0 8px;
+  text-wrap: balance;
+  color: var(--ink);
+}
+.dek {
+  font-size: 1.05rem;
+  color: var(--ink-dim);
+  max-width: 62ch;
+  margin: 0 0 32px;
+}
+.meta-row {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--ink-dim);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 12px 0;
+  margin-bottom: 40px;
+}
+.meta-row span b { color: var(--ink); font-weight: 600; }
+
+.verdict {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 52px;
+}
+.verdict-item {
+  background: var(--surface);
+  padding: 18px 20px;
+}
+.verdict-item .label {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  margin-bottom: 8px;
+}
+.verdict-item .value {
+  font-family: var(--font-mono);
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+.verdict-item .value.ok { color: var(--good); }
+.verdict-item .value.ok::before { content: "✓ "; }
+
+/* ---- sections ---- */
+section { margin-bottom: 64px; }
+.section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin-bottom: 6px;
+}
+.section-num {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--accent);
+}
+h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(1.6rem, 3vw, 2.1rem);
+  margin: 0;
+  letter-spacing: 0.005em;
+  text-wrap: balance;
+}
+.section-intro {
+  color: var(--ink-dim);
+  max-width: 68ch;
+  margin: 10px 0 28px;
+}
+.section-intro code, p code, li code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--surface-2);
+  padding: 0.1em 0.4em;
+  border-radius: 4px;
+  color: var(--accent);
+}
+
+/* ---- current-state stack diagram ---- */
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--line);
+}
+.stack-block {
+  background: var(--surface);
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  position: relative;
+}
+.stack-block .name {
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+  color: var(--ink);
+}
+.stack-block .name .sub {
+  color: var(--ink-dim);
+  font-size: 0.78rem;
+  display: block;
+  margin-top: 2px;
+}
+.flag {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--flag);
+  background: var(--flag-dim);
+  border: 1px solid var(--flag);
+  border-radius: 20px;
+  padding: 3px 11px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.stack-block.tall { padding-top: 22px; padding-bottom: 22px; }
+.stack-block.empty-note {
+  background: repeating-linear-gradient(135deg, var(--surface), var(--surface) 10px, var(--surface-2) 10px, var(--surface-2) 20px);
+}
+
+.flag-detail {
+  margin-top: 22px;
+  display: grid;
+  gap: 12px;
+}
+.flag-card {
+  border-left: 3px solid var(--flag);
+  background: var(--surface);
+  border-radius: 0 8px 8px 0;
+  padding: 14px 18px;
+}
+.flag-card .flag-title {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--flag);
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+.flag-card p { margin: 0; color: var(--ink-dim); font-size: 0.92rem; }
+
+/* ---- proposed views grid ---- */
+.views-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+@media (max-width: 720px) { .views-grid { grid-template-columns: 1fr; } }
+.view-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 22px 22px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.view-card .vc-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.vc-tag {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--bg);
+  background: var(--accent);
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-weight: 600;
+}
+.view-card h3 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.35rem;
+  margin: 0;
+  letter-spacing: 0.01em;
+}
+.view-card .vc-why {
+  font-size: 0.88rem;
+  color: var(--ink-dim);
+  margin: 0;
+}
+
+/* wireframe */
+.wire {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px;
+  display: grid;
+  gap: 4px;
+  height: 140px;
+}
+.wire-cell {
+  background: var(--bg);
+  border: 1px dashed var(--line);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  color: var(--ink-faint, var(--ink-dim));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 2px;
+  line-height: 1.2;
+}
+.wire-op {
+  grid-template-columns: 2fr 1fr;
+  grid-template-rows: auto 1fr 1fr;
+}
+.wire-op .w1 { grid-column: 1 / 3; }
+.wire-op .w2 { grid-row: 2 / 4; }
+.wire-op .w3 { }
+.wire-op .w4 { }
+
+.wire-plan {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.wire-analisis {
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: 1fr 1fr;
+}
+
+.wire-lab {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: auto 1fr;
+}
+.wire-lab .w1 { grid-column: 1/3; }
+
+.vc-contents {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.85rem;
+}
+.vc-contents li {
+  display: flex;
+  gap: 8px;
+  color: var(--ink-dim);
+}
+.vc-contents li::before {
+  content: "—";
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.vc-contents b { color: var(--ink); font-weight: 500; }
+.vc-badge {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: var(--ink-dim);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-left: 4px;
+}
+
+/* nav rail preview */
+.nav-preview {
+  display: flex;
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 28px;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+.nav-preview .tab {
+  flex: 1;
+  background: var(--surface);
+  padding: 12px 10px;
+  text-align: center;
+  color: var(--ink-dim);
+}
+.nav-preview .tab.active {
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-weight: 600;
+  border-bottom: 2px solid var(--accent);
+}
+
+/* migration plan */
+.phases {
+  display: grid;
+  gap: 14px;
+}
+.phase {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px 20px;
+  align-items: start;
+}
+.phase-n {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 2.1rem;
+  color: var(--accent-dim);
+  line-height: 1;
+}
+.phase h4 {
+  margin: 0 0 4px;
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 1.02rem;
+}
+.phase p { margin: 0; color: var(--ink-dim); font-size: 0.9rem; }
+.phase .tag {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--ink-dim);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 1px 6px;
+  margin-left: 8px;
+}
+
+/* mental model split */
+.split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-top: 20px;
+}
+@media (max-width: 640px) { .split { grid-template-columns: 1fr; } }
+.split-col {
+  padding: 18px 20px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.split-col h4 {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 10px;
+}
+.split-col ul { margin: 0; padding-left: 18px; color: var(--ink-dim); font-size: 0.9rem; }
+.split-col li { margin-bottom: 4px; }
+
+footer {
+  border-top: 1px solid var(--line);
+  padding-top: 24px;
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+  font-family: var(--font-mono);
+}
+</style>
+
+<div class="wrap">
+
+  <p class="eyebrow">simulador-ew · auditoría de interfaz</p>
+  <h1>Reordenar el Panel</h1>
+  <p class="dek">El código del frontend está limpio — la consola no tira errores, ninguna llamada a la API falla. Lo que está confuso es la arquitectura de la información: seis herramientas científicas distintas conviven bajo un solo acordeón, y el selector de modo de vista se disfraza de navegación de página sin serlo. Esta auditoría documenta eso y propone una reorganización en cuatro vistas con propósito claro.</p>
+
+  <div class="meta-row">
+    <span>Alcance: <b>frontend/index.html + js/*.js</b></span>
+    <span>Método: <b>consola + red + medición en vivo, localhost:8080</b></span>
+    <span>Fecha: <b>2026-09-13</b></span>
+  </div>
+
+  <div class="verdict">
+    <div class="verdict-item"><div class="label">Errores de consola</div><div class="value ok">0 detectados</div></div>
+    <div class="verdict-item"><div class="label">Llamadas a la API</div><div class="value ok">7 / 7 con 200</div></div>
+    <div class="verdict-item"><div class="label">Overflow horizontal</div><div class="value ok">no detectado</div></div>
+    <div class="verdict-item"><div class="label">Diagnóstico real</div><div class="value" style="color:var(--flag)">arquitectura, no bug</div></div>
+  </div>
+
+  <section>
+    <div class="section-head"><span class="section-num">01</span><h2>Cómo está armado hoy</h2></div>
+    <p class="section-intro">Es una sola página que crece hacia abajo. Métricas, mapa 3D, controles de tiro, gráficos de efectividad, y seis herramientas de laboratorio — todo apilado, todo con el mismo peso visual. Cuatro problemas concretos, encontrados navegándola en vivo:</p>
+
+    <div class="stack">
+      <div class="stack-block tall">
+        <div class="name">Encabezado<span class="sub">título · selector de vista (3D / Calor / Espectro) · estado de conexión</span></div>
+        <span class="flag">① parece navegación, no lo es</span>
+      </div>
+      <div class="stack-block">
+        <div class="name">Métricas<span class="sub">11 tarjetas: drones, neutralizados, energía, munición, tiempo…</span></div>
+      </div>
+      <div class="stack-block tall">
+        <div class="name">Mapa táctico 3D + panel de control<span class="sub">cañón · misil · WTA — columna derecha</span></div>
+        <span class="flag">② columna vacía la mitad inferior</span>
+      </div>
+      <div class="stack-block">
+        <div class="name">Efectividad vs distancia · mapa de calor · historial de disparos</div>
+        <span class="flag">③ el calor se ve vacío sin contexto</span>
+      </div>
+      <div class="stack-block empty-note tall">
+        <div class="name">Acordeón "Laboratorio"<span class="sub">sensibilidad · dosis-respuesta · 5 subsistemas · coevolución genética · experimentos Monte Carlo</span></div>
+        <span class="flag">④ 6 herramientas, 3 propósitos distintos</span>
+      </div>
+      <div class="stack-block">
+        <div class="name">Registro de eventos</div>
+      </div>
+    </div>
+
+    <div class="flag-detail">
+      <div class="flag-card">
+        <div class="flag-title">① El selector de vista se lee como navegación de página</div>
+        <p>3D / Calor / Espectro cambian el modo de render del mapa — no cambian de página. Visualmente ocupan el mismo lugar y tienen el mismo estilo que tendría una navegación real, así que un usuario (o una herramienta de accesibilidad) los interpreta como tabs de sección. Los confirmé así al auditar: le pedí al lector de accesibilidad de la página el tab "FISICO" y respondió que no existe como tal — son botones de un grupo "Modo de visualización" sin relación con navegación.</p>
+      </div>
+      <div class="flag-card">
+        <div class="flag-title">② La columna de control queda vacía en la mitad inferior de la página</div>
+        <p>Medido en vivo: el panel de control (cañón, misil, WTA) termina bastante antes que la columna izquierda, que sigue con gráficos y el Laboratorio. El resultado es una franja en blanco al costado de casi toda la mitad inferior de la pantalla — espacio real que no se usa.</p>
+      </div>
+      <div class="flag-card">
+        <div class="flag-title">③ El mapa de calor HPM se ve casi vacío la mayor parte del tiempo</div>
+        <p>No es necesariamente un bug — probablemente necesita más disparos acumulados para tener algo que mostrar — pero sin ninguna indicación ("todavía no hay datos suficientes") se lee exactamente igual a algo roto. Diagnóstico correcto, comunicación insuficiente.</p>
+      </div>
+      <div class="flag-card">
+        <div class="flag-title">④ "Laboratorio" mezcla tres tipos de herramienta que no se parecen entre sí</div>
+        <p>Sensibilidad, dosis-respuesta y el desglose de 5 subsistemas son <b style="color:var(--ink)">calculadoras instantáneas</b> sobre el estado actual. Coevolución genética y Experimentos Monte Carlo son <b style="color:var(--ink)">corridas en background</b> que tardan minutos y sondean su propio progreso. Y el plan óptimo (WTA) — que también es una herramienta de análisis — vive <i>afuera</i> del acordeón, en el panel de control de la derecha, sin razón aparente para estar ahí y no en "Laboratorio". Ninguna de las tres familias está señalizada como tal.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head"><span class="section-num">02</span><h2>El criterio de reordenamiento</h2></div>
+    <p class="section-intro">No hay que inventar categorías nuevas — hay que agrupar por lo que el usuario está tratando de hacer, que ya se separa naturalmente en dos ejes.</p>
+    <div class="split">
+      <div class="split-col">
+        <h4>¿Cuándo pasa?</h4>
+        <ul>
+          <li><b style="color:var(--ink)">Tiempo real</b> — la simulación corriendo, decisiones que se toman ahora (disparar, lanzar, interferir)</li>
+          <li><b style="color:var(--ink)">Fuera de línea</b> — cálculos y corridas que no dependen de que la simulación esté viva</li>
+        </ul>
+      </div>
+      <div class="split-col">
+        <h4>¿Cuánto tarda?</h4>
+        <ul>
+          <li><b style="color:var(--ink)">Instantáneo</b> — un cálculo, un resultado, sin esperar</li>
+          <li><b style="color:var(--ink)">Background</b> — un job que corre en segundo plano y hay que sondear (Monte Carlo, coevolución)</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head"><span class="section-num">03</span><h2>Cuatro vistas, cada una con un trabajo</h2></div>
+    <p class="section-intro">Navegación real (no un selector de render disfrazado) entre cuatro secciones. Cada una recibe exactamente lo que le corresponde según el criterio de arriba.</p>
+
+    <div class="nav-preview">
+      <div class="tab active">🎯 OPERACIÓN</div>
+      <div class="tab">🗺 PLANIFICACIÓN</div>
+      <div class="tab">📊 ANÁLISIS FÍSICO</div>
+      <div class="tab">🧪 LABORATORIO</div>
+    </div>
+
+    <div class="views-grid">
+
+      <div class="view-card">
+        <div class="vc-head"><span class="vc-tag">01</span><h3>Operación</h3></div>
+        <p class="vc-why">Tiempo real + instantáneo. Todo lo que se toca mientras la simulación corre.</p>
+        <div class="wire wire-op">
+          <div class="wire-cell w1">MÉTRICAS EN VIVO</div>
+          <div class="wire-cell w2">MAPA 3D</div>
+          <div class="wire-cell w3">CAÑÓN / MISIL / JAMMER</div>
+          <div class="wire-cell w4">HISTORIAL DE DISPAROS</div>
+        </div>
+        <ul class="vc-contents">
+          <li><b>Se queda:</b> métricas, mapa táctico, controles de tiro, historial, registro de eventos</li>
+          <li><b>Selector 3D/Calor/Espectro</b> pasa a ser un control chico dentro del propio mapa, no algo que compite con la navegación</li>
+        </ul>
+      </div>
+
+      <div class="view-card">
+        <div class="vc-head"><span class="vc-tag">02</span><h3>Planificación</h3></div>
+        <p class="vc-why">Decisión táctica antes o durante el combate — no es "ver un número", es "elegir qué hacer".</p>
+        <div class="wire wire-plan">
+          <div class="wire-cell">PLAN ÓPTIMO (WTA)</div>
+          <div class="wire-cell">RADAR / TRACKS</div>
+          <div class="wire-cell">EN RIESGO LATENTE</div>
+          <div class="wire-cell">EJECUTAR PLAN</div>
+        </div>
+        <ul class="vc-contents">
+          <li><b>Se muda acá:</b> asignación arma-blanco <span class="vc-badge">hoy en el panel derecho</span>, radar dinámico, lista de riesgo latente</li>
+          <li>Es la vista que responde "¿a qué le disparo primero?", separada de "disparar ahora"</li>
+        </ul>
+      </div>
+
+      <div class="view-card">
+        <div class="vc-head"><span class="vc-tag">03</span><h3>Análisis físico</h3></div>
+        <p class="vc-why">Calculadoras instantáneas sobre el modelo de daño. No dependen de que la simulación esté corriendo.</p>
+        <div class="wire wire-analisis">
+          <div class="wire-cell">SENSIBILIDAD</div>
+          <div class="wire-cell">DOSIS-RESPUESTA</div>
+          <div class="wire-cell">5 SUBSISTEMAS</div>
+          <div class="wire-cell">EFECTIVIDAD VS DISTANCIA</div>
+          <div class="wire-cell">MAPA DE CALOR</div>
+          <div class="wire-cell" style="color:var(--flag)">"aún sin datos" si vacío</div>
+        </div>
+        <ul class="vc-contents">
+          <li><b>Se muda acá:</b> los primeros 3 bloques de "Laboratorio" <span class="vc-badge">ya no comparten acordeón con Monte Carlo</span></li>
+          <li>El mapa de calor gana un estado vacío explícito en vez de verse roto</li>
+        </ul>
+      </div>
+
+      <div class="view-card">
+        <div class="vc-head"><span class="vc-tag">04</span><h3>Laboratorio</h3></div>
+        <p class="vc-why">Jobs en background. Se lanzan, se van, y uno vuelve a ver el resultado — no bloquean nada más.</p>
+        <div class="wire wire-lab">
+          <div class="wire-cell w1">CORRIDAS ACTIVAS / HISTORIAL</div>
+          <div class="wire-cell">EXPERIMENTOS MONTE CARLO</div>
+          <div class="wire-cell">COEVOLUCIÓN GENÉTICA</div>
+        </div>
+        <ul class="vc-contents">
+          <li><b>Se queda, reagrupado:</b> los 2 bloques que corren en background, ahora con una lista de corridas (pasadas y en curso) en vez de perderse al navegar</li>
+          <li>Nombre reservado para "esto tarda" — ya no compite con las calculadoras instantáneas por la misma etiqueta</li>
+        </ul>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head"><span class="section-num">04</span><h2>Cómo migrar sin romper nada</h2></div>
+    <p class="section-intro">Ningún endpoint cambia. Es reordenar HTML/CSS/JS existente en cuatro contenedores con navegación real, no reescribir funcionalidad.</p>
+    <div class="phases">
+      <div class="phase">
+        <div class="phase-n">1</div>
+        <div>
+          <h4>Navegación real de 4 vistas <span class="tag">estructural</span></h4>
+          <p>Reemplazar el selector de render (que hoy ocupa el lugar de una navegación) por tabs genuinos que muestran/ocultan contenedores. El selector 3D/Calor/Espectro se reubica como control interno del mapa, dentro de Operación.</p>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="phase-n">2</div>
+        <div>
+          <h4>Mover, no reescribir <span class="tag">bajo riesgo</span></h4>
+          <p>Cada bloque existente (.lab-block, panel de control, WTA) se mueve al contenedor de su vista nueva. Mismos ids, mismos listeners, mismas llamadas a la API — solo cambia dónde vive en el DOM.</p>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="phase-n">3</div>
+        <div>
+          <h4>Estado vacío del mapa de calor <span class="tag">chico</span></h4>
+          <p>Un mensaje simple — "todavía no hay suficientes disparos registrados" — reemplaza el grid vacío sin contexto, para que dejar de verse "roto" cuando en realidad solo falta actividad.</p>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="phase-n">4</div>
+        <div>
+          <h4>Historial de corridas en Laboratorio <span class="tag">nuevo, chico</span></h4>
+          <p>Una lista simple de las últimas corridas de Monte Carlo/coevolución (ya guardadas en el backend, <code>GET /api/experiments</code> las lista) para no perder una corrida larga si el usuario navegó a otra vista mientras corría.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    simulador-ew · verificado contra localhost:8080 y localhost:8000/api en vivo · sin cambios de código todavía — este documento es la propuesta, no la implementación.
+  </footer>
+
+</div>
