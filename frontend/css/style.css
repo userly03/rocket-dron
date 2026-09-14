@@ -830,7 +830,15 @@ body {
 
 .replay-chart-box { padding: 0; overflow: hidden; }
 
-.replay-chart-box canvas { width: 100%; display: block; }
+/* Alto fijo, no automático: sin esto el navegador calcula el alto a
+   partir del ancho estirado a 100% MANTENIENDO la relación de aspecto de
+   la resolución interna del canvas (300×220 por defecto hasta que JS lo
+   redimensiona) — si esa resolución interna quedó desactualizada porque
+   el panel estaba oculto quand se creó (Laboratorio no es la pestaña
+   activa al cargar la página), el resultado es una caja gigante y borrosa
+   en vez de un panel chico y nítido. Alto fijo = el layout no depende de
+   en qué momento corrió el resize. */
+.replay-chart-box canvas { width: 100%; height: 200px; display: block; }
 
 .replay-controls {
   display: flex;

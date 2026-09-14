@@ -179,12 +179,13 @@
   }
 
   function loadReplay(player, refs, wrapEl, frames) {
+    wrapEl.classList.remove("hidden");
+    player.resize(); // el wrap recién se hizo visible — ver el comentario en setActiveTab
     player.load(frames);
     refs.slider.max = Math.max(0, frames.length - 1);
     refs.slider.value = 0;
     refs.frameLabel.textContent = frames.length ? `1/${frames.length}` : "";
     refs.playBtn.innerHTML = LABEL_PLAY;
-    wrapEl.classList.remove("hidden");
   }
 
   function updateMunitionUI() {
@@ -702,6 +703,13 @@
           addLog("Demo: misil HPM auto-lanzado", "missile");
         } catch (e) {
           addLog(`Demo misil: ${e.message}`, "error");
+        } finally {
+          // El banner debe aparecer UNA vez para orientar a quien recién
+          // entra ("esto que ves moverse solo es la demo") y desaparecer
+          // — antes se quedaba pegado arriba para siempre, tapando cada
+          // vista con un aviso que ya dejó de ser cierto (el misil ya
+          // se lanzó, no sigue "en ejecución" nada nuevo).
+          setTimeout(() => ui.demoBanner.classList.add("hidden"), 4000);
         }
       }, delayS * 1000);
     } catch (err) {
@@ -745,7 +753,19 @@
       panel.classList.toggle("active", active);
       panel.hidden = !active;
     });
-    if (tab === "laboratorio") refreshLabRuns();
+    if (tab === "laboratorio") {
+      refreshLabRuns();
+      // Los reproductores de réplica se crean mientras Laboratorio está
+      // oculta (no es la pestaña activa al cargar la página) — su primer
+      // resize() es un no-op porque el panel mide 0×0 todavía. Sin este
+      // segundo resize al hacerse visible, el canvas queda con la
+      // resolución interna por defecto del navegador (300×220) mientras
+      // el CSS lo estira a un ancho mucho mayor — mismo síntoma que el
+      // fix de altura fija en .replay-chart-box, dos mitades del mismo
+      // bug (una de layout, una de nitidez).
+      mcReplay?.resize();
+      coevoReplay?.resize();
+    }
   }
 
   function setActiveSpeedButton(scale) {
