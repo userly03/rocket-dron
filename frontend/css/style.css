@@ -206,7 +206,11 @@ body {
 }
 
 .demo-banner {
-  position: fixed;
+  /* Antes era position:fixed — quedaba flotando sobre el header y le
+     tapaba el título y el estado de conexión en vez de convivir con la
+     página. sticky lo deja en el flujo normal (empuja el resto hacia
+     abajo cuando aparece) pero se sigue pegando arriba al scrollear. */
+  position: sticky;
   top: 0;
   left: 0;
   right: 0;
