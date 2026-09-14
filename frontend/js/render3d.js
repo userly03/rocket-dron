@@ -49,6 +49,13 @@ const COLOR = {
   trailFar: 0x0d2a2c,
   hpmCone: 0xd9772e,
   hpmOrigin: 0x4f8fc4,
+  // Misión ofensiva: un dron que LLEGÓ al objetivo — brecha de la
+  // defensa, no una baja (por eso no reusa neutralizado/rojo). Mismo
+  // naranja que el cono/pulso del cañón: "esto detonó/impactó algo",
+  // deliberadamente distinto del violeta de interferido y del rojo de
+  // neutralizado para que las tres causas de "un dron dejó de volar" se
+  // lean distintas de un vistazo.
+  objetivoAlcanzado: 0xd9772e,
   detonationOuter: 0x9a7fd1,
   detonationInner: 0x3fb8ae,
   ground: 0x0a0d11,
@@ -492,6 +499,14 @@ const Render3D = (() => {
         rec.fx = { state: "falling", start: now, fallFromZ: rec._smoothZ ?? d.z ?? FALLBACK_DRONE_ALTITUDE };
         spawnParticleBurst(worldToThree(field, d.x, d.y, d.z ?? FALLBACK_DRONE_ALTITUDE), COLOR.neutralizadoBlink);
       }
+      // Misión ofensiva: transición única alive → reached, aunque el
+      // snapshot siga trayendo objetivo_alcanzado=true en cada tick
+      // subsiguiente (no queremos relanzar el estallido cada frame).
+      if (!rec.objetivoAlcanzado && d.objetivo_alcanzado) {
+        rec.fx = { state: "reached" };
+        spawnParticleBurst(worldToThree(field, d.x, d.y, d.z ?? FALLBACK_DRONE_ALTITUDE), COLOR.objetivoAlcanzado);
+      }
+      rec.objetivoAlcanzado = d.objetivo_alcanzado === true;
       rec.estado = d.estado;
       rec.blindaje = d.blindaje;
       rec.detectado = d.detectado !== false;
@@ -534,6 +549,13 @@ const Render3D = (() => {
       } else if (rec.fx.state === "settled") {
         altitude = 0.6;
         colorHex = COLOR.neutralizado;
+      } else if (rec.fx.state === "reached") {
+        // Se queda exactamente donde llegó — a diferencia de "falling"
+        // (neutralizado) no cae al piso: cumplió su misión, no lo
+        // derribaron. La altura/posición ya dejaron de actualizarse
+        // (Swarm excluye a los drones con objetivo_alcanzado del loop de
+        // movimiento), así que esto solo fija el color.
+        colorHex = COLOR.objetivoAlcanzado;
       } else if (rec.estado === "danado") {
         const blinkOn = Math.floor(now / 220) % 2 === 0;
         visible = blinkOn;

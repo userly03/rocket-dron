@@ -408,6 +408,7 @@ body {
 .metric-active { color: var(--status-good); }
 .metric-neutralized { color: var(--status-bad); }
 .metric-riesgo { color: var(--status-warn); }
+.metric-brecha { color: var(--status-bad); }
 
 /* Main layout */
 .main-content {
@@ -622,6 +623,7 @@ body {
 .dot-damaged { background: var(--status-warn); box-shadow: 0 0 6px var(--status-warn); }
 .dot-jammed { background: var(--accent-purple); box-shadow: 0 0 6px var(--accent-purple); }
 .dot-neutralized { background: var(--status-bad); box-shadow: 0 0 6px var(--status-bad); }
+.dot-brecha { background: var(--accent-orange); box-shadow: 0 0 6px var(--accent-orange); }
 .dot-undetected { background: var(--border-glow); box-shadow: none; }
 .dot-missile { background: var(--status-track); box-shadow: 0 0 6px var(--status-track); }
 .dot-track { background: #6f93b0; box-shadow: 0 0 6px #6f93b0; }
@@ -1271,6 +1273,7 @@ input[type="number"]:focus {
 .log-entry.log-stop { color: var(--status-warn); }
 .log-entry.log-info { color: var(--text-primary); }
 .log-entry.log-error { color: var(--status-bad); }
+.log-entry.log-brecha { color: var(--status-bad); font-weight: bold; }
 
 /* Responsive */
 @media (max-width: 960px) {

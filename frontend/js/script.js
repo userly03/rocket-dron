@@ -23,6 +23,7 @@
     metricActive: document.getElementById("metric-active"),
     metricNeutralized: document.getElementById("metric-neutralized"),
     metricRiesgo: document.getElementById("metric-riesgo"),
+    metricBrecha: document.getElementById("metric-brecha"),
     riskList: document.getElementById("risk-list"),
     riskCount: document.getElementById("risk-count"),
     metricSuccess: document.getElementById("metric-success"),
@@ -554,6 +555,9 @@
     ui.metricNeutralized.textContent = c.neutralizado || 0;
     ui.metricSuccess.textContent = `${total ? Math.round(((c.neutralizado || 0) / total) * 100) : 0}%`;
     ui.metricTime.textContent = `${(snapshot.tiempo ?? state.simTime).toFixed(1)} s`;
+    if (snapshot.mision) {
+      ui.metricBrecha.textContent = snapshot.mision.activa ? snapshot.mision.brechas : "—";
+    }
     if (state.lastFireWallTime) {
       const s = Math.floor((Date.now() - state.lastFireWallTime) / 1000);
       ui.metricLastFire.textContent = s === 0 ? "Ahora" : `Hace ${s} s`;
@@ -606,6 +610,10 @@
       case "jamming_detenido": return { msg: "Jamming desactivado", type: "stop" };
       case "dron_interferido": return { msg: `Enlace perdido — drones: ${d.drones.join(", ")}`, type: "missile" };
       case "dron_recuperado": return { msg: `Enlace recuperado — drones: ${d.drones.join(", ")}`, type: "info" };
+      case "objetivo_alcanzado": {
+        const plural = d.cantidad === 1 ? "dron llegó" : "drones llegaron";
+        return { msg: `${Icon("alert")} BRECHA — ${d.cantidad} ${plural} al objetivo (drones: ${d.drones.join(", ")})`, type: "brecha" };
+      }
       default: return null;
     }
   }
