@@ -35,6 +35,7 @@
     munitionDisplay: document.getElementById("munition-display"),
     simStateBadge: document.getElementById("sim-state-badge"),
     logList: document.getElementById("log-list"),
+    viewIntro: document.getElementById("view-intro"),
     mapTitle: document.getElementById("map-title"),
     btnCameraTop: document.getElementById("btn-camera-top"),
     toggleTracks: document.getElementById("toggle-tracks"),
@@ -738,11 +739,25 @@
     window.Render3D?.setViewMode(mode);
   }
 
+  // Una frase en lenguaje llano por vista, para quien entra por primera
+  // vez y no tiene por qué deducir qué es cada pestaña solo por el
+  // nombre — feedback directo de usuario: "no sé para qué sirve cada
+  // una". Sin jargon de tickets internos (P1-A, P3-B, WTA) acá; esos
+  // códigos siguen existiendo como referencia técnica dentro de cada
+  // panel, no en la primera frase que alguien lee.
+  const VIEW_INTROS = {
+    operacion: "Control en vivo: disparás el cañón o lanzás un misil y ves al enjambre reaccionar en tiempo real.",
+    planificacion: "Antes de disparar — el sistema calcula <strong>a qué grupo de drones conviene atacar primero</strong>, dado el arma y la munición que quedan disponibles.",
+    analisis: "Diagnóstico del modelo físico: <strong>qué tan lejos llega el arma</strong> y qué tan sensible es cada resultado a sus parámetros.",
+    laboratorio: "Una sola simulación puede salir bien o mal por pura casualidad. Acá se corren <strong>cientos de simulaciones automáticas</strong> para saber si un arma o una formación funcionan de verdad, no si esta vez tuvieron suerte.",
+  };
+
   // Navegación real de 4 vistas (Operación/Planificación/Análisis/
   // Laboratorio). Cada .tab-panel existe siempre en el DOM — cambiar de
   // vista solo alterna [hidden], no recrea nada, así que ningún listener
   // ni referencia de `ui` se pierde al navegar.
   function setActiveTab(tab) {
+    ui.viewIntro.innerHTML = VIEW_INTROS[tab] || "";
     document.querySelectorAll(".nav-tab").forEach((btn) => {
       const active = btn.dataset.tab === tab;
       btn.classList.toggle("active", active);
@@ -1089,6 +1104,7 @@
 
     updateMissileAngleUI();
     setViewMode("tactical");
+    setActiveTab("operacion"); // puebla la frase de orientación al cargar, sin esperar a que alguien haga click en una pestaña
   }
 
   function updateMissileAngleUI() {

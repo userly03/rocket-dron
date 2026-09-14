@@ -84,7 +84,13 @@ body {
 
 .app {
   display: grid;
-  grid-template-rows: auto auto 1fr;
+  /* header, nav-tabs, view-intro, y el resto (los .tab-panel) llenando lo
+     que queda. Una fila explícita por cada hijo directo fijo de .app —
+     si se agrega un hijo nuevo sin agregar su fila acá, ese ".1fr" final
+     recae sobre el hijo equivocado y estira lo que no debería (pasó con
+     .view-intro: al insertarse como 3er hijo sin una fila propia, se
+     comió la fila "1fr" que le correspondía al panel de contenido). */
+  grid-template-rows: auto auto auto 1fr;
   gap: 12px;
   max-width: 1400px;
   margin: 0 auto;
@@ -136,6 +142,19 @@ body {
 }
 
 .tab-panel[hidden] { display: none; }
+
+/* Una frase de orientación por vista — ver el comentario en index.html.
+   Deliberadamente NO es un panel/card (nada de fondo ni borde): es una
+   línea de contexto que se lee antes del contenido, no otro bloque más
+   que compita visualmente con los paneles reales. */
+.view-intro {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  padding: 0 2px;
+}
+
+.view-intro strong { color: var(--text-primary); font-weight: 600; }
 
 .view-grid-2 {
   display: grid;
@@ -754,6 +773,34 @@ body {
 
 #metric-munition.munition-low { color: var(--status-warn); }
 #metric-munition.munition-empty { color: var(--status-bad); }
+
+/* Explicación en lenguaje llano al principio de Laboratorio — feedback
+   directo: "no me convence lo que hay en laboratorio", "no entendería
+   qué es eso". Antes de cualquier formulario técnico, esto responde
+   "para qué sirve esto" en dos frases, sin código de ticket interno. */
+.lab-explainer {
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  line-height: 1.6;
+}
+
+.lab-explainer p { margin: 0 0 10px; }
+
+.lab-explainer ol {
+  margin: 0 0 10px;
+  padding-left: 1.3em;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lab-explainer li strong { color: var(--text-bright); }
+
+.lab-explainer-hint {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  margin: 0 !important;
+}
 
 .lab-block {
   margin-bottom: 16px;

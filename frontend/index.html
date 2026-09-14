@@ -81,6 +81,12 @@
       <button type="button" class="nav-tab" data-tab="laboratorio" role="tab" aria-selected="false" title="Corridas en background: Monte Carlo y coevolución"><svg class="icon" aria-hidden="true"><use href="#i-flask"></use></svg> Laboratorio</button>
     </nav>
 
+    <!-- Una frase en lenguaje llano por vista — para quien entra por
+         primera vez y no tiene por qué saber qué significa cada pestaña
+         solo por el nombre. Contenido en script.js::VIEW_INTROS,
+         actualizado por setActiveTab(). -->
+    <p class="view-intro" id="view-intro" aria-live="polite"></p>
+
     <!-- ══════════════════════════ OPERACIÓN ══════════════════════════ -->
     <div class="tab-panel active" id="tab-operacion" role="tabpanel">
       <section class="metrics-panel panel" aria-label="Métricas de simulación">
@@ -336,16 +342,25 @@
 
     <!-- ═══════════════════════ LABORATORIO ═══════════════════════ -->
     <div class="tab-panel" id="tab-laboratorio" role="tabpanel" hidden>
+      <section class="panel lab-explainer">
+        <p>Dos formas de aplicar esa idea, corriendo el motor real muchas veces en vez de una sola:</p>
+        <ol>
+          <li><strong>Correr muchas veces la misma configuración</strong> — elegís un arma y una formación, se repite cientos de veces, y el resultado es un promedio confiable con margen de error, no la anécdota de una corrida.</li>
+          <li><strong>Dejar que el sistema busque la mejor combinación solo</strong> — un algoritmo genético hace evolucionar el arma y la defensa una contra la otra, generación tras generación, hasta encontrar qué configuración le gana a cuál.</li>
+        </ol>
+        <p class="lab-explainer-hint">En ambos casos podés ver, al terminar, una réplica real reproducida fotograma a fotograma — no solo los números.</p>
+      </section>
+
       <section class="panel">
-        <h2 class="panel-title"><svg class="icon" aria-hidden="true"><use href="#i-scroll"></use></svg> Corridas <span class="collapsible-hint">Monte Carlo + coevolución, esta sesión de backend</span></h2>
+        <h2 class="panel-title"><svg class="icon" aria-hidden="true"><use href="#i-scroll"></use></svg> Corridas <span class="collapsible-hint">esta sesión</span></h2>
         <ul id="lab-runs-list" class="shot-history-list">
           <li class="shot-empty">Sin corridas todavía</li>
         </ul>
       </section>
 
       <div class="lab-block">
-        <h3><svg class="icon" aria-hidden="true"><use href="#i-dice"></use></svg> Experimentos Monte Carlo (P1-A)</h3>
-        <p class="wta-hint">El estimador corregido: fracción media de drones neutralizados por réplica, con intervalo de confianza por bootstrap — no "¿se aniquiló el 100%?", que vale 0 en casi todo el rango de combate. Corre en background sobre el motor real, no la simulación en vivo.</p>
+        <h3><svg class="icon" aria-hidden="true"><use href="#i-dice"></use></svg> Correr muchas veces <span class="panel-tag">Monte Carlo</span></h3>
+        <p class="wta-hint">Fracción media de drones neutralizados por réplica, con intervalo de confianza por bootstrap — no "¿se aniquiló el 100%?", que vale 0 en casi todo el rango de combate. Corre en background sobre el motor real, no la simulación en vivo.</p>
         <div class="lab-controls">
           <label>Formación
             <select id="exp-formacion">
@@ -387,7 +402,7 @@
       </div>
 
       <div class="lab-block">
-        <h3><svg class="icon" aria-hidden="true"><use href="#i-dna"></use></svg> Coevolución genética arma↔enjambre (P3-B)</h3>
+        <h3><svg class="icon" aria-hidden="true"><use href="#i-dna"></use></svg> Buscar la mejor combinación <span class="panel-tag">Coevolución genética</span></h3>
         <p class="wta-hint">El arma y la defensa evolucionan una CONTRA la otra, generación tras generación, con el runner Monte Carlo real como fitness — no una heurística. Corre en background: tarda de decenas de segundos a un par de minutos según los parámetros.</p>
         <div class="lab-controls">
           <label>Generaciones <input type="number" id="coevo-generaciones" value="6" min="1" max="15" step="1"></label>
