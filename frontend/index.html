@@ -160,6 +160,37 @@
             </div>
 
             <div class="lab-block">
+              <h3>🎲 Experimentos Monte Carlo (P1-A)</h3>
+              <p class="wta-hint">El estimador corregido: fracción media de drones neutralizados por réplica, con intervalo de confianza por bootstrap — no "¿se aniquiló el 100%?", que vale 0 en casi todo el rango de combate. Corre en background sobre el motor real, no la simulación en vivo.</p>
+              <div class="lab-controls">
+                <label>Formación
+                  <select id="exp-formacion">
+                    <option value="circular" selected>Circular</option>
+                    <option value="cuadrada">Cuadrada</option>
+                    <option value="aleatoria">Aleatoria</option>
+                    <option value="linea">Línea</option>
+                    <option value="v">V</option>
+                  </select>
+                </label>
+                <label>Arma
+                  <select id="exp-arma">
+                    <option value="canion" selected>Cañón</option>
+                    <option value="misil">Misil</option>
+                    <option value="ninguna">Ninguna (control)</option>
+                  </select>
+                </label>
+                <label>Drones <input type="number" id="exp-cantidad" value="30" min="1" max="500" step="1"></label>
+                <label>Réplicas <input type="number" id="exp-replicas" value="20" min="2" max="200" step="1"></label>
+                <label>t_max (s) <input type="number" id="exp-tmax" value="20" min="1" max="120" step="1"></label>
+                <button type="button" id="btn-exp-start" class="btn btn-reset">🎲 CORRER EXPERIMENTO</button>
+              </div>
+              <div id="exp-progress" class="lab-result hidden">
+                <div id="exp-status-line"></div>
+              </div>
+              <div id="exp-result" class="lab-result hidden"></div>
+            </div>
+
+            <div class="lab-block">
               <h3>🧬 Coevolución genética arma↔enjambre (P3-B)</h3>
               <p class="wta-hint">El arma y la defensa evolucionan una CONTRA la otra, generación tras generación, con el runner Monte Carlo real como fitness — no una heurística. Corre en background: tarda de decenas de segundos a un par de minutos según los parámetros.</p>
               <div class="lab-controls">

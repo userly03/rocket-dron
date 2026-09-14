@@ -80,6 +80,15 @@
     btnLabSubsistemas: document.getElementById("btn-lab-subsistemas"),
     labSubsDistancia: document.getElementById("lab-subs-distancia"),
     labSubsResult: document.getElementById("lab-subs-result"),
+    expFormacion: document.getElementById("exp-formacion"),
+    expArma: document.getElementById("exp-arma"),
+    expCantidad: document.getElementById("exp-cantidad"),
+    expReplicas: document.getElementById("exp-replicas"),
+    expTmax: document.getElementById("exp-tmax"),
+    btnExpStart: document.getElementById("btn-exp-start"),
+    expProgress: document.getElementById("exp-progress"),
+    expStatusLine: document.getElementById("exp-status-line"),
+    expResult: document.getElementById("exp-result"),
     coevoGeneraciones: document.getElementById("coevo-generaciones"),
     coevoPoblacion: document.getElementById("coevo-poblacion"),
     coevoReplicas: document.getElementById("coevo-replicas"),
@@ -115,6 +124,8 @@
     userAdjustingHpm: false,
     demoRunning: false,
     wtaPlan: null,
+    expJobId: null,
+    expPollTimer: null,
     coevoJobId: null,
     coevoPollTimer: null,
   };
@@ -317,6 +328,60 @@
         ui.btnCoevoStart.disabled = false;
       }
     }, 1500);
+  }
+
+  // Experimentos Monte Carlo (P1-A): mismo patrón de job en background que
+  // la coevolución — POST arranca, GET pollea. Ver src/engine/experiments.py.
+  function renderExpProgress(job) {
+    ui.expProgress.classList.remove("hidden");
+    ui.expStatusLine.textContent = `Réplica ${job.completadas}/${job.replicas} — corriendo...`;
+  }
+
+  function renderExpResultado(resumen) {
+    const cv = resumen.cv === null ? "—" : resumen.cv.toFixed(4);
+    const at = resumen.aniquilacion_total;
+    ui.expResult.innerHTML = `
+      <div><strong>Métrica primaria (P1-A) — fracción neutralizada media:</strong>
+        ${resumen.fraccion_media.toFixed(4)}
+        (IC95% bootstrap: ${resumen.ic95_bootstrap[0].toFixed(4)}–${resumen.ic95_bootstrap[1].toFixed(4)})
+      </div>
+      <div>CV: ${cv} · percentiles p5=${resumen.percentiles.p5.toFixed(4)} p50=${resumen.percentiles.p50.toFixed(4)} p95=${resumen.percentiles.p95.toFixed(4)}</div>
+      <div style="margin-top:6px"><strong>Métrica vieja (aniquilación total del enjambre):</strong>
+        ${at.proporcion.toFixed(4)}
+        (IC95% Wilson: ${at.ic95_wilson[0].toFixed(4)}–${at.ic95_wilson[1].toFixed(4)})
+      </div>
+      <div class="wta-hint" style="margin-top:6px">Si la primaria es &gt; 0 y la vieja da 0, es la diferencia que documenta <code>research/NOTA_ESTIMADOR_CIEGO.md</code>: hubo bajas reales que la métrica vieja no puede ver.</div>
+    `;
+    ui.expResult.classList.remove("hidden");
+  }
+
+  function pollExpJob(expId) {
+    state.expJobId = expId;
+    if (state.expPollTimer) clearInterval(state.expPollTimer);
+    state.expPollTimer = setInterval(async () => {
+      let job;
+      try {
+        job = await api(`/api/experiments/${expId}`);
+      } catch (e) {
+        clearInterval(state.expPollTimer);
+        addLog(`Experimento: ${e.message}`, "error");
+        ui.btnExpStart.disabled = false;
+        return;
+      }
+      renderExpProgress(job);
+      if (job.status === "completado") {
+        clearInterval(state.expPollTimer);
+        ui.expStatusLine.textContent = `Completado — ${job.replicas} réplicas.`;
+        renderExpResultado(job.resumen);
+        addLog("Experimento Monte Carlo: corrida completada", "info");
+        ui.btnExpStart.disabled = false;
+      } else if (job.status === "error") {
+        clearInterval(state.expPollTimer);
+        ui.expStatusLine.textContent = `Error: ${job.error}`;
+        addLog(`Experimento: ${job.error}`, "error");
+        ui.btnExpStart.disabled = false;
+      }
+    }, 1000);
   }
 
   function clearWtaPlan() {
@@ -741,6 +806,29 @@
       ui.labSubsResult.classList.remove("hidden");
       addLog(`Desglose @ ${distancia}m: subsistema más vulnerable ${d.subsistemas[0].nombre} (${(d.subsistemas[0].probabilidad * 100).toFixed(1)}%)`, "info");
     }));
+
+    ui.btnExpStart.addEventListener("click", async () => {
+      ui.btnExpStart.disabled = true;
+      ui.expResult.classList.add("hidden");
+      ui.expProgress.classList.remove("hidden");
+      ui.expStatusLine.textContent = "Arrancando...";
+      try {
+        const body = {
+          formacion: ui.expFormacion.value,
+          arma_tipo: ui.expArma.value,
+          cantidad: +ui.expCantidad.value || 30,
+          replicas: +ui.expReplicas.value || 20,
+          t_max_s: +ui.expTmax.value || 20,
+        };
+        const r = await api("/api/experiments", { method: "POST", body: JSON.stringify(body) });
+        addLog(`Experimento Monte Carlo: ${r.experiment_id} arrancado (${body.replicas} réplicas, ${body.arma_tipo})`, "info");
+        pollExpJob(r.experiment_id);
+      } catch (e) {
+        ui.expStatusLine.textContent = `Error: ${e.message}`;
+        addLog(`Experimento: ${e.message}`, "error");
+        ui.btnExpStart.disabled = false;
+      }
+    });
 
     ui.btnCoevoStart.addEventListener("click", async () => {
       ui.btnCoevoStart.disabled = true;
