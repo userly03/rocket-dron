@@ -8,7 +8,12 @@
     resizeCanvas(canvas) {
       const parent = canvas.parentElement;
       if (!parent) return;
-      canvas.width = parent.clientWidth - 16;
+      // Los charts de Análisis Físico se siguen actualizando aunque esa
+      // pestaña esté oculta (el snapshot del WebSocket no sabe de tabs).
+      // clientWidth da 0 con display:none — sin esta guarda, el ancho
+      // quedaría negativo hasta el próximo snapshot con la pestaña visible.
+      const width = parent.clientWidth;
+      if (width > 0) canvas.width = width - 16;
     },
 
     drawEffectiveness(canvas, data) {
@@ -59,9 +64,21 @@
       const cols = grid[0]?.length || 0;
       const cellW = w / cols;
       const cellH = h / rows;
-      const max = heatmapData.max || 1;
 
       ctx.clearRect(0, 0, w, h);
+
+      // Sin disparos todavía, heatmapData.max es 0 y toda la grilla
+      // renderizaría como una capa casi transparente uniforme — se ve
+      // igual que un canvas roto. Un estado vacío explícito, mismo patrón
+      // que drawEffectiveness.
+      if (!heatmapData.max) {
+        ctx.fillStyle = "#6a8f6a";
+        ctx.font = "11px Courier New";
+        ctx.fillText("Sin datos suficientes todavía — hace falta disparar", 10, h / 2);
+        return;
+      }
+
+      const max = heatmapData.max;
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
           const v = grid[r][c] / max;

@@ -97,6 +97,7 @@
     coevoStatusLine: document.getElementById("coevo-status-line"),
     coevoGenBars: document.getElementById("coevo-gen-bars"),
     coevoResult: document.getElementById("coevo-result"),
+    labRunsList: document.getElementById("lab-runs-list"),
     btnStart: document.getElementById("btn-start"),
     btnStop: document.getElementById("btn-stop"),
     btnReset: document.getElementById("btn-reset"),
@@ -128,6 +129,8 @@
     expPollTimer: null,
     coevoJobId: null,
     coevoPollTimer: null,
+    mcRuns: [],
+    coevoRunsLocal: [],
   };
 
   let wsClient = null;
@@ -301,6 +304,18 @@
     ui.coevoResult.classList.remove("hidden");
   }
 
+  // Sin endpoint de listado en el backend (coevolucion_jobs.py solo expone
+  // estado por id) — se lleva el registro local de esta sesión a mano.
+  function trackCoevoRunLocal(id, n_generaciones) {
+    state.coevoRunsLocal.unshift({ id, n_generaciones, status: "corriendo" });
+    renderLabRuns();
+  }
+
+  function updateCoevoRunLocal(id, status) {
+    const r = state.coevoRunsLocal.find((x) => x.id === id);
+    if (r) { r.status = status; renderLabRuns(); }
+  }
+
   function pollCoevoJob(jobId) {
     state.coevoJobId = jobId;
     if (state.coevoPollTimer) clearInterval(state.coevoPollTimer);
@@ -312,6 +327,7 @@
         clearInterval(state.coevoPollTimer);
         addLog(`Coevolución: ${e.message}`, "error");
         ui.btnCoevoStart.disabled = false;
+        updateCoevoRunLocal(jobId, "error");
         return;
       }
       renderCoevoProgress(job);
@@ -321,11 +337,13 @@
         renderCoevoResultado(job.resultado);
         addLog("Coevolución: corrida completada", "info");
         ui.btnCoevoStart.disabled = false;
+        updateCoevoRunLocal(jobId, "completado");
       } else if (job.estado === "error") {
         clearInterval(state.coevoPollTimer);
         ui.coevoStatusLine.textContent = `Error: ${job.error}`;
         addLog(`Coevolución: ${job.error}`, "error");
         ui.btnCoevoStart.disabled = false;
+        updateCoevoRunLocal(jobId, "error");
       }
     }, 1500);
   }
@@ -382,6 +400,41 @@
         ui.btnExpStart.disabled = false;
       }
     }, 1000);
+  }
+
+  // Lista de corridas del Laboratorio (migración §04 del audit de UI).
+  // Los experimentos Monte Carlo sí tienen un endpoint de listado
+  // (GET /api/experiments); la coevolución no (src/api/coevolucion_jobs.py
+  // solo expone estado por id) — para esos se lleva un registro local de
+  // esta sesión, actualizado a mano cuando arranca un job y en cada poll.
+  function renderLabRuns() {
+    const mc = state.mcRuns.map((r) => ({
+      icon: "🎲", label: `Monte Carlo ${r.id}`,
+      detail: `${r.config?.arma?.tipo ?? "?"} · ${r.completadas}/${r.replicas} réplicas`,
+      status: r.status,
+    }));
+    const coevo = state.coevoRunsLocal.map((r) => ({
+      icon: "🧬", label: `Coevolución ${r.id}`,
+      detail: `${r.n_generaciones} generaciones`,
+      status: r.status,
+    }));
+    const runs = [...mc, ...coevo];
+    if (runs.length === 0) {
+      ui.labRunsList.innerHTML = '<li class="shot-empty">Sin corridas todavía</li>';
+      return;
+    }
+    ui.labRunsList.innerHTML = runs.map((r) => {
+      const badge = { completado: "✅", corriendo: "⏳", error: "⚠" }[r.status] || r.status;
+      return `<li>${r.icon} ${r.label} — ${r.detail} — ${badge}</li>`;
+    }).join("");
+  }
+
+  async function refreshLabRuns() {
+    try {
+      const { experimentos } = await api("/api/experiments");
+      state.mcRuns = experimentos;
+    } catch (e) { /* si falla, se queda con lo último conocido */ }
+    renderLabRuns();
   }
 
   function clearWtaPlan() {
@@ -557,17 +610,40 @@
     }
   }
 
+  // Modo de RENDER del mapa (Táctico / Calor 3D) — no confundir con
+  // .nav-tabs, que es navegación real entre las 4 vistas de la página.
+  // El espectro era antes un tercer "modo" acá, pero solo mostraba/ocultaba
+  // un chart que no tiene nada que ver con el render 3D (Render3D.setViewMode
+  // nunca tuvo una rama para "spectrum") — ahora el chart de espectro vive
+  // siempre visible en Análisis Físico, sin depender de este toggle.
   function setViewMode(mode) {
     state.viewMode = mode;
-    document.body.classList.remove("view-tactical", "view-physical", "view-spectrum");
+    document.body.classList.remove("view-tactical", "view-physical");
     document.body.classList.add(`view-${mode}`);
     ui.viewButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.view === mode));
 
-    const titles = { tactical: "🗺️ Mapa Táctico 3D", physical: "🌡️ Mapa Físico + Calor 3D", spectrum: "📡 Modo Espectro" };
+    const titles = { tactical: "🗺️ Mapa Táctico 3D", physical: "🌡️ Mapa Físico + Calor 3D" };
     ui.mapTitle.textContent = titles[mode] || titles.tactical;
 
     window.Render3D?.setViewMode(mode);
-    document.getElementById("spectrum-box")?.classList.toggle("hidden", mode !== "spectrum");
+  }
+
+  // Navegación real de 4 vistas (Operación/Planificación/Análisis/
+  // Laboratorio). Cada .tab-panel existe siempre en el DOM — cambiar de
+  // vista solo alterna [hidden], no recrea nada, así que ningún listener
+  // ni referencia de `ui` se pierde al navegar.
+  function setActiveTab(tab) {
+    document.querySelectorAll(".nav-tab").forEach((btn) => {
+      const active = btn.dataset.tab === tab;
+      btn.classList.toggle("active", active);
+      btn.setAttribute("aria-selected", String(active));
+    });
+    document.querySelectorAll(".tab-panel").forEach((panel) => {
+      const active = panel.id === `tab-${tab}`;
+      panel.classList.toggle("active", active);
+      panel.hidden = !active;
+    });
+    if (tab === "laboratorio") refreshLabRuns();
   }
 
   function setActiveSpeedButton(scale) {
@@ -718,6 +794,10 @@
       const plan = state.wtaPlan;
       if (!plan || !plan.asignacion?.length) return;
       ui.btnWtaExecute.disabled = true;
+      // El plan vive en Planificación, pero ejecutarlo dispara tiros
+      // reales — la animación del cañón, el historial y las métricas
+      // están en Operación. Saltar ahí para que el efecto se vea.
+      setActiveTab("operacion");
       // El plan se calculó con el presupuesto disponible AL MOMENTO de
       // pedirlo (energía del cañón, munición de misiles) — ejecutarlo
       // dispara en orden, pero cada disparo real puede rechazarse si el
@@ -823,6 +903,7 @@
         const r = await api("/api/experiments", { method: "POST", body: JSON.stringify(body) });
         addLog(`Experimento Monte Carlo: ${r.experiment_id} arrancado (${body.replicas} réplicas, ${body.arma_tipo})`, "info");
         pollExpJob(r.experiment_id);
+        refreshLabRuns();
       } catch (e) {
         ui.expStatusLine.textContent = `Error: ${e.message}`;
         addLog(`Experimento: ${e.message}`, "error");
@@ -844,6 +925,7 @@
         };
         const r = await api("/api/coevolucion/start", { method: "POST", body: JSON.stringify(body) });
         addLog(`Coevolución: job ${r.job_id} arrancado (${body.n_generaciones} generaciones)`, "info");
+        trackCoevoRunLocal(r.job_id, body.n_generaciones);
         pollCoevoJob(r.job_id);
       } catch (e) {
         addLog(`Coevolución: ${e.message}`, "error");
@@ -870,6 +952,10 @@
         addLog(r.message, "stop");
         wsClient?.requestStatus();
       } catch (e) { addLog(e.message, "error"); }
+    });
+
+    document.querySelectorAll(".nav-tab").forEach((btn) => {
+      btn.addEventListener("click", () => setActiveTab(btn.dataset.tab));
     });
 
     updateMissileAngleUI();

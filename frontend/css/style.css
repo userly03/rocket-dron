@@ -46,12 +46,68 @@ body {
 
 .app {
   display: grid;
-  grid-template-rows: auto auto 1fr auto;
+  grid-template-rows: auto auto 1fr;
   gap: 12px;
   max-width: 1400px;
   margin: 0 auto;
   padding: 12px;
   min-height: 100vh;
+}
+
+/* Navegación real entre las 4 vistas (Operación/Planificación/Análisis/
+   Laboratorio) — no confundir con .view-btn/.map-render-toggle de abajo,
+   que es un control del mapa, no navegación de página. Ver
+   docs/PROPUESTA_UI_REORDENAMIENTO.html: antes esta confusión de roles
+   era justamente el problema. */
+.nav-tabs {
+  display: flex;
+  gap: 4px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--panel-radius);
+  background: var(--bg-panel);
+  padding: 4px;
+}
+
+.nav-tab {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.03em;
+  padding: 10px 14px;
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  border-radius: calc(var(--panel-radius) - 2px);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.nav-tab:hover { color: var(--text-primary); background: var(--bg-panel-alt); }
+
+.nav-tab.active {
+  background: rgba(0, 255, 65, 0.15);
+  color: var(--accent-green);
+  box-shadow: inset 0 0 0 1px rgba(0, 255, 65, 0.3);
+}
+
+.tab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.tab-panel[hidden] { display: none; }
+
+.view-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .view-grid-2 { grid-template-columns: 1fr; }
 }
 
 /* Header */
@@ -137,6 +193,16 @@ body {
 .view-btn.active {
   background: rgba(0, 255, 65, 0.15);
   color: var(--accent-green);
+}
+
+/* Control del MAPA (qué renderiza el canvas 3D) — vive en el header del
+   panel de mapa, no del header global, para no competir visualmente con
+   .nav-tabs (navegación de página real). Reusa .view-btn. */
+.map-render-toggle {
+  display: flex;
+  border: 1px solid var(--border-color);
+  border-radius: var(--panel-radius);
+  overflow: hidden;
 }
 
 .demo-banner {
@@ -425,11 +491,6 @@ body {
 .shot-empty { color: var(--text-muted); font-style: italic; }
 
 .risk-list li { color: var(--accent-amber); }
-
-body.view-spectrum #spectrum-box { display: block !important; }
-body.view-spectrum .chart-box-spectrum { display: block !important; }
-
-#spectrum-box.hidden { display: none; }
 
 /* Map */
 .map-panel {
