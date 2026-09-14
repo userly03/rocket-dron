@@ -179,6 +179,15 @@ class Drone:
         self.amenaza_y = 0.0
         self.amenaza_intensidad = 0.0
 
+        # Misión ofensiva del enjambre: True una vez que este dron llegó al
+        # objetivo defendido (ver Swarm.objetivo_x/y en swarm.py) — una
+        # BRECHA de la defensa, no una baja. Eje ortogonal a estado_salud/
+        # estado_enlace (mismo criterio de P2-E: un dron puede estar dañado
+        # E interferido a la vez; acá, puede estar activo Y haber llegado).
+        # Falso por defecto y para siempre si no hay objetivo configurado
+        # — un enjambre sin misión no puede "llegar" a ningún lado.
+        self.objetivo_alcanzado = False
+
         # Fallo latente (P2-D, Parte 3): hazard rate (1/s) de una degradación
         # RECUPERABLE en curso. 0.0 = sin riesgo pendiente. Se activa en
         # ``recibir_daño`` cuando una exposición cae en la zona de UPSET

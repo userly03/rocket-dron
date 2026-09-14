@@ -38,7 +38,11 @@ _configure_validation_logging()
 async def lifespan(app: FastAPI):
     global simulation
 
-    simulation = SimulationEngine(swarm_size=SWARM_SIZE)
+    # mision_activa=True: la app en vivo es la única que arranca con la
+    # misión ofensiva encendida por defecto — ver el comentario en
+    # SimulationEngine.mision_activa (src/engine/simulation.py) para por
+    # qué Monte Carlo/coevolución NO la activan por defecto.
+    simulation = SimulationEngine(swarm_size=SWARM_SIZE, mision_activa=True)
     loop = asyncio.get_running_loop()
     attach_simulation_listener(simulation, loop)
 

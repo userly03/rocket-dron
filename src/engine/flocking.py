@@ -81,6 +81,7 @@ from src.config import (
     BOIDS_HOME_RADIUS,
     BOIDS_HOME_WEIGHT,
     BOIDS_MAX_TURN_RATE_DEG_S,
+    BOIDS_MISSION_WEIGHT,
     BOIDS_NEIGHBOR_RADIUS,
     BOIDS_SEPARATION_WEIGHT,
     BOIDS_THREAT_WEIGHT,
@@ -132,6 +133,38 @@ def _threat_vector(drone: Drone) -> tuple[float, float]:
 
     escala = BOIDS_NEIGHBOR_RADIUS / dist
     return dx * escala * intensidad, dy * escala * intensidad
+
+
+def _final_approach_vector(
+    drone: Drone, objetivo_x: float | None, objetivo_y: float | None
+) -> tuple[float, float]:
+    """
+    Vector unitario directo hacia el objetivo de la misión, activo SOLO
+    dentro de ``BOIDS_HOME_RADIUS`` de él — ver ``BOIDS_MISSION_WEIGHT`` en
+    src/config.py para el porqué: sin esto, avanzar solo el ancla de
+    cohesión (``formacion_x/y`` hacia ``objetivo_x/y``, ver
+    ``Swarm._avanzar_formacion_hacia_objetivo``) no alcanza, porque
+    ``_home_vector`` da fuerza CERO dentro de su propio radio — es un
+    límite de "no te alejes de acá", no una meta de "andá hacia allá". Este
+    término agarra exactamente donde home suelta: complementa, no
+    reemplaza, la convergencia de la formación completa.
+
+    A diferencia de separación/amenaza (que SE FORTALECEN cuanto más cerca,
+    1/distancia — tiene sentido para algo de lo que hay que alejarse), acá
+    la magnitud es constante (vector unitario): no hace falta que la
+    atracción crezca sin límite cerca del objetivo, alcanza con que nunca
+    sea cero mientras no se llegó.
+    """
+    if objetivo_x is None or objetivo_y is None:
+        return 0.0, 0.0
+
+    dx = objetivo_x - drone.x
+    dy = objetivo_y - drone.y
+    dist = math.hypot(dx, dy)
+    if dist < 1e-6 or dist > BOIDS_HOME_RADIUS:
+        return 0.0, 0.0
+
+    return dx / dist, dy / dist
 
 
 def propagate_alarm(drones: list[Drone]) -> None:
@@ -213,6 +246,8 @@ def compute_headings(
     dt: float,
     home_x: float | None = None,
     home_y: float | None = None,
+    objetivo_x: float | None = None,
+    objetivo_y: float | None = None,
 ) -> dict[int, float]:
     """
     Calcula el nuevo ángulo de vuelo de cada dron aplicando separación,
@@ -221,7 +256,10 @@ def compute_headings(
     ``(home_x, home_y)`` si se aleja más de ``BOIDS_HOME_RADIUS``, más un
     repulsor de la última posición de impacto que cada dron recuerda (P2-E,
     ver ``_threat_vector`` y la nota de diseño del módulo), con intensidad
-    que decae con el tiempo. Se mezcla con el rumbo actual y se limita a
+    que decae con el tiempo, más una atracción de acercamiento final hacia
+    ``(objetivo_x, objetivo_y)`` dentro de ``BOIDS_HOME_RADIUS`` de ese
+    punto (ver ``_final_approach_vector`` y ``BOIDS_MISSION_WEIGHT`` en
+    src/config.py). Se mezcla con el rumbo actual y se limita a
     ``BOIDS_MAX_TURN_RATE_DEG_S`` (mismo patrón de giro acotado que el
     guiado por navegación proporcional del misil — el rumbo cambia
     gradualmente, no de golpe).
@@ -234,7 +272,11 @@ def compute_headings(
             aplique a ellos mismos — ver ``Swarm.actualizar``).
         dt: paso de tiempo de la simulación.
         home_x, home_y: centro de la zona de patrulla (típicamente el
-            centro de la formación); si se omiten, no hay regla de retorno.
+            ancla de formación, ``Swarm.formacion_x/y``); si se omiten, no
+            hay regla de retorno.
+        objetivo_x, objetivo_y: objetivo de la misión ofensiva (típicamente
+            ``Swarm.objetivo_x/y``, el punto real, no el ancla que avanza
+            hacia él); si se omiten, no hay término de acercamiento final.
 
     Returns:
         Diccionario ``{drone_id: nuevo_angulo_grados}``.
@@ -254,10 +296,11 @@ def compute_headings(
         for d in drones:
             home_dx, home_dy = _home_vector(d, home_x, home_y)
             threat_dx, threat_dy = _threat_vector(d)
+            mision_dx, mision_dy = _final_approach_vector(d, objetivo_x, objetivo_y)
             resultado_sin_vecinos[d.id] = _girar_hacia(
                 d,
-                BOIDS_HOME_WEIGHT * home_dx + BOIDS_THREAT_WEIGHT * threat_dx,
-                BOIDS_HOME_WEIGHT * home_dy + BOIDS_THREAT_WEIGHT * threat_dy,
+                BOIDS_HOME_WEIGHT * home_dx + BOIDS_THREAT_WEIGHT * threat_dx + BOIDS_MISSION_WEIGHT * mision_dx,
+                BOIDS_HOME_WEIGHT * home_dy + BOIDS_THREAT_WEIGHT * threat_dy + BOIDS_MISSION_WEIGHT * mision_dy,
             )
         return resultado_sin_vecinos
 
@@ -279,13 +322,14 @@ def compute_headings(
     for i, drone in enumerate(drones):
         home_dx, home_dy = _home_vector(drone, home_x, home_y)
         threat_dx, threat_dy = _threat_vector(drone)
+        mision_dx, mision_dy = _final_approach_vector(drone, objetivo_x, objetivo_y)
         mask = vecinos[i]
 
         if not np.any(mask):
             resultado[drone.id] = _girar_hacia(
                 drone,
-                BOIDS_HOME_WEIGHT * home_dx + BOIDS_THREAT_WEIGHT * threat_dx,
-                BOIDS_HOME_WEIGHT * home_dy + BOIDS_THREAT_WEIGHT * threat_dy,
+                BOIDS_HOME_WEIGHT * home_dx + BOIDS_THREAT_WEIGHT * threat_dx + BOIDS_MISSION_WEIGHT * mision_dx,
+                BOIDS_HOME_WEIGHT * home_dy + BOIDS_THREAT_WEIGHT * threat_dy + BOIDS_MISSION_WEIGHT * mision_dy,
             )
             continue
 
@@ -309,6 +353,7 @@ def compute_headings(
             + BOIDS_COHESION_WEIGHT * coh_dx
             + BOIDS_HOME_WEIGHT * home_dx
             + BOIDS_THREAT_WEIGHT * threat_dx
+            + BOIDS_MISSION_WEIGHT * mision_dx
         )
         total_y = (
             BOIDS_SEPARATION_WEIGHT * sep_dy
@@ -316,6 +361,7 @@ def compute_headings(
             + BOIDS_COHESION_WEIGHT * coh_dy
             + BOIDS_HOME_WEIGHT * home_dy
             + BOIDS_THREAT_WEIGHT * threat_dy
+            + BOIDS_MISSION_WEIGHT * mision_dy
         )
 
         resultado[drone.id] = _girar_hacia(drone, total_x, total_y)

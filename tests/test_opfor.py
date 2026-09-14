@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 
 import src.engine.flocking as flocking
+from src.config import HPM_ORIGIN_X, HPM_ORIGIN_Y
 from src.engine.simulation import SimulationEngine
 from src.models.drone import (
     Drone,
@@ -564,5 +565,125 @@ class TestPropagacionDeAlarma:
         dist_sin_propagacion = _correr_con_un_impactado(0.0)
 
         assert dist_con_propagacion > dist_sin_propagacion
+
+
+# ---------------------------------------------------------------------------
+# Misión ofensiva del enjambre: el enjambre avanza hacia un objetivo y
+# "llegar" es una brecha de la defensa, no una baja (ver src/config.py,
+# bloque "Misión ofensiva del enjambre", y flocking._final_approach_vector).
+# ---------------------------------------------------------------------------
+
+
+class TestMisionOfensiva:
+    def test_sin_objetivo_la_formacion_no_se_mueve(self):
+        """Control de compatibilidad — objetivo_x/y=None (el default) debe
+        dejar el comportamiento idéntico a antes de este ítem: el ancla de
+        cohesión no se mueve sola."""
+        swarm = Swarm(centro_x=500.0, centro_y=500.0)
+        swarm.drones = [Drone(0, x=500.0, y=500.0, angulo=0.0, velocidad=15.0)]
+        assert swarm.objetivo_x is None
+
+        for _ in range(20):
+            llegaron = swarm.actualizar(dt=0.1)
+            assert llegaron == []
+
+        assert swarm.formacion_x == pytest.approx(500.0)
+        assert swarm.formacion_y == pytest.approx(500.0)
+
+    def test_formacion_avanza_hacia_el_objetivo(self):
+        swarm = Swarm(centro_x=500.0, centro_y=500.0)
+        swarm.drones = [Drone(0, x=500.0, y=500.0, angulo=0.0, velocidad=15.0)]
+        swarm.objetivo_x = 100.0
+        swarm.objetivo_y = 500.0
+
+        dist_inicial = distance(swarm.formacion_x, swarm.formacion_y, swarm.objetivo_x, swarm.objetivo_y)
+        for _ in range(20):
+            swarm.actualizar(dt=0.1)
+        dist_final = distance(swarm.formacion_x, swarm.formacion_y, swarm.objetivo_x, swarm.objetivo_y)
+
+        assert dist_final < dist_inicial
+
+    def test_dron_que_llega_se_marca_y_deja_de_volar(self):
+        """Un dron ya dentro de SWARM_OBJETIVO_RADIO_IMPACTO_M al primer
+        tick se marca objetivo_alcanzado=True y, de ahí en más, no cambia
+        de posición — misión cumplida, deja de estar bajo control de vuelo
+        (mismo criterio que un neutralizado, ver Swarm.actualizar)."""
+        swarm = Swarm(centro_x=100.0, centro_y=100.0)
+        drone = Drone(0, x=110.0, y=100.0, angulo=180.0, velocidad=15.0)  # a 10m, dentro del radio (30m)
+        swarm.drones = [drone]
+        swarm.objetivo_x = 100.0
+        swarm.objetivo_y = 100.0
+
+        llegaron = swarm.actualizar(dt=0.1)
+        assert llegaron == [drone]
+        assert drone.objetivo_alcanzado is True
+
+        x_al_llegar, y_al_llegar = drone.x, drone.y
+        for _ in range(10):
+            llegaron_de_nuevo = swarm.actualizar(dt=0.1)
+            assert llegaron_de_nuevo == []  # ya está marcado, no "llega" otra vez
+        assert (drone.x, drone.y) == (x_al_llegar, y_al_llegar)
+
+    def test_reset_de_formacion_reinicia_el_avance(self):
+        swarm = Swarm(centro_x=500.0, centro_y=500.0)
+        swarm.drones = [Drone(0, x=500.0, y=500.0, angulo=0.0, velocidad=15.0)]
+        swarm.objetivo_x = 0.0
+        swarm.objetivo_y = 0.0
+        for _ in range(20):
+            swarm.actualizar(dt=0.1)
+        assert (swarm.formacion_x, swarm.formacion_y) != (500.0, 500.0)
+
+        swarm.inicializar_formacion("cuadrada", 5)
+        assert swarm.formacion_x == pytest.approx(swarm.centro_x)
+        assert swarm.formacion_y == pytest.approx(swarm.centro_y)
+        # El objetivo en sí (a diferencia del avance) NO se reinicia — un
+        # engagement nuevo sigue siendo contra la misma misión.
+        assert swarm.objetivo_x == 0.0
+
+    def test_simulationengine_sin_mision_activa_no_fija_objetivo(self):
+        sim = SimulationEngine(swarm_size=3)
+        assert sim.mision_activa is False
+        assert sim.swarm.objetivo_x is None
+        sim.shutdown()
+
+    def test_simulationengine_con_mision_activa_apunta_al_origen_del_arma(self):
+        sim = SimulationEngine(swarm_size=3, mision_activa=True)
+        assert sim.swarm.objetivo_x == HPM_ORIGIN_X
+        assert sim.swarm.objetivo_y == HPM_ORIGIN_Y
+        sim.shutdown()
+
+    def test_tick_loguea_una_brecha_cuando_un_dron_llega(self):
+        sim = SimulationEngine(swarm_size=1, mision_activa=True)
+        drone = sim.swarm.drones[0]
+        drone.x, drone.y = HPM_ORIGIN_X + 5.0, HPM_ORIGIN_Y  # ya adentro del radio de impacto
+
+        sim._tick(dt=0.1)
+
+        eventos = [e for e in sim.logs if e["evento"] == "objetivo_alcanzado"]
+        assert len(eventos) == 1
+        assert eventos[0]["datos"]["drones"] == [drone.id]
+        assert drone.objetivo_alcanzado is True
+        sim.shutdown()
+
+    def test_un_dron_converge_y_llega_al_objetivo_de_verdad(self):
+        """El test central del ítem: no alcanza con que el ancla avance
+        (ver el docstring de BOIDS_MISSION_WEIGHT en src/config.py — con
+        un peso insuficiente el enjambre queda orbitando cerca del
+        objetivo para siempre, verificado empíricamente). Acá se prueba
+        el resultado real: un dron solo, con el motor real, corriendo
+        `actualizar()` tick a tick, tiene que LLEGAR — no solo acercarse —
+        dentro de un número acotado de ticks."""
+        swarm = Swarm(centro_x=100.0, centro_y=40.0)
+        swarm.drones = [Drone(0, x=100.0, y=40.0, angulo=90.0, velocidad=20.0)]
+        swarm.objetivo_x = 40.0
+        swarm.objetivo_y = 40.0
+
+        for _ in range(100):  # 10s simulados — el caso calibrado converge en ~2.3s
+            if swarm.actualizar(dt=0.1):
+                break
+        else:
+            pytest.fail("el dron no llegó al objetivo en 10s simulados")
+
+        assert swarm.contar_objetivo_alcanzado() == 1
 
 

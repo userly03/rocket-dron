@@ -61,6 +61,14 @@ class SimulationEngine:
     # la simulación interactiva ni con otras réplicas/experimentos
     # corriendo en paralelo. Ver docs/AUDITORIA_CHECKLIST.md §3.1.
     rng: Generator | None = None
+    # Misión ofensiva del enjambre (ver el bloque de comentarios en
+    # src/config.py): False (default) conserva el comportamiento previo a
+    # este ítem — el enjambre patrulla, no avanza hacia nada. La app en
+    # vivo (src/main.py) lo activa explícitamente; los runners de Monte
+    # Carlo/coevolución (src/engine/experiments.py) NO, para no invalidar
+    # en silencio la calibración de distancia/potencia ya hecha con el
+    # enjambre estático.
+    mision_activa: bool = False
     estado: SimulationState = SimulationState.DETENIDA
     tiempo: float = 0.0
     tick: int = 0
@@ -82,6 +90,15 @@ class SimulationEngine:
         self.jammer.origen_x = HPM_ORIGIN_X
         self.jammer.origen_y = HPM_ORIGIN_Y
         self.jammer.origen_z = HPM_ORIGIN_Z
+
+        # Misión ofensiva: el objetivo por defecto es el propio origen del
+        # arma — el motivo más simple de que el enjambre esté ahí es que
+        # va contra la batería que lo enfrenta. Si algún día se quiere un
+        # objetivo distinto (un activo defendido en otra posición), esto
+        # es lo único que hay que cambiar.
+        if self.mision_activa:
+            self.swarm.objetivo_x = HPM_ORIGIN_X
+            self.swarm.objetivo_y = HPM_ORIGIN_Y
 
         # Propagar el generador de esta instancia a los sub-sistemas que lo
         # consumen. ``swarm``/``missile_system`` llegan construidos por su
@@ -146,6 +163,12 @@ class SimulationEngine:
                     for d in self.swarm.drones
                 ],
                 "conteo_estados": self.swarm.contar_por_estado(),
+                "mision": {
+                    "activa": self.swarm.objetivo_x is not None,
+                    "objetivo_x": self.swarm.objetivo_x,
+                    "objetivo_y": self.swarm.objetivo_y,
+                    "brechas": self.swarm.contar_objetivo_alcanzado(),
+                },
                 "radar": {
                     "origen_x": HPM_ORIGIN_X,
                     "origen_y": HPM_ORIGIN_Y,
@@ -417,6 +440,25 @@ class SimulationEngine:
         )
         return result
 
+    def _registrar_impactos_en_objetivo(self, llegaron: list[Any]) -> None:
+        """Logea una brecha de la defensa: uno o más drones llegaron al
+        objetivo este tick (ver ``Swarm.actualizar``/``_detectar_impactos_
+        en_objetivo``). Mismo formato que ``hpm_disparo``/``misil_detonado``
+        — un evento agregado con la lista de ids, no uno por dron."""
+        self._log(
+            "objetivo_alcanzado",
+            {
+                "drones": [d.id for d in llegaron],
+                "cantidad": len(llegaron),
+                "objetivo_x": self.swarm.objetivo_x,
+                "objetivo_y": self.swarm.objetivo_y,
+            },
+        )
+        validacion_logger.warning(
+            "--- BRECHA — t=%.2fs --- %d dron(es) llegaron al objetivo: %s",
+            self.tiempo, len(llegaron), [d.id for d in llegaron],
+        )
+
     def _sembrar_memoria_amenaza(
         self, eventos: list[dict], impacto_x: float, impacto_y: float
     ) -> None:
@@ -641,7 +683,9 @@ class SimulationEngine:
 
         eventos_jamming: list[dict] = []
         if mover_enjambre:
-            self.swarm.actualizar(dt)
+            impactos_objetivo = self.swarm.actualizar(dt)
+            if impactos_objetivo:
+                self._registrar_impactos_en_objetivo(impactos_objetivo)
             eventos_jamming = self.jammer.actualizar(self.swarm.drones)
         eventos_misil = self.missile_system.actualizar_misiles(
             self.swarm.drones, dt, track_manager=self.swarm.track_manager

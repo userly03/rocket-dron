@@ -695,6 +695,79 @@ BOIDS_THREAT_WEIGHT: float = float(os.getenv("BOIDS_THREAT_WEIGHT", "2.5"))
 # punto de impacto, no solo al primero.
 BOIDS_ALARM_PROPAGATION_GAIN: float = float(os.getenv("BOIDS_ALARM_PROPAGATION_GAIN", "0.7"))
 
+# --- Misión ofensiva del enjambre ---
+# Hasta acá el enjambre era prey puro: patrullaba alrededor de su propio
+# centro de formación y solo reaccionaba si lo atacaban — nunca tuvo un
+# objetivo propio. Sin un objetivo, "¿lo pararon a tiempo?" no es una
+# pregunta que el modelo pueda responder, solo "¿cuántos neutralizaste?"
+# — una métrica de laboratorio, no una operacional. Esto le da al
+# enjambre una MISIÓN: avanzar hacia un punto (por defecto, el propio
+# origen del arma — el enjambre ataca la batería que lo defiende, el
+# motivo más simple de que esté ahí) y llegar cuenta como una brecha de
+# la defensa. Ver ``Swarm.objetivo_x/y``/``_avanzar_formacion_hacia_
+# objetivo`` y ``Drone.objetivo_alcanzado``.
+#
+# Condicional y apagado por defecto, mismo criterio que amenaza/home: con
+# ``Swarm.objetivo_x = None`` (el default) esto no aporta nada — el
+# enjambre patrulla exactamente igual que antes de este ítem. Se activa
+# explícitamente por quien construye el ``Swarm``/``SimulationEngine``
+# (``SimulationEngine.mision_activa``), NO globalmente acá, para no
+# invalidar en silencio la calibración de distancia/potencia ya hecha en
+# Monte Carlo y coevolución (``DISTANCIA_COMBATE_M`` en
+# ``src/engine/coevolution.py``, `research/BARRIDO_DEPREDADOR_PRESA.md`) —
+# esos experimentos siguen con la misión apagada salvo que se pida lo
+# contrario a propósito.
+#
+# Velocidad de avance de la FORMACIÓN (no de cada dron — cada dron sigue
+# gobernado por su propia velocidad individual, VELOCIDAD_MIN/MAX en
+# swarm.py; esto es la velocidad a la que se mueve el ANCLA de cohesión
+# que el enjambre persigue). 20 m/s cae en el medio del rango individual
+# (10-30 m/s) — la formación avanza a un ritmo que un dron individual
+# puede sostener, ni más rápido de lo físicamente plausible ni tan lento
+# que nunca cierre la distancia dentro de una corrida típica de este
+# proyecto (15-60s, ver ExperimentConfig.t_max_s).
+SWARM_AVANCE_VELOCIDAD_M_S: float = float(os.getenv("SWARM_AVANCE_VELOCIDAD_M_S", "20.0"))
+
+# Radio (m) dentro del cual un dron activo se considera que "alcanzó" el
+# objetivo — una brecha de la defensa. Más chico que el radio de efecto
+# típico de un misil HPM propio (50-200 m, ver el rango válido de
+# ``misil_radio`` en ``ExperimentRequest``/``MissileRequest`` de
+# ``src/api/routes.py``): llegar y estar sobre el objetivo es una
+# tolerancia más ajustada que el área que nuestra propia arma logra cubrir
+# de un pulso.
+SWARM_OBJETIVO_RADIO_IMPACTO_M: float = float(os.getenv("SWARM_OBJETIVO_RADIO_IMPACTO_M", "30.0"))
+
+# Peso del término de "acercamiento final" en compute_headings (ver
+# flocking._final_approach_vector). Medido durante el diseño de este
+# ítem, en dos pasos:
+#
+# 1. Sin este término, avanzar SOLO el ancla de cohesión (formacion_x/y
+#    hacia objetivo_x/y) no alcanza — _home_vector da fuerza CERO dentro
+#    de BOIDS_HOME_RADIUS (es un límite de "no te alejes", no una meta de
+#    "andá hacia acá"), así que el enjambre queda orbitando indefinidamente
+#    a ~BOIDS_HOME_RADIUS del objetivo (verificado: 120s simulados, ningún
+#    dron se acercó a menos de ~195m).
+# 2. Con este término pero en el mismo orden de magnitud que los otros
+#    pesos de boids (se probó 2.0, comparable a home=1.5/amenaza=2.5), el
+#    enjambre queda en un SEGUNDO equilibrio estable, más cerca pero
+#    tampoco llega: la fuerza de separación entre drones comprimidos
+#    hacia el mismo punto (que también crece a medida que se acercan)
+#    empata a la atracción antes de entrar al radio de impacto —
+#    verificado: 10 drones, 300s simulados, congelado en ~211m desde el
+#    segundo 60, sin una sola brecha. La atracción es CONSTANTE
+#    (vector unitario) pero la separación local crece con la densidad del
+#    grupo comprimiéndose — a peso parejo, separación gana.
+#
+# 8.0 (empírico, ~3-5× el resto de los pesos) es lo que hizo falta para
+# que la atracción realmente domine a la separación en el tramo final:
+# verificado con 10 y con 50 drones (el tamaño por defecto de la demo en
+# vivo, SWARM_SIZE) — en ambos casos el enjambre converge completo dentro
+# de ~60-80s simulados, sin oscilación, asentándose justo dentro de
+# SWARM_OBJETIVO_RADIO_IMPACTO_M (27-29m). No es un valor "elegante" — es
+# el que se necesitó para vencer una fuerza que compite de verdad, medido
+# corriendo el motor real, no estimado a mano.
+BOIDS_MISSION_WEIGHT: float = float(os.getenv("BOIDS_MISSION_WEIGHT", "8.0"))
+
 # --- OPFOR reactivo: perfiles de pérdida de enlace (P2-E) ---
 # Antes, perder el enlace (jammer) "congelaba" al dron (Drone.mover
 # retornaba temprano) — no es lo que hace un dron real: ejecuta un
