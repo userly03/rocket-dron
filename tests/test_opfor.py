@@ -687,3 +687,88 @@ class TestMisionOfensiva:
         assert swarm.contar_objetivo_alcanzado() == 1
 
 
+class TestKamikaze:
+    """El dron que llega al objetivo (misión ofensiva) inutiliza la
+    plataforma de verdad en vez de solo registrarse como brecha
+    estadística — kamikaze_activo, opt-in y separado de mision_activa/
+    con_mision (ver el comentario del campo en SimulationEngine)."""
+
+    def test_apagado_por_defecto_la_brecha_sigue_siendo_solo_estadistica(self):
+        sim = SimulationEngine(swarm_size=1, mision_activa=True)
+        assert sim.kamikaze_activo is False
+        drone = sim.swarm.drones[0]
+        drone.x, drone.y = HPM_ORIGIN_X, HPM_ORIGIN_Y
+
+        sim._tick(dt=0.1)
+
+        assert sim.hpm.destruido is False
+        assert sim.missile_system.destruido is False
+        assert sim.hpm.listo_para_disparar() is True
+        sim.shutdown()
+
+    def test_activado_el_primer_dron_que_llega_destruye_canon_y_lanzador(self):
+        sim = SimulationEngine(swarm_size=1, mision_activa=True, kamikaze_activo=True)
+        drone = sim.swarm.drones[0]
+        drone.x, drone.y = HPM_ORIGIN_X, HPM_ORIGIN_Y
+
+        sim._tick(dt=0.1)
+
+        assert sim.hpm.destruido is True
+        assert sim.missile_system.destruido is True
+        assert sim.hpm.listo_para_disparar() is False
+
+        eventos = [e for e in sim.logs if e["evento"] == "plataforma_destruida"]
+        assert len(eventos) == 1
+        assert eventos[0]["datos"]["drone_id"] == drone.id
+        sim.shutdown()
+
+    def test_canon_destruido_rechaza_disparar_sin_excepcion(self):
+        sim = SimulationEngine(swarm_size=1, mision_activa=True, kamikaze_activo=True)
+        sim.swarm.drones[0].x, sim.swarm.drones[0].y = HPM_ORIGIN_X, HPM_ORIGIN_Y
+        sim._tick(dt=0.1)
+
+        eventos = sim.hpm.disparar(sim.swarm.drones)
+
+        assert eventos == []
+        assert sim.hpm.ultimo_rechazo is not None
+        assert "destruid" in sim.hpm.ultimo_rechazo
+        sim.shutdown()
+
+    def test_lanzador_destruido_rechaza_lanzar_sin_excepcion(self):
+        sim = SimulationEngine(swarm_size=1, mision_activa=True, kamikaze_activo=True)
+        sim.swarm.drones[0].x, sim.swarm.drones[0].y = HPM_ORIGIN_X, HPM_ORIGIN_Y
+        sim._tick(dt=0.1)
+
+        resultado = sim.missile_system.lanzar(
+            x=HPM_ORIGIN_X, y=HPM_ORIGIN_Y, angulo=0.0, drones=sim.swarm.drones
+        )
+
+        assert resultado["success"] is False
+        assert "destruid" in resultado["message"]
+        sim.shutdown()
+
+    def test_reset_repara_la_plataforma(self):
+        sim = SimulationEngine(swarm_size=1, mision_activa=True, kamikaze_activo=True)
+        sim.swarm.drones[0].x, sim.swarm.drones[0].y = HPM_ORIGIN_X, HPM_ORIGIN_Y
+        sim._tick(dt=0.1)
+        assert sim.hpm.destruido is True
+
+        sim.reset()
+
+        assert sim.hpm.destruido is False
+        assert sim.missile_system.destruido is False
+        assert sim.hpm.listo_para_disparar() is True
+        sim.shutdown()
+
+    def test_no_afecta_con_mision_en_monte_carlo_por_no_estar_activado_ahi(self):
+        """kamikaze_activo nunca se pasa a ExperimentConfig/run_replica —
+        con_mision=True sigue midiendo lo mismo que antes de este ítem."""
+        from src.engine.experiments import ExperimentConfig, run_replica
+
+        cfg = ExperimentConfig(
+            formacion="cuadrada", cantidad=5, replicas=1, t_max_s=3.0, semilla=7, con_mision=True
+        )
+        resultado = run_replica(cfg, 0)
+        assert "fraccion_alcanzo_objetivo" in resultado
+
+

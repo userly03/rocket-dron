@@ -64,11 +64,19 @@ class HPMWeapon:
     energia_actual_kj: float = HPM_ENERGIA_ALMACENADA_KJ
     temperatura_c: float = HPM_TEMP_AMBIENTE_C
     disparos: int = field(default=0, init=False)
-    # Motivo del último rechazo de disparo (energía o temperatura), o
-    # ``None`` si el último ``disparar()`` se ejecutó (o si todavía no se
-    # llamó nunca). Es el canal por el que ``disparar()`` "dice" por qué no
-    # disparó sin usar una excepción — ver su docstring.
+    # Motivo del último rechazo de disparo (energía, temperatura, o
+    # plataforma destruida), o ``None`` si el último ``disparar()`` se
+    # ejecutó (o si todavía no se llamó nunca). Es el canal por el que
+    # ``disparar()`` "dice" por qué no disparó sin usar una excepción —
+    # ver su docstring.
     ultimo_rechazo: str | None = field(default=None, init=False)
+    # Kamikaze (ver SimulationEngine.kamikaze_activo): True si un dron
+    # llegó al objetivo en modo kamikaze e inutilizó la plataforma. A
+    # diferencia del presupuesto de energía/temperatura (que se recupera
+    # solo), esto NO se recupera con el tiempo — un impacto cinético real
+    # sobre el emisor no se "enfría", necesita reparación (ver
+    # SimulationEngine.reset()).
+    destruido: bool = field(default=False, init=False)
 
     def _energia_por_disparo_kj(self, potencia: float | None = None) -> float:
         """
@@ -86,9 +94,11 @@ class HPMWeapon:
         return p * HPM_DISPARO_DURACION_S
 
     def listo_para_disparar(self) -> bool:
-        """True si el arma tiene margen térmico y energía para OTRO disparo."""
+        """True si el arma no está destruida y tiene margen térmico y
+        energía para OTRO disparo."""
         return (
-            self.temperatura_c < HPM_TEMP_MAX_C - _EPS_PRESUPUESTO
+            not self.destruido
+            and self.temperatura_c < HPM_TEMP_MAX_C - _EPS_PRESUPUESTO
             and self.energia_actual_kj
             >= self._energia_por_disparo_kj() - _EPS_PRESUPUESTO
         )
@@ -131,6 +141,13 @@ class HPMWeapon:
             cono de efecto).
         """
         self.ultimo_rechazo = None
+
+        if self.destruido:
+            self.ultimo_rechazo = (
+                "plataforma destruida — un dron kamikaze impactó el emisor, "
+                "no dispara hasta que se repare (reiniciar la simulación)"
+            )
+            return []
 
         if self.temperatura_c >= HPM_TEMP_MAX_C - _EPS_PRESUPUESTO:
             self.ultimo_rechazo = (
@@ -297,4 +314,5 @@ class HPMWeapon:
             "temperatura_max_c": HPM_TEMP_MAX_C,
             "listo_para_disparar": self.listo_para_disparar(),
             "ultimo_rechazo": self.ultimo_rechazo,
+            "destruido": self.destruido,
         }

@@ -4,6 +4,7 @@
  */
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
 const FALLBACK_DRONE_ALTITUDE = 100;
 const FALLBACK_MISSILE_ALTITUDE = 100;
@@ -81,12 +82,6 @@ function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
-function makeDroneGeometry() {
-  const geo = new THREE.ConeGeometry(4, 12, 6);
-  geo.rotateZ(-Math.PI / 2); // el cono apunta a lo largo de +X (rumbo 0)
-  return geo;
-}
-
 function makeMissileGeometry() {
   const geo = new THREE.ConeGeometry(3, 16, 8);
   geo.rotateZ(-Math.PI / 2);
@@ -144,8 +139,14 @@ class TrailRibbon {
 const Render3D = (() => {
   let renderer, scene, camera, controls, canvas;
   let field = { width: 1000, height: 1000 };
-  let droneMesh = null;
-  let droneCapacity = 0;
+  // Dron real (tools/blender/generar_dron.py → frontend/models/dron.glb):
+  // reemplaza el cono genérico. A diferencia del vehículo (un solo
+  // modelo), acá hay hasta ~50 a la vez — droneTemplate es la escena
+  // cargada UNA vez, nunca agregada a la escena en sí; cada dron vivo
+  // clona su propia copia (con su propio material "Cuerpo" clonado
+  // aparte, para poder teñirlo por estado sin afectar a los demás).
+  let droneTemplate = null;
+  let dronesGroup = null;
   const droneRecords = new Map(); // id -> { x,y,angulo,estado, target:{x,y,angulo}, fx }
   const missileObjects = new Map(); // id -> { mesh, trail, x, y, target:{x,y} }
   const detonations = []; // { mesh1, mesh2, start }
@@ -153,9 +154,23 @@ const Render3D = (() => {
   const particleBursts = []; // { points: THREE.Points, start, velocities }
   const lightningBolts = []; // { line, start }
   let hpmConeMesh = null;
-  let hpmOriginMesh = null;
-  let hpmMastMesh = null;
-  let hpmPadMesh = null;
+  // Vehículo lanzador (tools/blender/generar_lanzador_hpm.py, exportado
+  // a frontend/models/lanzador_hpm.glb): reemplaza la esfera+mástil
+  // genéricos de antes. vehiculoGroup existe desde el arranque (para
+  // poder posicionarlo ya mismo); torretaHpmNode se completa recién
+  // cuando termina de cargar el .glb (carga async) — se rota según
+  // hpm.direccion en cuanto está disponible.
+  let vehiculoGroup = null;
+  let torretaHpmNode = null;
+  const lastHpmOrigin = { x: 0, z: 0 };
+  // Kamikaze (ver SimulationEngine.kamikaze_activo): plataformaDestruida
+  // es el estado deseado (puede llegar ANTES de que termine de cargar
+  // el .glb, por eso es una variable aparte, no algo que se aplica al
+  // vuelo); coloresOriginalesVehiculo guarda el color de cada material
+  // relevante la primera vez que se toca, para poder restaurarlo en un
+  // reset sin tener que recordar los hex a mano acá.
+  let plataformaDestruida = false;
+  const coloresOriginalesVehiculo = new Map();
   let radarRingMesh = null;
   let radarPingMesh = null;
   let trackLinesMesh = null;
@@ -191,7 +206,12 @@ const Render3D = (() => {
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.maxPolarAngle = Math.PI * 0.49;
-    controls.minDistance = maxDim * 0.15;
+    // Antes maxDim*0.15 (150m con el campo default de 1000m): un piso
+    // tan alto hacía IMPOSIBLE acercar la cámara a cualquier cosa,
+    // incluido el vehículo lanzador (ver verPlataforma) — nadie podía
+    // zoomear de cerca, ni con mouse real ni con automatización. 8m
+    // sigue evitando atravesar geometría pero deja acercarse en serio.
+    controls.minDistance = 8;
     controls.maxDistance = maxDim * 2.5;
 
     // Antes tenían tinte verde (0x445544/0xbfffcf) — se filtraba a CADA
@@ -206,10 +226,26 @@ const Render3D = (() => {
     buildGround();
     buildHeatmapPlane();
     buildHpmCone();
+    buildDroneTemplate();
 
     resize();
     started = true;
     requestAnimationFrame(loop);
+  }
+
+  function buildDroneTemplate() {
+    dronesGroup = new THREE.Group();
+    scene.add(dronesGroup);
+    new GLTFLoader().load(
+      "models/dron.glb",
+      (gltf) => {
+        droneTemplate = gltf.scene;
+      },
+      undefined,
+      (err) => {
+        console.error("No se pudo cargar frontend/models/dron.glb:", err);
+      },
+    );
   }
 
   function buildGround() {
@@ -271,30 +307,37 @@ const Render3D = (() => {
     hpmConeMesh.position.y = 0.8;
     scene.add(hpmConeMesh);
 
-    // Marcador del emplazamiento (cañón Y misil, comparten origen — ver
-    // MISSILE comparte HPM_ORIGIN_X/Y/Z en config.py): antes era solo una
-    // esfera de 6 unidades, casi invisible contra un campo de cientos de
-    // metros — no se entendía "de dónde sale" ni el cañón ni el misil.
-    // Ahora es un mástil (para que se ancle visualmente al piso, no
-    // flote) sobre una base circular tipo helipuerto — mismo azul de
-    // interfaz que ya usaba (hpmOrigin, "esto es nuestro sistema").
-    const originGeo = new THREE.SphereGeometry(11, 14, 14);
-    const originMat = new THREE.MeshBasicMaterial({ color: COLOR.hpmOrigin });
-    hpmOriginMesh = new THREE.Mesh(originGeo, originMat);
-    scene.add(hpmOriginMesh);
-
-    const mastGeo = new THREE.CylinderGeometry(1.5, 2.2, 11, 10);
-    const mastMat = new THREE.MeshBasicMaterial({ color: COLOR.hpmOrigin, transparent: true, opacity: 0.8 });
-    hpmMastMesh = new THREE.Mesh(mastGeo, mastMat);
-    scene.add(hpmMastMesh);
-
-    const padGeo = new THREE.RingGeometry(16, 20, 32);
-    const padMat = new THREE.MeshBasicMaterial({
-      color: COLOR.hpmOrigin, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false,
-    });
-    hpmPadMesh = new THREE.Mesh(padGeo, padMat);
-    hpmPadMesh.rotation.x = -Math.PI / 2;
-    scene.add(hpmPadMesh);
+    // Vehículo lanzador (cañón + misil, comparten emplazamiento — ver
+    // HPM_ORIGIN_X/Y/Z en src/config.py). Antes era una esfera+mástil
+    // genéricos; ahora es el modelo real (ver tools/blender/
+    // generar_lanzador_hpm.py para el porqué de cada pieza). El grupo
+    // se agrega YA (para poder posicionarlo desde el primer snapshot);
+    // el contenido visual aparece cuando termina de cargar el .glb —
+    // carga asíncrona, no bloquea el resto de la escena.
+    vehiculoGroup = new THREE.Group();
+    scene.add(vehiculoGroup);
+    const ESCALA_VEHICULO = 3; // el modelo mide ~6.5m real; a esta escala
+    // se ve comparable al tamaño de los drones (ver generar_dron.py) —
+    // mismo criterio de "exagerado para que se note a la distancia de
+    // combate" que ya usa el resto del mapa.
+    new GLTFLoader().load(
+      "models/lanzador_hpm.glb",
+      (gltf) => {
+        const modelo = gltf.scene;
+        modelo.scale.setScalar(ESCALA_VEHICULO);
+        vehiculoGroup.add(modelo);
+        torretaHpmNode = modelo.getObjectByName("Torreta_HPM");
+        // Por si plataformaDestruida ya llegó True ANTES de que terminara
+        // de cargar el modelo (snapshot procesado mientras el .glb
+        // todavía viajaba por red) — sin esto quedaría con los colores
+        // normales hasta el próximo cambio de estado.
+        aplicarEstadoDestruccionVehiculo();
+      },
+      undefined,
+      (err) => {
+        console.error("No se pudo cargar frontend/models/lanzador_hpm.glb:", err);
+      },
+    );
 
     const radarGeo = new THREE.RingGeometry(RADAR_RANGE_M - 3, RADAR_RANGE_M, 64);
     const radarMat = new THREE.MeshBasicMaterial({
@@ -354,12 +397,21 @@ const Render3D = (() => {
   function updateHpmCone(hpm) {
     if (!hpm) return;
     const origin = worldToThree(field, hpm.origen_x ?? 0, hpm.origen_y ?? 0, 0.8);
-    hpmOriginMesh.position.set(origin.x, 11, origin.z);
-    if (hpmMastMesh) hpmMastMesh.position.set(origin.x, 5.5, origin.z);
-    if (hpmPadMesh) hpmPadMesh.position.set(origin.x, 0.4, origin.z);
+    // Guardado para verPlataforma(): la vista por defecto siempre mira
+    // al centro del mapa (donde nace el enjambre), pero el vehículo
+    // suele estar lejos de ahí — sin esto no hay forma de acercar la
+    // cámara al vehículo en sí.
+    lastHpmOrigin.x = origin.x;
+    lastHpmOrigin.z = origin.z;
+    if (vehiculoGroup) vehiculoGroup.position.set(origin.x, 0, origin.z);
     if (radarRingMesh) radarRingMesh.position.set(origin.x, 0.5, origin.z);
 
     const dirDeg = hpm.direccion ?? 0;
+    // Torreta_HPM mira +X en reposo, misma convención que este cono
+    // (mundo: x=cos, z=sin — ver más abajo) — headingToRotationY ya
+    // hace la conversión de signo correcta entre esa convención y el
+    // rotation.y de Three (mismo helper que usan drones/misiles).
+    if (torretaHpmNode) torretaHpmNode.rotation.y = headingToRotationY(dirDeg);
     const aperture = hpm.apertura_cono ?? 30;
     const half = THREE.MathUtils.degToRad(aperture / 2);
     const dirRad = THREE.MathUtils.degToRad(dirDeg);
@@ -480,23 +532,27 @@ const Render3D = (() => {
     }
   }
 
-  function ensureDroneCapacity(n) {
-    if (droneMesh && droneCapacity >= n) return;
-    if (droneMesh) scene.remove(droneMesh);
-    droneCapacity = Math.max(n, 64);
-    const geo = makeDroneGeometry();
-    const mat = new THREE.MeshStandardMaterial({ vertexColors: false, roughness: 0.6, metalness: 0.1 });
-    droneMesh = new THREE.InstancedMesh(geo, mat, droneCapacity);
-    droneMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(droneCapacity * 3), 3);
-    droneMesh.frustumCulled = false;
-    scene.add(droneMesh);
+  function ensureDroneModel(rec) {
+    // droneTemplate carga async — si todavía no está listo, el rec se
+    // actualiza igual (estado/posición) y el modelo aparece recién
+    // cuando ensureDroneModel se vuelve a llamar en un tick posterior
+    // y ya está disponible (mismo patrón que vehiculoGroup).
+    if (rec.model || !droneTemplate) return;
+    const model = droneTemplate.clone(true);
+    // clone(true) clona la jerarquía pero NO los materiales (los hijos
+    // clonados siguen apuntando al MISMO material que el original) — si
+    // no clonamos acá el material de "Cuerpo", teñir un dron por estado
+    // teñiría a los 50 a la vez.
+    const cuerpo = model.getObjectByName("Cuerpo");
+    if (cuerpo) {
+      cuerpo.material = cuerpo.material.clone();
+      rec.cuerpoMaterial = cuerpo.material;
+    }
+    dronesGroup.add(model);
+    rec.model = model;
   }
 
-  const _matrix = new THREE.Matrix4();
-  const _quat = new THREE.Quaternion();
   const _euler = new THREE.Euler();
-  const _scale = new THREE.Vector3(1, 1, 1);
-  const _pos = new THREE.Vector3();
   const _color = new THREE.Color();
   const _riesgoColor = new THREE.Color(COLOR.riesgoLatente);
   const _missileQuatYaw = new THREE.Quaternion();
@@ -506,10 +562,8 @@ const Render3D = (() => {
 
   function updateDrones(drones, now) {
     if (!drones) return;
-    ensureDroneCapacity(drones.length);
 
     const seen = new Set();
-    let idx = 0;
     for (const d of drones) {
       seen.add(d.id);
       let rec = droneRecords.get(d.id);
@@ -524,6 +578,7 @@ const Render3D = (() => {
         };
         droneRecords.set(d.id, rec);
       }
+      ensureDroneModel(rec);
 
       if (rec.estado !== "neutralizado" && d.estado === "neutralizado") {
         rec.fx = { state: "falling", start: now, fallFromZ: rec._smoothZ ?? d.z ?? FALLBACK_DRONE_ALTITUDE };
@@ -549,15 +604,20 @@ const Render3D = (() => {
         rec._smoothZ = d.z ?? FALLBACK_DRONE_ALTITUDE;
         rec._smoothAngulo = d.angulo;
       }
-
-      idx += 1;
     }
     for (const id of [...droneRecords.keys()]) {
-      if (!seen.has(id)) droneRecords.delete(id);
+      if (seen.has(id)) continue;
+      const rec = droneRecords.get(id);
+      if (rec.model) {
+        dronesGroup.remove(rec.model);
+        rec.cuerpoMaterial?.dispose();
+      }
+      droneRecords.delete(id);
     }
 
-    let i = 0;
     for (const rec of droneRecords.values()) {
+      if (!rec.model) continue; // template todavía no cargó — se pone al día solo
+
       const smoothing = 0.25;
       rec._smoothX = lerp(rec._smoothX, rec.target.x, smoothing);
       rec._smoothY = lerp(rec._smoothY, rec.target.y, smoothing);
@@ -591,36 +651,33 @@ const Render3D = (() => {
         visible = blinkOn;
       }
 
-      _pos.set(rec._smoothX - field.width / 2, altitude, rec._smoothY - field.height / 2);
+      rec.model.position.set(rec._smoothX - field.width / 2, altitude, rec._smoothY - field.height / 2);
       _euler.set(0, headingToRotationY(rec._smoothAngulo), 0);
-      _quat.setFromEuler(_euler);
-      _scale.setScalar(visible ? 1 : 0.001);
-      _matrix.compose(_pos, _quat, _scale);
-      droneMesh.setMatrixAt(i, _matrix);
+      rec.model.quaternion.setFromEuler(_euler);
+      rec.model.visible = visible;
 
-      _color.setHex(colorHex);
-      // Riesgo latente (P2-D): el dron impactado entró en una ventana de
-      // vulnerabilidad transitoria — puede recuperarse o fallar más tarde.
-      // Se comunica con un parpadeo ámbar superpuesto al color normal (no lo
-      // reemplaza) cuya frecuencia escala con la severidad, en vez de un
-      // estado discreto más — la muerte diferida deja de verse instantánea
-      // e inexplicable. No se aplica mientras cae/ya cayó (ya tiene su
-      // propio efecto) ni si está "no detectado" (ese color ya domina).
-      if (
-        rec.riesgoSeveridad > 0 &&
-        rec.fx.state !== "falling" && rec.fx.state !== "settled" &&
-        rec.detectado !== false
-      ) {
-        const periodMs = lerp(1600, 400, rec.riesgoSeveridad);
-        const wave = (Math.sin((now % periodMs) / periodMs * Math.PI * 2) + 1) / 2;
-        _color.lerp(_riesgoColor, 0.15 + 0.55 * wave);
+      if (rec.cuerpoMaterial) {
+        _color.setHex(colorHex);
+        // Riesgo latente (P2-D): el dron impactado entró en una ventana de
+        // vulnerabilidad transitoria — puede recuperarse o fallar más tarde.
+        // Se comunica con un parpadeo ámbar superpuesto al color normal (no
+        // lo reemplaza) cuya frecuencia escala con la severidad, en vez de
+        // un estado discreto más — la muerte diferida deja de verse
+        // instantánea e inexplicable. No se aplica mientras cae/ya cayó (ya
+        // tiene su propio efecto) ni si está "no detectado" (ese color ya
+        // domina).
+        if (
+          rec.riesgoSeveridad > 0 &&
+          rec.fx.state !== "falling" && rec.fx.state !== "settled" &&
+          rec.detectado !== false
+        ) {
+          const periodMs = lerp(1600, 400, rec.riesgoSeveridad);
+          const wave = (Math.sin((now % periodMs) / periodMs * Math.PI * 2) + 1) / 2;
+          _color.lerp(_riesgoColor, 0.15 + 0.55 * wave);
+        }
+        rec.cuerpoMaterial.color.copy(_color);
       }
-      droneMesh.setColorAt(i, _color);
-      i += 1;
     }
-    droneMesh.count = i;
-    droneMesh.instanceMatrix.needsUpdate = true;
-    if (droneMesh.instanceColor) droneMesh.instanceColor.needsUpdate = true;
   }
 
   function ensureMissile(m) {
@@ -982,6 +1039,58 @@ const Render3D = (() => {
     }
   }
 
+  // Materiales que se apagan cuando la plataforma queda destruida —
+  // Chasis/Torreta (el cuerpo del vehículo) y EmisorHPM/AcentoEnergia
+  // (el panel que el dron kamikaze impactó, ver el mensaje de rechazo en
+  // src/models/hpm_weapon.py) — no Pista/Rueda/Detalle/Radar, que no
+  // tienen nada que ver con por qué dejó de funcionar.
+  const MATERIALES_DANIABLES = ["Chasis", "Torreta", "EmisorHPM", "AcentoEnergia"];
+  const COLOR_QUEMADO = 0x0d0b0a;
+
+  function setPlataformaDestruida(destruida) {
+    destruida = !!destruida;
+    if (destruida === plataformaDestruida) return;
+    const primeraVez = destruida && !plataformaDestruida;
+    plataformaDestruida = destruida;
+    aplicarEstadoDestruccionVehiculo();
+    if (primeraVez) {
+      spawnParticleBurst(
+        new THREE.Vector3(lastHpmOrigin.x, 8, lastHpmOrigin.z),
+        COLOR.neutralizadoBlink,
+      );
+    }
+  }
+
+  function aplicarEstadoDestruccionVehiculo() {
+    if (!vehiculoGroup) return;
+    vehiculoGroup.traverse((obj) => {
+      if (!obj.isMesh || !obj.material || !MATERIALES_DANIABLES.includes(obj.material.name)) return;
+      if (!coloresOriginalesVehiculo.has(obj.material.name)) {
+        coloresOriginalesVehiculo.set(obj.material.name, obj.material.color.clone());
+      }
+      if (plataformaDestruida) {
+        obj.material.color.setHex(COLOR_QUEMADO);
+      } else {
+        obj.material.color.copy(coloresOriginalesVehiculo.get(obj.material.name));
+      }
+    });
+  }
+
+  function verPlataforma() {
+    // A diferencia de resetCamera()/setDefaultView() (siempre miran al
+    // centro del mapa, donde nace el enjambre), esta apunta y acerca la
+    // cámara al vehículo lanzador — sin esto, el minDistance/target
+    // fijos al centro nunca dejan verlo de cerca cuando el arma está
+    // lejos del centro (caso por defecto: arma en la esquina del campo).
+    const dist = 45; // suficiente para ver el vehículo completo, no solo una pieza
+    camera.position.set(lastHpmOrigin.x + dist * 0.7, dist * 0.6, lastHpmOrigin.z + dist * 0.7);
+    camera.lookAt(lastHpmOrigin.x, 6, lastHpmOrigin.z);
+    if (controls) {
+      controls.target.set(lastHpmOrigin.x, 6, lastHpmOrigin.z);
+      controls.update();
+    }
+  }
+
   function resize() {
     if (!renderer || !canvas) return;
     const wrapper = canvas.parentElement;
@@ -1004,7 +1113,10 @@ const Render3D = (() => {
     renderer.render(scene, camera);
   }
 
-  return { init, updateSnapshot, setViewMode, resetCamera, resize, triggerCannonPulse, flashHits, setShowTracks, setWtaPlan };
+  return {
+    init, updateSnapshot, setViewMode, resetCamera, verPlataforma, resize,
+    triggerCannonPulse, flashHits, setShowTracks, setWtaPlan, setPlataformaDestruida,
+  };
 })();
 
 window.Render3D = Render3D;

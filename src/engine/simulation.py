@@ -69,6 +69,19 @@ class SimulationEngine:
     # en silencio la calibración de distancia/potencia ya hecha con el
     # enjambre estático.
     mision_activa: bool = False
+    # Kamikaze: el primer dron que llega al objetivo (ver mision_activa)
+    # inutiliza la plataforma (cañón Y lanzador de misiles — comparten
+    # vehículo) en vez de solo registrarse como "brecha" estadística.
+    # False (default) conserva el comportamiento de antes de este ítem —
+    # necesita mision_activa=True para poder disparar siquiera (sin
+    # misión nadie llega a ningún lado), pero es un flag APARTE, no
+    # implícito en mision_activa: los experimentos Monte Carlo/
+    # coevolución que ya usan con_mision=True (ver src/engine/
+    # experiments.py) miden fraccion_alcanzo_objetivo/probabilidad_brecha
+    # asumiendo que el arma sigue disparando el resto de la réplica
+    # después de una brecha — activar esto ahí cambiaría esos resultados
+    # en silencio. Solo la app en vivo (src/main.py) lo activa.
+    kamikaze_activo: bool = False
     estado: SimulationState = SimulationState.DETENIDA
     tiempo: float = 0.0
     tick: int = 0
@@ -257,6 +270,7 @@ class SimulationEngine:
                 self.swarm.formacion.value, self.swarm_size
             )
             self.hpm.disparos = 0
+            self.hpm.destruido = False
             self.missile_system.reset()
             self.jammer.detener()
             self.analytics.reset()
@@ -458,6 +472,27 @@ class SimulationEngine:
             "--- BRECHA — t=%.2fs --- %d dron(es) llegaron al objetivo: %s",
             self.tiempo, len(llegaron), [d.id for d in llegaron],
         )
+
+        # Kamikaze (ver kamikaze_activo): el PRIMER dron que llega ya
+        # inutiliza la plataforma — no hace falta que lleguen más para
+        # que "importe" (una vez destruida, sigue destruida hasta reset).
+        if self.kamikaze_activo and not self.hpm.destruido:
+            self.hpm.destruido = True
+            self.missile_system.destruido = True
+            self._log(
+                "plataforma_destruida",
+                {
+                    "drone_id": llegaron[0].id,
+                    "objetivo_x": self.swarm.objetivo_x,
+                    "objetivo_y": self.swarm.objetivo_y,
+                },
+            )
+            validacion_logger.warning(
+                "--- PLATAFORMA DESTRUIDA — t=%.2fs --- dron %s impactó en "
+                "modo kamikaze — cañón y lanzador de misiles fuera de "
+                "servicio hasta reiniciar la simulación",
+                self.tiempo, llegaron[0].id,
+            )
 
     def _sembrar_memoria_amenaza(
         self, eventos: list[dict], impacto_x: float, impacto_y: float

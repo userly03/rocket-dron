@@ -39,6 +39,7 @@
     viewIntro: document.getElementById("view-intro"),
     mapTitle: document.getElementById("map-title"),
     btnCameraTop: document.getElementById("btn-camera-top"),
+    btnCameraPlataforma: document.getElementById("btn-camera-plataforma"),
     toggleTracks: document.getElementById("toggle-tracks"),
     powerSlider: document.getElementById("power-slider"),
     powerValue: document.getElementById("power-value"),
@@ -139,6 +140,7 @@
     lastFireWallTime: null,
     processedLogKeys: new Set(),
     userAdjustingHpm: false,
+    plataformaDestruida: false,
     demoRunning: false,
     wtaPlan: null,
     expJobId: null,
@@ -643,6 +645,12 @@
         const plural = d.cantidad === 1 ? "dron llegó" : "drones llegaron";
         return { msg: `${Icon("alert")} BRECHA — ${d.cantidad} ${plural} al objetivo (drones: ${d.drones.join(", ")})`, type: "brecha" };
       }
+      case "plataforma_destruida":
+        // El estado visual (recolorear el vehículo) lo sincroniza
+        // applySnapshot desde snap.hpm.destruido, no este evento — así
+        // funciona también para un cliente que recién conecta después
+        // del impacto, que nunca ve este log (solo trae logs recientes).
+        return { msg: `${Icon("flame")} PLATAFORMA DESTRUIDA — dron ${d.drone_id} kamikaze — cañón y misil fuera de servicio`, type: "brecha" };
       default: return null;
     }
   }
@@ -655,6 +663,15 @@
       ui.powerValue.textContent = Math.round(state.hpm.potencia);
       ui.directionSlider.value = Math.round(state.hpm.direccion);
       ui.directionValue.textContent = Math.round(state.hpm.direccion);
+    }
+    // Sincronizado desde el snapshot (no solo desde el evento de log): un
+    // cliente que recién conecta o recarga la página después del impacto
+    // no vio "plataforma_destruida" en logs_recientes (solo trae lo
+    // reciente, no todo el historial) — sin esto se perdería el estado
+    // visual aunque snap.hpm.destruido siga siendo true.
+    if (snap.hpm && snap.hpm.destruido !== state.plataformaDestruida) {
+      state.plataformaDestruida = snap.hpm.destruido === true;
+      window.Render3D?.setPlataformaDestruida(state.plataformaDestruida);
     }
     if (snap.estado) { state.simEstado = snap.estado; updateSimBadge(snap.estado); }
     if (snap.tiempo !== undefined) state.simTime = snap.tiempo;
@@ -829,6 +846,7 @@
     ui.viewButtons.forEach((btn) => btn.addEventListener("click", () => setViewMode(btn.dataset.view)));
 
     ui.btnCameraTop.addEventListener("click", () => window.Render3D?.resetCamera());
+    ui.btnCameraPlataforma.addEventListener("click", () => window.Render3D?.verPlataforma());
     ui.toggleTracks.addEventListener("change", () => window.Render3D?.setShowTracks(ui.toggleTracks.checked));
 
     ui.speedButtons.forEach((btn) => {
@@ -903,10 +921,19 @@
     ui.btnFire.addEventListener("click", async () => {
       try {
         const body = { potencia: +ui.powerSlider.value, direccion: +ui.directionSlider.value };
-        await api("/api/fire", { method: "POST", body: JSON.stringify(body) });
-        state.lastFireWallTime = Date.now();
-        window.Render3D?.triggerCannonPulse(state.hpm.origen_x, state.hpm.origen_y);
-        addLog(`Cañón ${body.potencia}kW @ ${body.direccion}°`, "fire");
+        const r = await api("/api/fire", { method: "POST", body: JSON.stringify(body) });
+        // El backend devuelve 200 OK incluso cuando rechaza el disparo
+        // (energía/temperatura/plataforma destruida — ver HPMWeapon.
+        // disparar) — un 200 no significa "disparó", hay que mirar el
+        // mensaje. Sin este chequeo el log mentía "Cañón disparado"
+        // aunque el arma nunca hiciera nada.
+        if (r.message?.startsWith("Disparo rechazado")) {
+          addLog(r.message, "error");
+        } else {
+          state.lastFireWallTime = Date.now();
+          window.Render3D?.triggerCannonPulse(state.hpm.origen_x, state.hpm.origen_y);
+          addLog(`Cañón ${body.potencia}kW @ ${body.direccion}°`, "fire");
+        }
         wsClient?.requestStatus();
       } catch (e) { addLog(e.message, "error"); }
     });

@@ -38,6 +38,11 @@ class HPMissileSystem:
     misiles: list[HPMissile] = field(default_factory=list)
     municion_total: int = MISSILE_MUNITION_TOTAL
     municion_restante: int = MISSILE_MUNITION_TOTAL
+    # Kamikaze (ver SimulationEngine.kamikaze_activo): el lanzador comparte
+    # vehículo con el cañón HPM (mismo emplazamiento, ver HPM_ORIGIN_X/Y/Z
+    # en src/config.py) — si un dron kamikaze inutiliza la plataforma,
+    # ambos sistemas caen juntos, no solo el cañón.
+    destruido: bool = field(default=False, init=False)
     # RNG por instancia (P0-B): None conserva el generador global; se
     # propaga a cada ``HPMissile`` que ``lanzar()`` crea, para que una
     # réplica de experimento y la simulación interactiva no compartan
@@ -79,6 +84,11 @@ class HPMissileSystem:
         documentado como parte del alcance de P2-G, no un efecto colateral
         no declarado.
         """
+        if self.destruido:
+            return {
+                "success": False,
+                "message": "lanzador destruido — un dron kamikaze impactó la plataforma",
+            }
         if self.municion_restante <= 0:
             return {"success": False, "message": "Sin munición disponible"}
 
@@ -222,6 +232,7 @@ class HPMissileSystem:
                 1 for m in self.misiles if m.estado in (MissileEstado.LANZADO, MissileEstado.VOLANDO)
             ),
             "misiles": [m.to_dict() for m in self.misiles],
+            "destruido": self.destruido,
         }
 
     def get_munition(self) -> dict:
@@ -233,6 +244,7 @@ class HPMissileSystem:
     def reset(self) -> None:
         self.misiles.clear()
         self.municion_restante = self.municion_total
+        self.destruido = False
 
     def _estimar_distancia_objetivo(
         self,

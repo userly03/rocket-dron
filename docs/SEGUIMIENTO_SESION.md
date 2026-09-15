@@ -469,3 +469,60 @@ llegó al objetivo" en el resultado, coincidiendo exactamente con lo que
 devolvió la API; corrida con el checkbox apagado no mostró ese bloque y
 `con_mision: false`/campos `null` en la respuesta — consola sin errores
 en ambos casos.
+
+### 9.5 Kamikaze — el dron que llega inutiliza la plataforma de verdad — ✅ CERRADO
+
+Hasta acá "brecha" (9.4) era una marca estadística — el dron llegaba, se
+congelaba, no le pasaba nada al cañón. Pedido explícito: que llegar
+inutilice la plataforma de verdad, no solo se registre.
+
+`HPMWeapon.destruido`/`HPMissileSystem.destruido` (ambos `False` por
+defecto): el primer dron que llega al objetivo (ver
+`SimulationEngine._registrar_impactos_en_objetivo`) marca los dos, y se
+quedan así — no se "enfrían" solos como el presupuesto de energía/
+temperatura, necesitan `reset()`. `disparar()`/`lanzar()` rechazan por el
+mismo canal que ya usaban para energía/temperatura agotada (mensaje en
+`ultimo_rechazo`/`result["message"]`, sin excepción) — cero cambios en
+`fire()`/`launch_missile()` ni en las rutas.
+
+Gateado por `kamikaze_activo` (opt-in, `False` por defecto), **separado**
+de `mision_activa`/`con_mision`: los experimentos Monte Carlo/coevolución
+que ya usan `con_mision=True` miden `fraccion_alcanzo_objetivo`/
+`probabilidad_brecha` asumiendo que el arma sigue disparando el resto de
+la réplica después de una brecha — activar esto ahí cambiaría esos
+resultados en silencio. Solo la app en vivo (`src/main.py`) lo activa.
+Vehículo y lanzador comparten emplazamiento (mismo `HPM_ORIGIN_X/Y/Z`),
+así que un impacto los deja a los dos fuera de servicio, no solo el
+cañón.
+
+En el camino se encontró un bug real preexistente, no introducido por
+esto: el botón "DISPARAR CAÑÓN" nunca revisaba si el backend rechazaba
+el disparo (`/api/fire` devuelve 200 OK con un mensaje de rechazo, no un
+error HTTP — a propósito, el plan WTA depende de ese contrato) — el log
+siempre decía "Cañón disparado" aunque el arma no hubiera hecho nada. Con
+energía/temperatura era un descuido menor y transitorio; con "destruido"
+(permanente) se vuelve mucho más engañoso, así que se corrigió ahí
+mismo. El botón de misil no tenía este problema (esa ruta sí usa
+`HTTPException`).
+
+Frontend: el vehículo 3D se ennegrece (`Chasis`/`Torreta`/`EmisorHPM`/
+`AcentoEnergia` — no ruedas/radar, que no tienen que ver con el impacto)
+la primera vez que `snap.hpm.destruido` pasa a `true`, con un estallido
+de partículas. Sincronizado desde el SNAPSHOT, no solo desde el evento
+de log (`logs_recientes` solo trae lo reciente — un cliente que recién
+conecta después del impacto no vería el log, pero sí sigue viendo
+`snap.hpm.destruido`).
+
+6 tests nuevos (`tests/test_opfor.py::TestKamikaze`), 160 tests de todos
+los archivos que tocan `HPMWeapon`/`HPMissileSystem` sin regresiones.
+Verificado en vivo: reset+start real (no forzado a mano), la misión
+convergió y destruyó la plataforma a los t=45s — vehículo se puso negro
+en el mapa 3D, "DISPARAR CAÑÓN" y "LANZAR MISIL" mostraron el rechazo
+correcto en el log, reset por API lo reparó (`destruido: false` de
+nuevo). Hallazgo honesto sin corregir: con `kamikaze_activo` puesto, la
+demo en vivo pierde el arma de forma permanente de manera bastante
+confiable a los 45-90s de arrancar — es la misma convergencia rápida ya
+documentada en 9.1, ahora con una consecuencia irreversible en vez de
+solo estadística. No es un bug, es el ritmo real que da esta calibración
+combinado con esta característica nueva — mencionado acá por si en algún
+momento se quiere ajustar el ritmo del "primer combate" de la demo.

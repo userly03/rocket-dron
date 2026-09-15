@@ -9,7 +9,8 @@
     {
       "imports": {
         "three": "./js/vendor/three/three.module.js",
-        "three/addons/controls/OrbitControls.js": "./js/vendor/three/OrbitControls.js"
+        "three/addons/controls/OrbitControls.js": "./js/vendor/three/OrbitControls.js",
+        "three/addons/loaders/GLTFLoader.js": "./js/vendor/three/GLTFLoader.js"
       }
     }
   </script>
@@ -129,6 +130,7 @@
                 <button type="button" class="view-btn" data-view="physical" title="Superpone el mapa de calor de intensidad HPM sobre el terreno">Calor 3D</button>
               </div>
               <button type="button" id="btn-camera-top" class="btn-camera" title="Restablece la cámara a vista superior (podés arrastrar para rotar libremente)"><svg class="icon" aria-hidden="true"><use href="#i-camera"></use></svg> Vista superior</button>
+              <button type="button" id="btn-camera-plataforma" class="btn-camera" title="Acerca la cámara al vehículo lanzador (cañón + misil) — la vista superior siempre mira al centro del mapa, lejos de donde está el arma"><svg class="icon" aria-hidden="true"><use href="#i-camera"></use></svg> Ver plataforma</button>
               <label class="checkbox-label checkbox-track-toggle" title="Dibuja una línea entre la posición REAL de cada dron detectado y la posición ESTIMADA por el radar (con la que apunta el misil) — solo se muestra cuando la diferencia es apreciable">
                 <input type="checkbox" id="toggle-tracks"> <svg class="icon" aria-hidden="true"><use href="#i-radar"></use></svg> Mostrar tracks
               </label>
