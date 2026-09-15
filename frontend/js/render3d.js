@@ -39,7 +39,13 @@ const COLOR = {
   activoBlindado: 0x5bb3c7,
   riesgoLatente: 0xe0a23d,
   track: 0x6f93b0,
-  danado: 0xd9a53d,
+  // Tono propio, distinto del ámbar de riesgoLatente: un dron puede estar
+  // "dañado" (estado_salud persistente) Y en riesgo latente (transitorio,
+  // ver entrar_en_riesgo_latente en drone.py) al mismo tiempo — con casi
+  // el mismo hex que antes (0xd9a53d vs 0xe0a23d) el parpadeo ámbar de
+  // riesgo era invisible sobre el color base. Ver --status-damaged en
+  // style.css (mismo hex).
+  danado: 0x9c6b3e,
   neutralizado: 0x8f3a34,
   neutralizadoBlink: 0xe0574f,
   interferido: 0x9a7fd1,
@@ -148,6 +154,8 @@ const Render3D = (() => {
   const lightningBolts = []; // { line, start }
   let hpmConeMesh = null;
   let hpmOriginMesh = null;
+  let hpmMastMesh = null;
+  let hpmPadMesh = null;
   let radarRingMesh = null;
   let radarPingMesh = null;
   let trackLinesMesh = null;
@@ -263,10 +271,30 @@ const Render3D = (() => {
     hpmConeMesh.position.y = 0.8;
     scene.add(hpmConeMesh);
 
-    const originGeo = new THREE.SphereGeometry(6, 12, 12);
+    // Marcador del emplazamiento (cañón Y misil, comparten origen — ver
+    // MISSILE comparte HPM_ORIGIN_X/Y/Z en config.py): antes era solo una
+    // esfera de 6 unidades, casi invisible contra un campo de cientos de
+    // metros — no se entendía "de dónde sale" ni el cañón ni el misil.
+    // Ahora es un mástil (para que se ancle visualmente al piso, no
+    // flote) sobre una base circular tipo helipuerto — mismo azul de
+    // interfaz que ya usaba (hpmOrigin, "esto es nuestro sistema").
+    const originGeo = new THREE.SphereGeometry(11, 14, 14);
     const originMat = new THREE.MeshBasicMaterial({ color: COLOR.hpmOrigin });
     hpmOriginMesh = new THREE.Mesh(originGeo, originMat);
     scene.add(hpmOriginMesh);
+
+    const mastGeo = new THREE.CylinderGeometry(1.5, 2.2, 11, 10);
+    const mastMat = new THREE.MeshBasicMaterial({ color: COLOR.hpmOrigin, transparent: true, opacity: 0.8 });
+    hpmMastMesh = new THREE.Mesh(mastGeo, mastMat);
+    scene.add(hpmMastMesh);
+
+    const padGeo = new THREE.RingGeometry(16, 20, 32);
+    const padMat = new THREE.MeshBasicMaterial({
+      color: COLOR.hpmOrigin, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false,
+    });
+    hpmPadMesh = new THREE.Mesh(padGeo, padMat);
+    hpmPadMesh.rotation.x = -Math.PI / 2;
+    scene.add(hpmPadMesh);
 
     const radarGeo = new THREE.RingGeometry(RADAR_RANGE_M - 3, RADAR_RANGE_M, 64);
     const radarMat = new THREE.MeshBasicMaterial({
@@ -326,7 +354,9 @@ const Render3D = (() => {
   function updateHpmCone(hpm) {
     if (!hpm) return;
     const origin = worldToThree(field, hpm.origen_x ?? 0, hpm.origen_y ?? 0, 0.8);
-    hpmOriginMesh.position.set(origin.x, 6, origin.z);
+    hpmOriginMesh.position.set(origin.x, 11, origin.z);
+    if (hpmMastMesh) hpmMastMesh.position.set(origin.x, 5.5, origin.z);
+    if (hpmPadMesh) hpmPadMesh.position.set(origin.x, 0.4, origin.z);
     if (radarRingMesh) radarRingMesh.position.set(origin.x, 0.5, origin.z);
 
     const dirDeg = hpm.direccion ?? 0;
@@ -602,6 +632,13 @@ const Render3D = (() => {
       scene.add(mesh);
       obj = { mesh, trail: new TrailRibbon(scene), x: m.x, y: m.y };
       missileObjects.set(m.id, obj);
+      // Antes el misil solo "aparecía" ya en vuelo, sin ninguna marca de
+      // dónde salió — un estallido en su primera posición conocida (el
+      // lanzador, mismo origen que el cañón) da esa referencia visual,
+      // igual que ya se hace al neutralizar un dron o al llegar a la
+      // misión (spawnParticleBurst).
+      const launchPos = worldToThree(field, m.x, m.y, m.z ?? FALLBACK_MISSILE_ALTITUDE);
+      spawnParticleBurst(launchPos, COLOR.missile);
     }
     return obj;
   }

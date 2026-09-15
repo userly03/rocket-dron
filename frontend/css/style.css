@@ -29,6 +29,16 @@
   --status-track: #3fb8ae;  /* misil, radar, subsistema físico (antes "cyan") */
   --accent-orange: #d9772e; /* cañón / energía HPM */
   --accent-purple: #9a7fd1; /* recarga / interferido */
+  /* dañado (estructural, persistente) usaba el mismo --status-warn que
+     riesgo latente (transitorio, se superpone sobre el color base) —
+     mismo dron podía tener ambos a la vez y se veían idénticos. Tono
+     propio, fuera de la familia ámbar/naranja que ya ocupan riesgo,
+     brecha y el cañón. */
+  --status-damaged: #9c6b3e;
+  /* Coincide con COLOR.missile en render3d.js — el misil real en el mapa
+     3D es naranja-rojizo, no el turquesa de --status-track que usaba
+     antes la leyenda (la leyenda mentía sobre qué color buscar). */
+  --accent-missile: #d9573a;
   --font-mono: "Courier New", "Lucida Console", "Consolas", monospace;
   --panel-radius: 4px;
   --shadow-inset: inset 0 0 20px rgba(79, 143, 196, 0.03);
@@ -582,6 +592,8 @@ body {
 
 .map-legend {
   display: flex;
+  flex-wrap: wrap;
+  row-gap: 6px;
   gap: 14px;
   font-size: 0.75rem;
   color: var(--text-muted);
@@ -620,12 +632,12 @@ body {
 
 .dot-active { background: var(--status-good); box-shadow: 0 0 6px var(--status-good); }
 .dot-hardened { background: var(--status-track); box-shadow: 0 0 6px var(--status-track); }
-.dot-damaged { background: var(--status-warn); box-shadow: 0 0 6px var(--status-warn); }
+.dot-damaged { background: var(--status-damaged); box-shadow: 0 0 6px var(--status-damaged); }
 .dot-jammed { background: var(--accent-purple); box-shadow: 0 0 6px var(--accent-purple); }
 .dot-neutralized { background: var(--status-bad); box-shadow: 0 0 6px var(--status-bad); }
 .dot-brecha { background: var(--accent-orange); box-shadow: 0 0 6px var(--accent-orange); }
 .dot-undetected { background: var(--border-glow); box-shadow: none; }
-.dot-missile { background: var(--status-track); box-shadow: 0 0 6px var(--status-track); }
+.dot-missile { background: var(--accent-missile); box-shadow: 0 0 6px var(--accent-missile); }
 .dot-track { background: #6f93b0; box-shadow: 0 0 6px #6f93b0; }
 .checkbox-track-toggle {
   margin-left: 12px;

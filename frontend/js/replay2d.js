@@ -22,7 +22,10 @@
     bg: "#0a0d11",
     grid: "#1c232b",
     activo: "#4caf6e",
-    danado: "#d9a53d",
+    // Mismo hex que --status-damaged en style.css / COLOR.danado en
+    // render3d.js — antes coincidía casi exactamente con "riesgo" de acá
+    // abajo (0xd9a53d vs 0xe0a23d) y los dos se veían idénticos.
+    danado: "#9c6b3e",
     neutralizado: "#8f3a34",
     interferido: "#9a7fd1",
     riesgo: "#e0a23d",
