@@ -112,6 +112,7 @@
     coevoReplayPlay: document.getElementById("coevo-replay-play"),
     coevoReplaySlider: document.getElementById("coevo-replay-slider"),
     coevoReplayWait: document.getElementById("coevo-replay-wait"),
+    coevoConMision: document.getElementById("coevo-con-mision"),
     labRunsList: document.getElementById("lab-runs-list"),
     btnStart: document.getElementById("btn-start"),
     btnStop: document.getElementById("btn-stop"),
@@ -148,6 +149,7 @@
     mcRuns: [],
     coevoRunsLocal: [],
     expConMisionActual: false,
+    coevoConMisionActual: false,
   };
 
   let wsClient = null;
@@ -352,11 +354,23 @@
       frontera.length
         ? frontera.map((p) => `(${p[campo1]}, ${p[campo2]})`).join(" · ")
         : "sin puntos no-dominados";
+    // resultado.con_mision es la fuente de verdad de qué evolucionó esta
+    // corrida en particular (viene del backend, no del checkbox actual de
+    // la UI, que puede haber cambiado desde que se lanzó el job).
+    let bloqueMision = "";
+    if (resultado.con_mision) {
+      bloqueMision = `
+      <div style="margin-top:6px"><strong>También evolucionó contra la brecha:</strong>
+        arma — ${(armaF.fraccion_alcanzo_objetivo * 100).toFixed(1)}% del enjambre le llegó igual al objetivo;
+        defensa — ${(defF.fraccion_alcanzo_objetivo * 100).toFixed(1)}% de su enjambre llegó al objetivo
+      </div>`;
+    }
     ui.coevoResult.innerHTML = `
       <div><strong>Arma final:</strong> potencia=${armaF.potencia_kw}kW, apertura=${armaF.apertura_cono}°, duty_cycle=${armaF.duty_cycle}</div>
       <div><strong>Defensa final:</strong> formación=${defF.formacion}, cantidad=${defF.cantidad}</div>
       <div style="margin-top:6px">Frontera de Pareto arma (potencia_kw, fracción neutralizada):<br>${fmtFrontera(resultado.frontera_pareto_arma, "potencia_kw", "fraccion_neutralizada")}</div>
       <div style="margin-top:4px">Frontera de Pareto defensa (cantidad, supervivencia):<br>${fmtFrontera(resultado.frontera_pareto_defensa, "cantidad", "supervivencia")}</div>
+      ${bloqueMision}
     `;
     ui.coevoResult.classList.remove("hidden");
   }
@@ -1091,7 +1105,9 @@
           n_generaciones: +ui.coevoGeneraciones.value || 6,
           tam_poblacion: +ui.coevoPoblacion.value || 8,
           replicas_por_evaluacion: +ui.coevoReplicas.value || 4,
+          con_mision: ui.coevoConMision.checked,
         };
+        state.coevoConMisionActual = body.con_mision;
         const r = await api("/api/coevolucion/start", { method: "POST", body: JSON.stringify(body) });
         addLog(`Coevolución: job ${r.job_id} arrancado (${body.n_generaciones} generaciones)`, "info");
         trackCoevoRunLocal(r.job_id, body.n_generaciones);

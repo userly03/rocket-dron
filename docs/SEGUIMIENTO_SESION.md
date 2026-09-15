@@ -405,10 +405,67 @@ prueba explícitamente que resultados de ANTES de este ítem, sin los
 campos nuevos, no rompen `_summarize`). Verificado en vivo en el
 navegador con y sin el checkbox activado, consola limpia.
 
-**No incluido en este alcance** (una extensión futura, no lo que se
-pidió): que la coevolución (P3-B) evolucione TAMBIÉN contra
-`probabilidad_brecha` como un segundo objetivo del algoritmo genético,
-en vez de solo `fraccion_media`. Es una pregunta de diseño real (¿qué
-significa "ganar" para el arma: neutralizar más, o impedir más
-brechas?) que merece su propia decisión, no algo para agregar sin
-que se pida a propósito.
+### 9.4 Coevolución contra la brecha — ✅ CERRADO
+
+Pedido explícito del usuario ("que la coevolución evolucione también
+contra probabilidad_brecha"), la extensión que 9.3 dejó deliberadamente
+afuera hasta que se pidiera a propósito.
+
+`evaluar_enfrentamiento(...)` (la función que usan los ~10 tests
+existentes y los dos experimentos de control de una sola población) NO
+cambió ni de firma ni de comportamiento. La extensión vive en funciones
+nuevas y paralelas: `_evaluar_enfrentamiento_con_mision(...)` (devuelve
+`(fraccion_media, fraccion_alcanzo_objetivo)` del mismo lote de réplicas,
+sin costo extra de simulación) y `_fitness_arma`/`_fitness_defensa`, que
+con `con_mision=False` devuelven la señal cruda de siempre (byte a byte
+igual que antes) y con `con_mision=True` promedian 50/50 con la señal de
+misión: el arma contra "impidió la brecha" (`1 - fraccion_alcanzo`), la
+defensa contra "llegó" (`fraccion_alcanzo`).
+
+Por qué 50/50 y no otro peso: no hay evidencia para preferir un término
+sobre el otro — neutralizar más no es lo mismo que impedir que lleguen
+(un arma lenta puede neutralizar bastante y aun así dejar pasar al
+resto) — y pesarlos distinto sin medir algo sería inventar un número,
+lo mismo que este proyecto evita en el resto de sus constantes.
+
+La frontera de Pareto (`puntos_arma`/`puntos_defensa`, y por lo tanto
+`frontera_pareto_arma`/`frontera_pareto_defensa` en el JSON) sigue
+guardando SIEMPRE `fraccion_media`/`supervivencia` crudas, nunca el
+fitness combinado — para que esas etiquetas del JSON sigan significando
+lo que dicen, con o sin misión. El fitness combinado gobierna selección
+y reproducción del GA, pero no lo que se reporta como "fracción
+neutralizada" o "supervivencia".
+
+Hallazgo geométrico observado y NO corregido a propósito: con formaciones
+grandes (P3-B usa `DISTANCIA_COMBATE_M=60m`, formaciones de 20-37+ drones
+con 30m de espaciado pueden abarcar 180m+ de lado), algunos drones nacen
+ya casi sobre el objetivo — se vieron brechas a `t=0.00s` en pruebas de
+humo. No se tocó `DISTANCIA_COMBATE_M` ni la geometría de spawn para
+"arreglarlo": cambiar esa constante invalidaría en silencio toda la
+calibración previa de P1-A/P3-B y el barrido de potencia del depredador.
+Queda documentado como una característica real del modelo a esa
+distancia de combate, no como un bug.
+
+Wiring end-to-end: `ExperimentConfig.con_mision` → `coevolucionar(...,
+con_mision=...)` → `iniciar_job(..., con_mision=...)` (job en background,
+incluida la réplica de muestra campeón-vs-campeón, que ahora también
+respeta la bandera) → `POST /api/coevolucion/start` (`con_mision`,
+apagado por defecto) → checkbox nuevo en el panel de Laboratorio
+("Evolucionar también contra la brecha"). `resumen_json` expone
+`fraccion_alcanzo_objetivo` en `mejor_arma_final`/`mejor_defensa_final` y
+las series `fraccion_alcanzo_arma_por_generacion`/`..._defensa_...` —
+`None` (no `0`) cuando `con_mision=False`, para no leer "el mejor arma
+encontrada no impidió ninguna brecha" cuando en realidad la corrida ni
+siquiera midió eso.
+
+14 tests nuevos en `test_coevolution.py` (fórmulas de fitness en
+aislado, `_evaluar_enfrentamiento_con_mision`, reproducibilidad byte a
+byte con `con_mision=True`, `con_mision=False` idéntico al comportamiento
+de antes de este ítem, y dos tests end-to-end contra el endpoint del
+job). Suite completa sin regresiones. Verificado en vivo en el
+navegador: corrida con el checkbox activado mostró "arma — 8.6% del
+enjambre le llegó igual al objetivo; defensa — 13.8% de su enjambre
+llegó al objetivo" en el resultado, coincidiendo exactamente con lo que
+devolvió la API; corrida con el checkbox apagado no mostró ese bloque y
+`con_mision: false`/campos `null` en la respuesta — consola sin errores
+en ambos casos.

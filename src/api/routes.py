@@ -514,6 +514,15 @@ class CoevolucionStartRequest(BaseModel):
     replicas_por_evaluacion: int = Field(default=4, ge=1, le=MAX_REPLICAS)
     t_max_s: float = Field(default=6.0, ge=1.0, le=MAX_T_MAX_S)
     seed: int = Field(default=2026)
+    con_mision: bool = Field(
+        default=False,
+        description=(
+            "El arma también evoluciona contra impedir la brecha, y el enjambre "
+            "también evoluciona contra llegar al objetivo — no solo neutralizar/"
+            "sobrevivir. Apagado por defecto: no cambia el fitness de ninguna "
+            "corrida existente."
+        ),
+    )
 
 
 @router.post("/coevolucion/start")
@@ -537,6 +546,7 @@ def start_coevolucion(body: CoevolucionStartRequest) -> dict:
         replicas_por_evaluacion=body.replicas_por_evaluacion,
         t_max_s=body.t_max_s,
         seed=body.seed,
+        con_mision=body.con_mision,
     )
     return {"job_id": job_id}
 

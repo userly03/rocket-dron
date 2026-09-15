@@ -413,6 +413,9 @@
           <label>Réplicas <input type="number" id="coevo-replicas" value="4" min="1" max="10" step="1"></label>
           <button type="button" id="btn-coevo-start" class="btn btn-reset"><svg class="icon" aria-hidden="true"><use href="#i-dna"></use></svg> CORRER COEVOLUCIÓN</button>
         </div>
+        <div class="lab-controls">
+          <label class="lab-checkbox" title="El arma también evoluciona contra impedir que el enjambre llegue al objetivo, y el enjambre también evoluciona contra llegar — no solo neutralizar/sobrevivir. Apagado por defecto: no cambia el fitness de ninguna corrida existente."><input type="checkbox" id="coevo-con-mision"> Evolucionar también contra la brecha (no solo neutralizar/sobrevivir)</label>
+        </div>
         <div id="coevo-progress" class="lab-result hidden">
           <div id="coevo-status-line"></div>
           <div id="coevo-gen-bars" class="lab-bars"></div>

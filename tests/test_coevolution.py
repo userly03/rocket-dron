@@ -33,7 +33,10 @@ from src.engine.coevolution import (
     GenomaDefensa,
     ResultadoCoevolucion,
     _cruzar_arma,
+    _evaluar_enfrentamiento_con_mision,
     _evolucionar_poblacion,
+    _fitness_arma,
+    _fitness_defensa,
     _mutar_arma,
     _origen_combate,
     _rumbo_al_centro_del_campo,
@@ -449,3 +452,192 @@ class TestJobDeCoevolucionEnBackground:
             assert client.post("/api/coevolucion/start", json={"n_generaciones": 999}).status_code == 422
             assert client.post("/api/coevolucion/start", json={"tam_poblacion": 1}).status_code == 422
             assert client.post("/api/coevolucion/start", json={"t_max_s": 1000}).status_code == 422
+
+
+class TestFitnessArmaYDefensaEnAislado:
+    """``_fitness_arma``/``_fitness_defensa`` son funciones puras (sin
+    simulación) — se prueban directo contra la fórmula documentada, sin
+    pasar por Monte Carlo, misma disciplina que ``TestFronteraPareto``."""
+
+    def test_fitness_arma_sin_mision_es_la_fraccion_cruda(self):
+        # con_mision=False debe devolver EXACTAMENTE fraccion_media, sin
+        # mezclar con fraccion_alcanzo — así el modo por defecto queda
+        # byte a byte igual que antes de que existiera esta opción, sin
+        # importar qué venga en fraccion_alcanzo.
+        assert _fitness_arma(0.42, 0.0, con_mision=False) == 0.42
+        assert _fitness_arma(0.42, 0.99, con_mision=False) == 0.42
+
+    def test_fitness_defensa_sin_mision_es_supervivencia_cruda(self):
+        assert _fitness_defensa(0.3, 0.0, con_mision=False) == pytest.approx(0.7)
+        assert _fitness_defensa(0.3, 0.87, con_mision=False) == pytest.approx(0.7)
+
+    def test_fitness_arma_con_mision_es_promedio_simple_con_impedir_brecha(self):
+        # fraccion_media=0.4, fraccion_alcanzo=0.2 -> impidio_brecha=0.8
+        # promedio = 0.5*0.4 + 0.5*0.8 = 0.6
+        assert _fitness_arma(0.4, 0.2, con_mision=True) == pytest.approx(0.6)
+
+    def test_fitness_defensa_con_mision_es_promedio_simple_con_llegar(self):
+        # supervivencia = 1 - 0.4 = 0.6, fraccion_alcanzo=0.2
+        # promedio = 0.5*0.6 + 0.5*0.2 = 0.4
+        assert _fitness_defensa(0.4, 0.2, con_mision=True) == pytest.approx(0.4)
+
+    def test_con_mision_arma_mejora_si_impide_mas_la_brecha_a_igual_neutralizacion(self):
+        peor = _fitness_arma(0.5, 0.9, con_mision=True)  # casi todos llegan
+        mejor = _fitness_arma(0.5, 0.1, con_mision=True)  # casi nadie llega
+        assert mejor > peor
+
+    def test_con_mision_defensa_mejora_si_llega_mas_a_igual_supervivencia(self):
+        peor = _fitness_defensa(0.5, 0.1, con_mision=True)  # casi nadie llega
+        mejor = _fitness_defensa(0.5, 0.9, con_mision=True)  # casi todos llegan
+        assert mejor > peor
+
+
+class TestEvaluarEnfrentamientoConMision:
+    def test_sin_con_mision_la_fraccion_que_llego_es_siempre_cero(self):
+        # Sin con_mision, ExperimentConfig nunca fija objetivo_x/y (ver
+        # run_replica) — ningún dron puede tener objetivo_alcanzado=True,
+        # así que fraccion_alcanzo debe ser 0.0 sin excepción.
+        arma = GenomaArma(potencia_kw=60.0, apertura_cono=15.0, duty_cycle=0.05)
+        defensa = GenomaDefensa(formacion_idx=FORMACIONES.index("cuadrada"), cantidad=15)
+        _fm, fa = _evaluar_enfrentamiento_con_mision(
+            arma, defensa, replicas=3, t_max_s=6.0, semilla=17, con_mision=False
+        )
+        assert fa == 0.0
+
+    def test_con_mision_devuelve_una_fraccion_alcanzo_valida(self):
+        arma = GenomaArma(potencia_kw=10.0, apertura_cono=15.0, duty_cycle=0.05)
+        defensa = GenomaDefensa(formacion_idx=FORMACIONES.index("cuadrada"), cantidad=15)
+        fm, fa = _evaluar_enfrentamiento_con_mision(
+            arma, defensa, replicas=3, t_max_s=6.0, semilla=17, con_mision=True
+        )
+        assert 0.0 <= fm <= 1.0
+        assert 0.0 <= fa <= 1.0
+
+
+class TestCoevolucionConMision:
+    """Extensión pedida explícitamente por el usuario: que la coevolución
+    también evolucione contra ``probabilidad_brecha`` (fraccion_alcanzo del
+    campeón), no solo contra la fracción neutralizada/supervivencia."""
+
+    PARAMS = dict(n_generaciones=2, tam_poblacion=4, replicas_por_evaluacion=2, t_max_s=5.0, seed=321)
+
+    def test_sin_con_mision_las_series_de_brecha_quedan_en_cero(self):
+        r = coevolucionar(**self.PARAMS, con_mision=False)
+        assert r.con_mision is False
+        assert r.fraccion_alcanzo_arma_por_generacion == [0.0, 0.0]
+        assert r.fraccion_alcanzo_defensa_por_generacion == [0.0, 0.0]
+
+    def test_sin_con_mision_default_y_explicito_false_dan_resultado_identico(self):
+        # con_mision=False debe ser byte a byte igual al comportamiento de
+        # antes de este ítem, con o sin pasar el parámetro explícito.
+        r_default = coevolucionar(**self.PARAMS)
+        r_explicito = coevolucionar(**self.PARAMS, con_mision=False)
+        assert resumen_json(r_default) == resumen_json(r_explicito)
+
+    def test_con_mision_true_puebla_las_series_de_brecha_y_es_reproducible(self):
+        r1 = coevolucionar(**self.PARAMS, con_mision=True)
+        r2 = coevolucionar(**self.PARAMS, con_mision=True)
+        assert r1.con_mision is True
+        assert len(r1.fraccion_alcanzo_arma_por_generacion) == 2
+        assert len(r1.fraccion_alcanzo_defensa_por_generacion) == 2
+        for f in r1.fraccion_alcanzo_arma_por_generacion + r1.fraccion_alcanzo_defensa_por_generacion:
+            assert 0.0 <= f <= 1.0
+        # misma semilla, mismo resultado byte a byte — mismo criterio que
+        # TestReproducibilidad, ahora también con la misión activa.
+        assert resumen_json(r1) == resumen_json(r2)
+
+    def test_con_mision_true_el_fitness_del_campeon_es_el_promedio_documentado(self):
+        r = coevolucionar(**self.PARAMS, con_mision=True)
+        for gen_idx in range(r.generaciones):
+            fa_arma = r.fraccion_alcanzo_arma_por_generacion[gen_idx]
+            fitness_arma = r.fitness_arma_por_generacion[gen_idx]
+            # El fitness del campeón de arma es <= 1.0 y consistente con un
+            # promedio 50/50 entre neutralizar y evitar la brecha: no puede
+            # superar el máximo de las dos señales que promedia.
+            assert 0.0 <= fitness_arma <= 1.0
+
+    def test_resumen_json_expone_fraccion_alcanzo_objetivo_solo_con_mision(self):
+        sin = resumen_json(coevolucionar(**self.PARAMS, con_mision=False))
+        con = resumen_json(coevolucionar(**self.PARAMS, con_mision=True))
+
+        assert sin["con_mision"] is False
+        assert sin["fraccion_alcanzo_arma_por_generacion"] is None
+        assert sin["fraccion_alcanzo_defensa_por_generacion"] is None
+        assert sin["mejor_arma_final"]["fraccion_alcanzo_objetivo"] is None
+        assert sin["mejor_defensa_final"]["fraccion_alcanzo_objetivo"] is None
+
+        assert con["con_mision"] is True
+        assert len(con["fraccion_alcanzo_arma_por_generacion"]) == 2
+        assert len(con["fraccion_alcanzo_defensa_por_generacion"]) == 2
+        assert con["mejor_arma_final"]["fraccion_alcanzo_objetivo"] is not None
+        assert con["mejor_defensa_final"]["fraccion_alcanzo_objetivo"] is not None
+
+    def test_con_mision_no_cambia_el_significado_de_la_frontera_pareto(self):
+        # puntos_arma/puntos_defensa (y por lo tanto frontera_pareto_arma/
+        # defensa en el JSON) siempre guardan fraccion_media/supervivencia
+        # CRUDAS, nunca el fitness combinado — para que las etiquetas
+        # "fraccion_neutralizada"/"supervivencia" del JSON sigan siendo
+        # ciertas también con con_mision=True.
+        r = coevolucionar(**self.PARAMS, con_mision=True)
+        for punto in r.puntos_arma:
+            _potencia, fraccion = punto
+            assert 0.0 <= fraccion <= 1.0
+        for punto in r.puntos_defensa:
+            _cantidad, supervivencia = punto
+            assert 0.0 <= supervivencia <= 1.0
+
+
+class TestJobDeCoevolucionConMision:
+    """Extremo a extremo: el body ``con_mision`` de POST /start debe llegar
+    hasta ``coevolucionar`` y quedar reflejado en el resultado — mismo
+    patrón que ``TestJobDeCoevolucionEnBackground``."""
+
+    def test_con_mision_en_el_body_llega_al_resultado_y_a_los_parametros(self):
+        import time
+
+        from fastapi.testclient import TestClient
+
+        from src.main import app
+
+        params = {
+            "n_generaciones": 2, "tam_poblacion": 3, "replicas_por_evaluacion": 1,
+            "t_max_s": 3.0, "seed": 55, "con_mision": True,
+        }
+        with TestClient(app) as client:
+            job_id = client.post("/api/coevolucion/start", json=params).json()["job_id"]
+
+            limite = time.monotonic() + 60
+            d = None
+            while time.monotonic() < limite:
+                d = client.get(f"/api/coevolucion/status/{job_id}").json()
+                if d["estado"] != "ejecutando":
+                    break
+                time.sleep(0.5)
+            assert d is not None and d["estado"] == "completado"
+            assert d["resultado"]["con_mision"] is True
+            assert d["resultado"]["fraccion_alcanzo_arma_por_generacion"] is not None
+
+    def test_sin_con_mision_en_el_body_el_default_es_false(self):
+        import time
+
+        from fastapi.testclient import TestClient
+
+        from src.main import app
+
+        params = {
+            "n_generaciones": 2, "tam_poblacion": 3, "replicas_por_evaluacion": 1,
+            "t_max_s": 3.0, "seed": 56,
+        }
+        with TestClient(app) as client:
+            job_id = client.post("/api/coevolucion/start", json=params).json()["job_id"]
+
+            limite = time.monotonic() + 60
+            d = None
+            while time.monotonic() < limite:
+                d = client.get(f"/api/coevolucion/status/{job_id}").json()
+                if d["estado"] != "ejecutando":
+                    break
+                time.sleep(0.5)
+            assert d is not None and d["estado"] == "completado"
+            assert d["resultado"]["con_mision"] is False
+            assert d["resultado"]["fraccion_alcanzo_arma_por_generacion"] is None

@@ -243,7 +243,14 @@ def evaluar_enfrentamiento(
     """
     Fracción media neutralizada si ``arma`` dispara contra un enjambre
     configurado según ``defensa`` — el número que gobierna el fitness de
-    AMBAS poblaciones (``fitness_arma = esto``, ``fitness_defensa = 1 - esto``).
+    AMBAS poblaciones (``fitness_arma = esto``, ``fitness_defensa = 1 - esto``)
+    cuando la misión ofensiva está apagada (el caso de siempre hasta este
+    punto). Firma sin tocar a propósito — la usan ``evolucionar_arma_contra_
+    defensa_fija``/``evolucionar_defensa_contra_arma_fija`` (controles
+    experimentales que aíslan el mecanismo del GA) y ~10 tests existentes;
+    ver ``_evaluar_enfrentamiento_con_mision`` para la versión que también
+    mide si el enjambre llegó al objetivo, usada solo dentro de
+    ``coevolucionar``.
     """
     cfg = ExperimentConfig(
         formacion=defensa.formacion,
@@ -254,6 +261,71 @@ def evaluar_enfrentamiento(
         arma=arma.a_weapon_policy(),
     )
     return _fraccion_media(cfg)
+
+
+def _evaluar_enfrentamiento_con_mision(
+    arma: GenomaArma,
+    defensa: GenomaDefensa,
+    replicas: int,
+    t_max_s: float,
+    semilla: int,
+    con_mision: bool,
+) -> tuple[float, float]:
+    """
+    Como ``evaluar_enfrentamiento``, pero devuelve ``(fraccion_media,
+    fraccion_alcanzo_objetivo)`` — ambas del MISMO conjunto de réplicas,
+    sin costo extra de simulación. ``fraccion_alcanzo_objetivo`` es 0.0
+    si ``con_mision=False`` (sin objetivo, ningún dron puede tener
+    ``objetivo_alcanzado`` — ver ``run_replica``).
+    """
+    cfg = ExperimentConfig(
+        formacion=defensa.formacion,
+        cantidad=int(round(defensa.cantidad)),
+        replicas=replicas,
+        t_max_s=t_max_s,
+        semilla=semilla,
+        arma=arma.a_weapon_policy(),
+        con_mision=con_mision,
+    )
+    resultados = [run_replica(cfg, i) for i in range(cfg.replicas)]
+    fraccion_media = float(np.mean([r["fraccion"] for r in resultados]))
+    fraccion_alcanzo = float(np.mean([r["fraccion_alcanzo_objetivo"] for r in resultados]))
+    return fraccion_media, fraccion_alcanzo
+
+
+def _fitness_arma(fraccion_media: float, fraccion_alcanzo: float, con_mision: bool) -> float:
+    """
+    Cuánto le conviene este genoma al ARMA. Sin misión (el default):
+    ``fraccion_media`` sola, byte a byte igual que antes de este ítem —
+    ver ``con_mision=False`` en ``coevolucionar``. Con misión: promedio
+    simple con "impidió la brecha" (``1 - fraccion_alcanzo``).
+
+    Por qué promedio simple y no un peso distinto para cada término: no
+    hay evidencia para preferir uno sobre el otro — neutralizar más no es
+    lo mismo que impedir que lleguen (un arma lenta puede neutralizar
+    bastante y aun así dejar pasar al resto), y esta característica
+    existe precisamente porque esas dos cosas pueden divergir. Pesarlas
+    distinto sin una razón medida sería inventar un número, lo mismo que
+    este proyecto evita en el resto de sus constantes.
+    """
+    if not con_mision:
+        return fraccion_media
+    return 0.5 * fraccion_media + 0.5 * (1.0 - fraccion_alcanzo)
+
+
+def _fitness_defensa(fraccion_media: float, fraccion_alcanzo: float, con_mision: bool) -> float:
+    """
+    Cuánto le conviene este genoma a la DEFENSA/enjambre. Sin misión:
+    supervivencia sola (``1 - fraccion_media``), igual que antes. Con
+    misión: promedio simple con "llegó al objetivo" — sobrevivir y
+    cumplir la misión son dos formas distintas de que el ataque
+    "funcione"; ninguna alcanza sola (ver ``_fitness_arma`` para el
+    mismo razonamiento del lado del arma).
+    """
+    supervivencia = 1.0 - fraccion_media
+    if not con_mision:
+        return supervivencia
+    return 0.5 * supervivencia + 0.5 * fraccion_alcanzo
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -500,8 +572,19 @@ class ResultadoCoevolucion:
     # a esta escala de letalidad y no es un buen indicador de tendencia.
     fitness_arma_media_por_generacion: list[float] = field(default_factory=list)
     fitness_defensa_media_por_generacion: list[float] = field(default_factory=list)
-    puntos_arma: list[tuple[float, float]] = field(default_factory=list)  # (potencia, fraccion)
-    puntos_defensa: list[tuple[float, float]] = field(default_factory=list)  # (cantidad, supervivencia)
+    puntos_arma: list[tuple[float, float]] = field(default_factory=list)  # (potencia, fraccion) — SIEMPRE fraccion_media cruda, no el fitness combinado (ver coevolucionar)
+    puntos_defensa: list[tuple[float, float]] = field(default_factory=list)  # (cantidad, supervivencia) — ídem
+    # Misión ofensiva (P3-B + P2-E/misión, ver ExperimentConfig.con_mision):
+    # False (default) deja fitness_arma/fitness_defensa EXACTAMENTE como
+    # antes de este ítem — fraccion_media/supervivencia sin mezclar con
+    # nada. Con con_mision=True, esas dos series pasan a ser el promedio
+    # con la señal de brecha (ver _fitness_arma/_fitness_defensa); estas
+    # dos series nuevas guardan la fraccion_alcanzo_objetivo CRUDA del
+    # enfrentamiento del campeón, para poder reportarla sin ambigüedad
+    # (0.0 en todas las generaciones si con_mision=False).
+    con_mision: bool = False
+    fraccion_alcanzo_arma_por_generacion: list[float] = field(default_factory=list)
+    fraccion_alcanzo_defensa_por_generacion: list[float] = field(default_factory=list)
 
     def frontera_arma(self) -> list[tuple[float, float]]:
         return frontera_pareto(self.puntos_arma)
@@ -518,6 +601,7 @@ def coevolucionar(
     cantidad_defensa_base: int = 20,
     seed: int = 2026,
     on_generacion: Callable[[int, ResultadoCoevolucion], None] | None = None,
+    con_mision: bool = False,
 ) -> ResultadoCoevolucion:
     """
     Corre ``n_generaciones`` de coevolución. Cada generación evalúa TODOS
@@ -538,6 +622,13 @@ def coevolucionar(
     (P3-B no tiene forma de correr "rápido": una corrida de varios minutos
     necesita poder mostrar avance, no solo el resultado final). No cambia
     nada de la lógica determinista del algoritmo.
+
+    ``con_mision`` (False por defecto): además de neutralizar, el arma
+    también evoluciona contra impedir que el enjambre llegue al objetivo,
+    y el enjambre también evoluciona contra llegar — ver ``_fitness_arma``/
+    ``_fitness_defensa`` para el porqué del promedio simple entre las dos
+    señales. Apagado, esto es byte a byte lo mismo que antes de que
+    existiera esta opción.
     """
     gen = nuevo_generador(seed)
 
@@ -562,30 +653,41 @@ def coevolucionar(
     campeon_arma = GenomaArma(potencia_kw=60.0, apertura_cono=15.0, duty_cycle=0.05)
     campeon_defensa = GenomaDefensa(formacion_idx=FORMACIONES.index("cuadrada"), cantidad=cantidad_defensa_base)
 
-    resultado = ResultadoCoevolucion(generaciones=n_generaciones)
+    resultado = ResultadoCoevolucion(generaciones=n_generaciones, con_mision=con_mision)
 
     for generacion in range(n_generaciones):
         semilla_generacion = seed + 1000 * (generacion + 1)
 
-        fitness_arma = [
-            evaluar_enfrentamiento(
+        # (fraccion_media, fraccion_alcanzo) crudas por individuo — la
+        # fuente de verdad. fitness_* es lo que gobierna selección/
+        # reproducción (_fitness_arma/_fitness_defensa combinan ambas
+        # señales solo si con_mision=True).
+        crudos_arma = [
+            _evaluar_enfrentamiento_con_mision(
                 individuo, campeon_defensa, replicas_por_evaluacion, t_max_s,
-                semilla_generacion + i * replicas_por_evaluacion,
+                semilla_generacion + i * replicas_por_evaluacion, con_mision,
             )
             for i, individuo in enumerate(poblacion_arma)
         ]
-        fitness_defensa = [
-            1.0 - evaluar_enfrentamiento(
+        crudos_defensa = [
+            _evaluar_enfrentamiento_con_mision(
                 campeon_arma, individuo, replicas_por_evaluacion, t_max_s,
-                semilla_generacion + 500 + i * replicas_por_evaluacion,
+                semilla_generacion + 500 + i * replicas_por_evaluacion, con_mision,
             )
             for i, individuo in enumerate(poblacion_defensa)
         ]
+        fitness_arma = [_fitness_arma(fm, fa, con_mision) for fm, fa in crudos_arma]
+        fitness_defensa = [_fitness_defensa(fm, fa, con_mision) for fm, fa in crudos_defensa]
 
-        for individuo, f in zip(poblacion_arma, fitness_arma):
-            resultado.puntos_arma.append((individuo.potencia_kw, f))
-        for individuo, f in zip(poblacion_defensa, fitness_defensa):
-            resultado.puntos_defensa.append((individuo.cantidad, f))
+        # puntos_arma/puntos_defensa (la frontera de Pareto) siguen siendo
+        # SIEMPRE fraccion_media/supervivencia crudas, no el fitness
+        # combinado — para que "fraccion_neutralizada"/"supervivencia" en
+        # el JSON de salida sigan significando lo que dicen que significan,
+        # con o sin misión.
+        for individuo, (fm, _fa) in zip(poblacion_arma, crudos_arma):
+            resultado.puntos_arma.append((individuo.potencia_kw, fm))
+        for individuo, (fm, _fa) in zip(poblacion_defensa, crudos_defensa):
+            resultado.puntos_defensa.append((individuo.cantidad, 1.0 - fm))
 
         mejor_idx_arma = int(np.argmax(fitness_arma))
         mejor_idx_defensa = int(np.argmax(fitness_defensa))
@@ -598,6 +700,8 @@ def coevolucionar(
         resultado.fitness_defensa_media_por_generacion.append(float(np.mean(fitness_defensa)))
         resultado.fitness_arma_por_generacion.append(fitness_arma[mejor_idx_arma])
         resultado.fitness_defensa_por_generacion.append(fitness_defensa[mejor_idx_defensa])
+        resultado.fraccion_alcanzo_arma_por_generacion.append(crudos_arma[mejor_idx_arma][1])
+        resultado.fraccion_alcanzo_defensa_por_generacion.append(crudos_defensa[mejor_idx_defensa][1])
 
         poblacion_arma = _evolucionar_poblacion(
             poblacion_arma, fitness_arma, gen, _cruzar_arma, _mutar_arma, GenomaArma.aleatorio
@@ -627,10 +731,18 @@ def resumen_json(resultado: ResultadoCoevolucion) -> dict[str, Any]:
             "potencia_kw": round(resultado.mejor_arma_por_generacion[-1].potencia_kw, 2),
             "apertura_cono": round(resultado.mejor_arma_por_generacion[-1].apertura_cono, 2),
             "duty_cycle": round(resultado.mejor_arma_por_generacion[-1].duty_cycle, 4),
+            "fraccion_alcanzo_objetivo": (
+                round(resultado.fraccion_alcanzo_arma_por_generacion[-1], 4)
+                if resultado.con_mision and resultado.fraccion_alcanzo_arma_por_generacion else None
+            ),
         } if resultado.mejor_arma_por_generacion else None,
         "mejor_defensa_final": {
             "formacion": resultado.mejor_defensa_por_generacion[-1].formacion,
             "cantidad": int(round(resultado.mejor_defensa_por_generacion[-1].cantidad)),
+            "fraccion_alcanzo_objetivo": (
+                round(resultado.fraccion_alcanzo_defensa_por_generacion[-1], 4)
+                if resultado.con_mision and resultado.fraccion_alcanzo_defensa_por_generacion else None
+            ),
         } if resultado.mejor_defensa_por_generacion else None,
         "frontera_pareto_arma": [
             {"potencia_kw": round(c, 2), "fraccion_neutralizada": round(v, 4)}
@@ -640,4 +752,19 @@ def resumen_json(resultado: ResultadoCoevolucion) -> dict[str, Any]:
             {"cantidad": round(c, 2), "supervivencia": round(v, 4)}
             for c, v in resultado.frontera_defensa()
         ],
+        # Misión ofensiva (ExperimentConfig.con_mision, ver el commit que la
+        # introdujo): None/ausente si estaba apagada durante esta corrida —
+        # a diferencia del resto de los campos de acá, que siempre están
+        # presentes con 0, acá se prefiere None a un 0 engañoso: un 0
+        # podría leerse como "el mejor arma encontrada NO impidió ninguna
+        # brecha" en vez de "esta corrida ni siquiera midió eso".
+        "con_mision": resultado.con_mision,
+        "fraccion_alcanzo_arma_por_generacion": (
+            [round(f, 4) for f in resultado.fraccion_alcanzo_arma_por_generacion]
+            if resultado.con_mision else None
+        ),
+        "fraccion_alcanzo_defensa_por_generacion": (
+            [round(f, 4) for f in resultado.fraccion_alcanzo_defensa_por_generacion]
+            if resultado.con_mision else None
+        ),
     }

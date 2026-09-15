@@ -49,6 +49,7 @@ def iniciar_job(
     replicas_por_evaluacion: int,
     t_max_s: float,
     seed: int,
+    con_mision: bool = False,
 ) -> str:
     """Crea un job, lanza el hilo que lo corre, y devuelve su id de
     inmediato — no espera a que termine ni una sola generación."""
@@ -63,6 +64,7 @@ def iniciar_job(
                 "replicas_por_evaluacion": replicas_por_evaluacion,
                 "t_max_s": t_max_s,
                 "seed": seed,
+                "con_mision": con_mision,
             },
             "progreso": [],
             "resultado": None,
@@ -97,6 +99,7 @@ def iniciar_job(
                 t_max_s=t_max_s,
                 seed=seed,
                 on_generacion=_on_generacion,
+                con_mision=con_mision,
             )
             with _lock:
                 job = _jobs.get(job_id)
@@ -121,6 +124,11 @@ def iniciar_job(
                         t_max_s=t_max_s,
                         semilla=seed,
                         arma=campeon_arma.a_weapon_policy(),
+                        # Misma bandera que la corrida — si evolucionó
+                        # contra la brecha, la réplica que lo muestra
+                        # también debería mostrar al enjambre avanzando,
+                        # no patrullando.
+                        con_mision=con_mision,
                     )
                     frames: list[dict[str, Any]] = []
                     run_replica(cfg_preview, 0, frames_out=frames)
