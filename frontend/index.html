@@ -384,6 +384,7 @@
           <label>Réplicas <input type="number" id="exp-replicas" value="20" min="2" max="200" step="1"></label>
           <label>t_max (s) <input type="number" id="exp-tmax" value="20" min="1" max="120" step="1"></label>
           <label class="lab-checkbox"><input type="checkbox" id="exp-con-preview" checked> Capturar réplica 0 para reproducirla</label>
+          <label class="lab-checkbox" title="El enjambre avanza hacia el arma en vez de solo patrullar — mide si lo pararon a tiempo, no solo cuántos neutralizaste. Apagado por defecto: no toca la calibración de distancia/potencia existente."><input type="checkbox" id="exp-con-mision"> El enjambre ataca (no solo patrulla)</label>
           <button type="button" id="btn-exp-start" class="btn btn-reset"><svg class="icon" aria-hidden="true"><use href="#i-dice"></use></svg> CORRER EXPERIMENTO</button>
         </div>
         <div id="exp-progress" class="lab-result hidden">

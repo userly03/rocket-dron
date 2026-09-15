@@ -89,6 +89,36 @@ class TestReplica:
         assert r1 == r2
         assert r1["neutralizados"] <= r1["total"]
 
+    def test_sin_con_mision_nunca_hay_brecha(self):
+        """Control de compatibilidad — con_mision=False (el default) debe
+        dar exactamente lo mismo que antes de este ítem: nadie puede tener
+        objetivo_alcanzado sin objetivo."""
+        cfg = ExperimentConfig(
+            formacion="circular", cantidad=5, replicas=1, t_max_s=10.0, semilla=1,
+            arma=WeaponPolicy(tipo="ninguna", origen_x=440.0, origen_y=500.0),
+        )
+        r = run_replica(cfg, 0)
+        assert r["alcanzaron_objetivo"] == 0
+        assert r["fraccion_alcanzo_objetivo"] == 0.0
+        assert r["brecha"] is False
+
+    def test_con_mision_el_objetivo_sigue_al_arma_reubicada(self):
+        """El punto central del diseño: el objetivo tiene que ser la
+        posición REAL del arma en ESTA réplica (WeaponPolicy.origen_x/y,
+        como reubica P3-B), no el HPM_ORIGIN_X/Y global — si el mecanismo
+        usara el global (~707m del enjambre con la geometría por defecto),
+        nadie llegaría en 10s simulados. Con el arma a 60m (la misma
+        distancia de combate que ya usa P3-B), sí."""
+        cfg = ExperimentConfig(
+            formacion="circular", cantidad=5, replicas=1, t_max_s=10.0, semilla=1,
+            arma=WeaponPolicy(tipo="ninguna", origen_x=440.0, origen_y=500.0),
+            con_mision=True,
+        )
+        r = run_replica(cfg, 0)
+        assert r["brecha"] is True
+        assert r["alcanzaron_objetivo"] > 0
+        assert r["fraccion_alcanzo_objetivo"] == pytest.approx(r["alcanzaron_objetivo"] / r["total"])
+
     def test_captura_de_frames_no_altera_el_resultado(self):
         # La captura (frontend/js/replay2d.js consume estos fotogramas para
         # reproducir la réplica) tiene que ser un efecto puramente aditivo:
@@ -464,6 +494,34 @@ class TestResumenP1A:
         # Y ya no se publica como si fuera "la" probabilidad de baja.
         assert "p_hat" not in s
         assert "ic95" not in s
+
+    def test_resultados_sin_campos_de_mision_dan_cero_no_error(self):
+        """Compatibilidad hacia atrás: resultados de ANTES de con_mision (sin
+        alcanzaron_objetivo/fraccion_alcanzo_objetivo/brecha, como los que
+        construye ``_resultados`` acá arriba) no deben romper _summarize —
+        deben leerse como "nadie llegó", no lanzar KeyError."""
+        s = ExperimentManager._summarize(self._resultados([0.0, 0.5, 1.0]))
+        assert s["fraccion_alcanzo_objetivo_media"] == 0.0
+        assert s["probabilidad_brecha"]["proporcion"] == 0.0
+
+    def test_probabilidad_brecha_es_bernoulli_por_replica_con_wilson(self):
+        """Mismo criterio que aniquilacion_total: 'brecha' es un ensayo
+        Bernoulli legítimo A NIVEL RÉPLICA (¿llegó al menos uno?), así que
+        Wilson es el intervalo correcto — a diferencia de
+        fraccion_alcanzo_objetivo_media (continua, bootstrap)."""
+        resultados = [
+            {"replica": i, "semilla": i, "neutralizados": 0, "total": 10,
+             "fraccion": 0.0, "t_sim": 10.0, "exito": False,
+             "alcanzaron_objetivo": alcanzaron, "fraccion_alcanzo_objetivo": alcanzaron / 10,
+             "brecha": alcanzaron > 0}
+            for i, alcanzaron in enumerate([0, 0, 3, 5])
+        ]
+        s = ExperimentManager._summarize(resultados)
+        pb = s["probabilidad_brecha"]
+        assert pb["replicas_con_brecha"] == 2
+        assert pb["proporcion"] == pytest.approx(0.5)
+        assert pb["ic95_wilson"] == pytest.approx(list(wilson_interval(2, 4)), abs=1e-4)
+        assert s["fraccion_alcanzo_objetivo_media"] == pytest.approx((0 + 0 + 0.3 + 0.5) / 4)
 
     def test_percentiles_ordenados(self):
         s = ExperimentManager._summarize(self._resultados([0.0, 0.1, 0.2, 0.5, 0.9]))

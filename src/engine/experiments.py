@@ -253,6 +253,16 @@ class ExperimentConfig:
     dt: float = 1.0 / 30.0
     semilla: int = 1234
     arma: WeaponPolicy = field(default_factory=WeaponPolicy)
+    # Misión ofensiva del enjambre (ver el bloque de comentarios en
+    # src/config.py y el commit que la introdujo). False por defecto —
+    # NO se activa sola en ningún experimento existente, para no
+    # invalidar en silencio la calibración de distancia/potencia ya hecha
+    # con el enjambre estático (DISTANCIA_COMBATE_M en coevolution.py,
+    # research/BARRIDO_DEPREDADOR_PRESA.md). Quien la pida a propósito
+    # (``con_mision=True``) obtiene, además de ``fraccion_media``, la
+    # pregunta operacional real: ¿llegó el enjambre antes de que lo
+    # pararan? Ver ``run_replica`` y ``ExperimentManager._summarize``.
+    con_mision: bool = False
 
 
 def run_replica(
@@ -289,6 +299,18 @@ def run_replica(
         sim.hpm.origen_x = cfg.arma.origen_x
     if cfg.arma.origen_y is not None:
         sim.hpm.origen_y = cfg.arma.origen_y
+    if cfg.con_mision:
+        # NO se pasa mision_activa=True al constructor: ese mecanismo fija
+        # el objetivo al HPM_ORIGIN_X/Y GLOBAL en __post_init__, ANTES de
+        # que las dos líneas de arriba reposicionen el arma para esta
+        # réplica (P3-B reubica el arma a DISTANCIA_COMBATE_M — con el
+        # mecanismo del constructor, el enjambre terminaría atacando el
+        # origen por defecto, a ~707m de donde el arma REALMENTE está
+        # esta réplica). Se fija acá, después del reposicionamiento, para
+        # que el objetivo siempre sea la posición REAL del arma en esta
+        # réplica en particular.
+        sim.swarm.objetivo_x = sim.hpm.origen_x
+        sim.swarm.objetivo_y = sim.hpm.origen_y
 
     disparado = False
     tick_n = 0
@@ -349,6 +371,7 @@ def run_replica(
     conteo = sim.swarm.contar_por_estado()
     total = len(sim.swarm.drones)
     neutralizados = conteo["neutralizado"]
+    alcanzaron = sim.swarm.contar_objetivo_alcanzado()
     return {
         "replica": replica_idx,
         "semilla": cfg.semilla + replica_idx,
@@ -362,6 +385,16 @@ def run_replica(
         # legítimo a nivel réplica, pero vale 0 en casi todo el espacio de
         # operación — no confundir con "probabilidad de baja".
         "exito": neutralizados >= total and total > 0,
+        # Misión ofensiva (``cfg.con_mision``): 0/False siempre que está
+        # apagada — ningún dron puede tener objetivo_alcanzado=True sin
+        # objetivo. Mismo par primaria/secundaria que fraccion/exito:
+        # "alcanzaron_objetivo" es la observación continua por réplica
+        # (cuántos llegaron), "brecha" es el ensayo Bernoulli (¿llegó
+        # AL MENOS UNO?) — la pregunta operacional real, "¿lo pararon a
+        # tiempo?".
+        "alcanzaron_objetivo": alcanzaron,
+        "fraccion_alcanzo_objetivo": (alcanzaron / total) if total > 0 else 0.0,
+        "brecha": alcanzaron > 0,
     }
 
 
@@ -483,6 +516,23 @@ class ExperimentManager:
         exitos = sum(1 for r in resultados if r["exito"])
         aniq_lo, aniq_hi = wilson_interval(exitos, n)
 
+        # Misión ofensiva (``ExperimentConfig.con_mision``): mismo par
+        # primaria/secundaria que fraccion_media/aniquilacion_total, pero
+        # para la pregunta operacional — 0/IC en [0,0] en todo esto si la
+        # misión estaba apagada (ningún dron puede haber llegado sin
+        # objetivo, ver run_replica). ``fracciones_alcanzo`` es continua
+        # (bootstrap, mismo criterio que fraccion_media: la réplica es la
+        # unidad de muestreo); ``brechas`` SÍ es un ensayo Bernoulli
+        # legítimo a nivel réplica (¿llegó al menos uno?, mismo criterio
+        # que aniquilacion_total), así que Wilson es el intervalo correcto.
+        fracciones_alcanzo = np.asarray(
+            [float(r.get("fraccion_alcanzo_objetivo", 0.0)) for r in resultados], dtype=float
+        )
+        alcanzo_media = float(fracciones_alcanzo.mean())
+        alcanzo_boot_lo, alcanzo_boot_hi = intervalo_bootstrap(fracciones_alcanzo)
+        brechas = sum(1 for r in resultados if r.get("brecha", False))
+        brecha_lo, brecha_hi = wilson_interval(brechas, n)
+
         # Convergencia de la MÉTRICA PRIMARIA: media acumulada y semiancho de
         # su IC. El bootstrap se remuestrea en cada paso, así que se usa un
         # número reducido de remuestreos para que la serie no domine el coste
@@ -530,6 +580,16 @@ class ExperimentManager:
                 "replicas_con_enjambre_aniquilado": exitos,
                 "proporcion": round(exitos / n, 4),
                 "ic95_wilson": [round(aniq_lo, 4), round(aniq_hi, 4)],
+            },
+            # ── MISIÓN OFENSIVA (0/en [0,0] si con_mision=False) ──
+            # "¿lo pararon a tiempo?" — la pregunta operacional real, no
+            # solo "¿cuántos neutralizaste?". Ver ExperimentConfig.con_mision.
+            "fraccion_alcanzo_objetivo_media": round(alcanzo_media, 4),
+            "ic95_bootstrap_alcanzo": [round(alcanzo_boot_lo, 4), round(alcanzo_boot_hi, 4)],
+            "probabilidad_brecha": {
+                "replicas_con_brecha": brechas,
+                "proporcion": round(brechas / n, 4),
+                "ic95_wilson": [round(brecha_lo, 4), round(brecha_hi, 4)],
             },
         }
 

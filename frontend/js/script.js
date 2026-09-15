@@ -92,6 +92,7 @@
     expStatusLine: document.getElementById("exp-status-line"),
     expResult: document.getElementById("exp-result"),
     expConPreview: document.getElementById("exp-con-preview"),
+    expConMision: document.getElementById("exp-con-mision"),
     expReplay: document.getElementById("exp-replay"),
     expReplayFrame: document.getElementById("exp-replay-frame"),
     expReplayCanvas: document.getElementById("exp-replay-canvas"),
@@ -146,6 +147,7 @@
     coevoPreviewPollTimer: null,
     mcRuns: [],
     coevoRunsLocal: [],
+    expConMisionActual: false,
   };
 
   let wsClient = null;
@@ -446,9 +448,21 @@
     ui.expStatusLine.textContent = `Réplica ${job.completadas}/${job.replicas} — corriendo...`;
   }
 
-  function renderExpResultado(resumen) {
+  function renderExpResultado(resumen, conMision) {
     const cv = resumen.cv === null ? "—" : resumen.cv.toFixed(4);
     const at = resumen.aniquilacion_total;
+    let bloqueMision = "";
+    if (conMision) {
+      const pb = resumen.probabilidad_brecha;
+      bloqueMision = `
+      <div style="margin-top:6px"><strong>El enjambre ataca — ¿lo pararon a tiempo?:</strong>
+        ${(pb.proporcion * 100).toFixed(1)}% de las réplicas tuvieron al menos una brecha
+        (IC95% Wilson: ${(pb.ic95_wilson[0] * 100).toFixed(1)}–${(pb.ic95_wilson[1] * 100).toFixed(1)}%)
+      </div>
+      <div>De media, ${(resumen.fraccion_alcanzo_objetivo_media * 100).toFixed(1)}% del enjambre llegó al objetivo por réplica
+        (IC95% bootstrap: ${(resumen.ic95_bootstrap_alcanzo[0] * 100).toFixed(1)}–${(resumen.ic95_bootstrap_alcanzo[1] * 100).toFixed(1)}%)
+      </div>`;
+    }
     ui.expResult.innerHTML = `
       <div><strong>Métrica primaria (P1-A) — fracción neutralizada media:</strong>
         ${resumen.fraccion_media.toFixed(4)}
@@ -460,6 +474,7 @@
         (IC95% Wilson: ${at.ic95_wilson[0].toFixed(4)}–${at.ic95_wilson[1].toFixed(4)})
       </div>
       <div class="wta-hint" style="margin-top:6px">Si la primaria es &gt; 0 y la vieja da 0, es la diferencia que documenta <code>research/NOTA_ESTIMADOR_CIEGO.md</code>: hubo bajas reales que la métrica vieja no puede ver.</div>
+      ${bloqueMision}
     `;
     ui.expResult.classList.remove("hidden");
   }
@@ -481,7 +496,7 @@
       if (job.status === "completado") {
         clearInterval(state.expPollTimer);
         ui.expStatusLine.textContent = `Completado — ${job.replicas} réplicas.`;
-        renderExpResultado(job.resumen);
+        renderExpResultado(job.resumen, state.expConMisionActual);
         addLog("Experimento Monte Carlo: corrida completada", "info");
         ui.btnExpStart.disabled = false;
         if (job.previa_disponible) {
@@ -1047,7 +1062,9 @@
           replicas: +ui.expReplicas.value || 20,
           t_max_s: +ui.expTmax.value || 20,
           con_preview: ui.expConPreview.checked,
+          con_mision: ui.expConMision.checked,
         };
+        state.expConMisionActual = body.con_mision;
         const r = await api("/api/experiments", { method: "POST", body: JSON.stringify(body) });
         addLog(`Experimento Monte Carlo: ${r.experiment_id} arrancado (${body.replicas} réplicas, ${body.arma_tipo})`, "info");
         pollExpJob(r.experiment_id);

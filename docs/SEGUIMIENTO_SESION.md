@@ -341,3 +341,74 @@ cañón acá dispara una vez y no persigue — sección 4 de la nota explica
 por qué es razonable no ver esa forma exacta). En formación circular la
 señal es demasiado ruidosa (CV 1.8-5.5) para afirmar nada con 30
 réplicas — reportado como límite de resolución, no como hallazgo.
+
+---
+
+## 9. Misión ofensiva del enjambre — "¿por qué los drones no atacan?"
+
+Motivado por una pregunta directa del usuario, evaluando el proyecto como
+lo haría un evaluador externo: el enjambre era prey puro, patrullaba sin
+misión — "¿lo pararon a tiempo?" no era una pregunta que el modelo
+pudiera responder. Cerrado en 3 fases.
+
+### 9.1 Motor — ✅ CERRADO (ver commit `feat(swarm): misión ofensiva`)
+
+El enjambre avanza hacia un objetivo (por defecto, el propio arma —
+"ataca la batería que lo enfrenta"). Un dron que llega queda marcado
+`objetivo_alcanzado` (eje ortogonal a salud/enlace, mismo criterio que
+P2-E) y deja de volar — es una BRECHA, no una baja.
+
+Dos fallas reales encontradas y corregidas en el diseño, antes de dar
+el mecanismo por terminado:
+1. Avanzar solo el ancla de cohesión no alcanza — `_home_vector` da
+   fuerza cero dentro de su radio (es un límite, no una meta); el
+   enjambre quedaba orbitando el objetivo para siempre.
+2. Un primer término de atracción nuevo, con peso "razonable" (del orden
+   del resto de los pesos de boids), tampoco alcanzaba — la separación
+   entre drones comprimidos hacia el mismo punto crece a la par y empata
+   la atracción antes de que lleguen. Hizo falta un peso ~4x más fuerte
+   (`BOIDS_MISSION_WEIGHT=8.0`, empírico) para que la atracción
+   realmente gane — verificado con 10 y con 50 drones, convergencia
+   limpia en 60-80s, sin oscilación.
+
+Activado por defecto SOLO en la app en vivo — Monte Carlo y coevolución
+NO, para no invalidar en silencio la calibración ya hecha con el
+enjambre estático. 8 tests nuevos, suite completa sin regresiones.
+
+### 9.2 Frontend mínimo — ✅ CERRADO
+
+Sin esto, la app en vivo (que ahora mueve al enjambre por defecto) se
+vería como un bug — drones agrupándose y "desapareciendo" cerca del
+arma sin explicación. Nueva métrica "Brechas" en Operación, un dron que
+llega pasa a un naranja distintivo en el mapa 3D (con su propio estallido
+de partículas, no cae al piso — cumplió la misión, no lo derribaron),
+entrada nueva en la leyenda y en el registro de eventos. Verificado en
+vivo: demo real acumuló 36 brechas visibles antes de que se agotara el
+tiempo de prueba.
+
+### 9.3 Monte Carlo — ✅ CERRADO
+
+`ExperimentConfig.con_mision` (opt-in, apagado por defecto). Punto de
+diseño importante: el objetivo tiene que seguir la posición REAL del
+arma en la réplica (`WeaponPolicy.origen_x/y`, como reubica P3-B), no el
+`HPM_ORIGIN_X/Y` global — si no, con la geometría que usa la coevolución
+(arma reubicada a `DISTANCIA_COMBATE_M`=60m) el enjambre terminaría
+atacando un punto a 707m de donde el arma realmente está. Se sincroniza
+explícitamente después de aplicar cualquier override de posición.
+
+Mismo par primaria/secundaria que ya usa P1-A: `fraccion_alcanzo_
+objetivo_media` (continua, bootstrap) y `probabilidad_brecha` (Bernoulli
+por réplica — ¿llegó al menos uno?, Wilson) — la pregunta operacional
+real, expuesta en `/api/experiments` y en el panel de Laboratorio con un
+checkbox nuevo ("El enjambre ataca"). 4 tests nuevos (incluye uno que
+prueba explícitamente que resultados de ANTES de este ítem, sin los
+campos nuevos, no rompen `_summarize`). Verificado en vivo en el
+navegador con y sin el checkbox activado, consola limpia.
+
+**No incluido en este alcance** (una extensión futura, no lo que se
+pidió): que la coevolución (P3-B) evolucione TAMBIÉN contra
+`probabilidad_brecha` como un segundo objetivo del algoritmo genético,
+en vez de solo `fraccion_media`. Es una pregunta de diseño real (¿qué
+significa "ganar" para el arma: neutralizar más, o impedir más
+brechas?) que merece su propia decisión, no algo para agregar sin
+que se pida a propósito.

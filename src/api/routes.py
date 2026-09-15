@@ -100,6 +100,15 @@ class ExperimentRequest(BaseModel):
         default=False,
         description="Captura fotogramas de la réplica 0 para reproducirla luego (GET .../preview)",
     )
+    con_mision: bool = Field(
+        default=False,
+        description=(
+            "El enjambre avanza hacia el arma en vez de patrullar — expone "
+            "probabilidad_brecha/fraccion_alcanzo_objetivo_media en el resumen. "
+            "Apagado por defecto: no altera la calibración de distancia/potencia "
+            "existente salvo que se pida a propósito."
+        ),
+    )
 
 
 def get_simulation() -> SimulationEngine:
@@ -329,6 +338,7 @@ def start_experiment(body: ExperimentRequest) -> dict:
             misil_potencia=body.misil_potencia,
             misil_radio=body.misil_radio,
         ),
+        con_mision=body.con_mision,
     )
     exp_id = experiment_manager.start(cfg, con_preview=body.con_preview)
     return {"experiment_id": exp_id, "status": "corriendo"}
@@ -366,6 +376,14 @@ def get_experiment(exp_id: str) -> dict:
     publicaba como ``p_hat``/``ic95``, o sea como si fuera la probabilidad de
     baja; no lo era y valía 0 en casi todo el espacio de operación (ver
     docs/AUDITORIA_CHECKLIST.md §1.2).
+
+    Misión ofensiva (solo si el experimento se lanzó con ``con_mision=true``,
+    apagado por defecto): ``resumen.probabilidad_brecha`` — proporción de
+    réplicas en que AL MENOS UN dron llegó al objetivo (Bernoulli por
+    réplica, Wilson), y ``resumen.fraccion_alcanzo_objetivo_media`` —
+    fracción media del enjambre que llegó por réplica (continua, bootstrap,
+    mismo criterio que ``fraccion_media``). 0/IC en [0,0] si la misión
+    estaba apagada.
     """
     registro = experiment_manager.get(exp_id)
     if registro is None:
