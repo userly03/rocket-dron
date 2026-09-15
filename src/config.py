@@ -746,6 +746,29 @@ SWARM_AVANCE_VELOCIDAD_M_S: float = float(os.getenv("SWARM_AVANCE_VELOCIDAD_M_S"
 # de un pulso.
 SWARM_OBJETIVO_RADIO_IMPACTO_M: float = float(os.getenv("SWARM_OBJETIVO_RADIO_IMPACTO_M", "30.0"))
 
+# --- Estructuras atacables (edificios) — ver src/models/structure.py ---
+# A diferencia del vehículo (un solo impacto kamikaze lo inutiliza), un
+# edificio tiene "salud" propia porque son varios drones chicos contra
+# una construcción real, no contra electrónica expuesta — un solo FPV no
+# tira una pared. 100/25 = 4 drones en promedio para destruir uno,
+# número redondo elegido para que sea un objetivo con cuerpo (no un
+# solo-hit como el vehículo) pero alcanzable por una fracción razonable
+# de un enjambre de 30-50, no todo el enjambre entero.
+ESTRUCTURA_SALUD_MAXIMA: float = float(os.getenv("ESTRUCTURA_SALUD_MAXIMA", "100.0"))
+ESTRUCTURA_DANO_POR_DRON: float = float(os.getenv("ESTRUCTURA_DANO_POR_DRON", "25.0"))
+# Mismo radio que SWARM_OBJETIVO_RADIO_IMPACTO_M por defecto (constante
+# aparte, ajustable independiente — un edificio real tiene más "cuerpo"
+# físico que el vehículo, podría justificar un radio distinto más
+# adelante, pero no hay medición todavía que lo respalde).
+ESTRUCTURA_RADIO_IMPACTO_M: float = float(os.getenv("ESTRUCTURA_RADIO_IMPACTO_M", "30.0"))
+# Radio (m) del footprint que bloquea línea de vista (ver
+# hpm_engine.linea_de_vista_bloqueada) — más chico que el radio de
+# impacto de arriba a propósito: "llegaste y contás como que llegaste"
+# (impacto) es un área más generosa que "esto bloquea físicamente un haz"
+# (bloqueo), que debería aproximar el tamaño real de una construcción
+# chica, no todo el radio de tolerancia de la misión.
+ESTRUCTURA_RADIO_BLOQUEO_M: float = float(os.getenv("ESTRUCTURA_RADIO_BLOQUEO_M", "12.0"))
+
 # Peso del término de "acercamiento final" en compute_headings (ver
 # flocking._final_approach_vector). Medido durante el diseño de este
 # ítem, en dos pasos:

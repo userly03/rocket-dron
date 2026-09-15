@@ -28,6 +28,7 @@ from src.engine.hpm_engine import (
     calculate_area_neutralization_probability_friis,
     e50_upset_desde_damage,
     energia_absorbida_j,
+    linea_de_vista_bloqueada,
     target_angle_from_origin,
 )
 from src.engine.physics import update_position
@@ -339,9 +340,20 @@ class HPMissile:
             k=HPM_K_CONSTANT,
         )
 
-    def detonar(self, drones: list[Drone]) -> list[dict]:
+    def detonar(
+        self,
+        drones: list[Drone],
+        obstaculos: list[tuple[float, float, float]] | None = None,
+    ) -> list[dict]:
         """
         Detona el pulso HPM en área. Soft-kill: paraliza drones sin explosión física.
+
+        ``obstaculos`` (línea de vista, ver ``HPMWeapon.disparar`` para el
+        mismo mecanismo): un dron dentro del radio de efecto pero detrás
+        de un obstáculo no recibe daño — aparece en ``eventos`` con
+        ``"bloqueado": True``, ``probabilidad``/``neutralizado`` en 0/False,
+        sin tocar ``drone.recibir_daño``. ``None`` (default) es CERO
+        obstáculos, comportamiento idéntico al de antes de esto.
 
         Returns:
             Lista de eventos de impacto por dron afectado.
@@ -359,6 +371,27 @@ class HPMissile:
 
             dist = distance3d(self.x, self.y, self.z, drone.x, drone.y, drone.z)
             if dist > self.radio_efecto:
+                continue
+
+            if linea_de_vista_bloqueada(self.x, self.y, drone.x, drone.y, obstaculos):
+                eventos.append(
+                    {
+                        "drone_id": drone.id,
+                        "distancia": round(dist, 2),
+                        "distancia_horizontal": round(distance(self.x, self.y, drone.x, drone.y), 2),
+                        "delta_altitud": round(drone.z - self.z, 2),
+                        "probabilidad": 0.0,
+                        "factor_acoplamiento": round(drone.factor_acoplamiento(), 4),
+                        "neutralizado": False,
+                        "estado": drone.estado.value,
+                        "salud": round(drone.salud, 2),
+                        "tipo": "soft_kill",
+                        "entro_en_riesgo": False,
+                        "riesgo_latente_por_s": round(drone.riesgo_latente_por_s, 6),
+                        "subsistema_en_riesgo": drone.subsistema_en_riesgo,
+                        "bloqueado": True,
+                    }
+                )
                 continue
 
             probabilidad = self.calcular_daño(drone, dist)
@@ -442,6 +475,7 @@ class HPMissile:
                     "entro_en_riesgo": entro_en_riesgo,
                     "riesgo_latente_por_s": round(drone.riesgo_latente_por_s, 6),
                     "subsistema_en_riesgo": drone.subsistema_en_riesgo,
+                    "bloqueado": False,
                 }
             )
 

@@ -21,7 +21,7 @@ from src.config import (
     HPM_TEMP_MAX_C,
     VEHICULO_VELOCIDAD_M_S,
 )
-from src.engine.hpm_engine import compute_target_parameters
+from src.engine.hpm_engine import compute_target_parameters, linea_de_vista_bloqueada
 from src.models.drone import Drone, DroneEstado
 from src.utils.helpers import distance
 
@@ -171,7 +171,11 @@ class HPMWeapon:
             return 0
         return int(self.energia_actual_kj / energia_por_disparo)
 
-    def disparar(self, drones: list[Drone]) -> list[dict]:
+    def disparar(
+        self,
+        drones: list[Drone],
+        obstaculos: list[tuple[float, float, float]] | None = None,
+    ) -> list[dict]:
         """
         Aplica daño HPM a todos los drones dentro del cono de efecto.
 
@@ -182,6 +186,17 @@ class HPMWeapon:
         motivo en ``self.ultimo_rechazo`` y devuelve una lista vacía de
         eventos (indistinguible en la firma de "no había drones en el
         cono", pero distinguible consultando ``ultimo_rechazo``).
+
+        ``obstaculos`` (línea de vista — ver ``hpm_engine.linea_de_vista_
+        bloqueada``): círculos ``(x, y, radio)`` que bloquean el haz por
+        completo si se interponen entre el origen y un dron — un dron
+        geométricamente dentro del cono pero detrás de un obstáculo NO
+        recibe daño (no se llama ``drone.recibir_daño`` — bloqueado de
+        verdad, no "probabilidad baja"). Igual aparece en ``eventos`` con
+        ``"bloqueado": True`` y ``probabilidad``/``neutralizado`` en 0/False,
+        para que quede visible que estaba en el cono pero protegido, no
+        que el arma lo ignoró. ``None`` (default) es CERO obstáculos —
+        comportamiento idéntico al de antes de que existiera esto.
 
         Returns:
             Lista de eventos de impacto por dron afectado (vacía si el
@@ -240,6 +255,29 @@ class HPMWeapon:
             if abs(angulo_offset) > self.apertura_cono / 2.0:
                 continue
 
+            if linea_de_vista_bloqueada(
+                self.origen_x, self.origen_y, drone.x, drone.y, obstaculos
+            ):
+                eventos.append(
+                    {
+                        "drone_id": drone.id,
+                        "distancia": round(distancia, 2),
+                        "distancia_horizontal": round(distance(self.origen_x, self.origen_y, drone.x, drone.y), 2),
+                        "delta_altitud": round(drone.z - self.origen_z, 2),
+                        "angulo_offset": round(angulo_offset, 2),
+                        "probabilidad": 0.0,
+                        "factor_acoplamiento": round(drone.factor_acoplamiento(), 4),
+                        "neutralizado": False,
+                        "estado": drone.estado.value,
+                        "salud": round(drone.salud, 2),
+                        "entro_en_riesgo": False,
+                        "riesgo_latente_por_s": round(drone.riesgo_latente_por_s, 6),
+                        "subsistema_en_riesgo": drone.subsistema_en_riesgo,
+                        "bloqueado": True,
+                    }
+                )
+                continue
+
             # Riesgo latente PREVIO a esta exposición: si ya estaba
             # pendiente sin id de disparo asignado (por ejemplo, un miss
             # anterior no atribuido — no debería ocurrir en la práctica,
@@ -290,6 +328,7 @@ class HPMWeapon:
                     "entro_en_riesgo": entro_en_riesgo,
                     "riesgo_latente_por_s": round(drone.riesgo_latente_por_s, 6),
                     "subsistema_en_riesgo": drone.subsistema_en_riesgo,
+                    "bloqueado": False,
                 }
             )
 

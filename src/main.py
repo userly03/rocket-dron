@@ -42,7 +42,9 @@ async def lifespan(app: FastAPI):
     # misión ofensiva encendida por defecto — ver el comentario en
     # SimulationEngine.mision_activa (src/engine/simulation.py) para por
     # qué Monte Carlo/coevolución NO la activan por defecto.
-    simulation = SimulationEngine(swarm_size=SWARM_SIZE, mision_activa=True, kamikaze_activo=True)
+    simulation = SimulationEngine(
+        swarm_size=SWARM_SIZE, mision_activa=True, kamikaze_activo=True, estructuras_activas=True
+    )
     loop = asyncio.get_running_loop()
     attach_simulation_listener(simulation, loop)
 

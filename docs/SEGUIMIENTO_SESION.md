@@ -585,3 +585,229 @@ vehículo visible moviéndose en el mapa 3D, badge y estado del panel
 correctos, "DISPARAR CAÑÓN"/"LANZAR MISIL" rechazados mientras viaja,
 llega exacto al destino elegido y vuelve a poder disparar, reset lo
 devuelve al origen.
+
+### 9.7 Edificios atacables — motor cerrado, falta visual y línea de vista — 🟡 PARCIAL
+
+Pedido explícito: un pueblito de edificios que el enjambre también pueda
+elegir atacar, cada uno con su propia salud (a diferencia del vehículo,
+un solo impacto kamikaze). Alcance confirmado con el usuario antes de
+programar: 3-5 edificios ("un pueblito chico"), layout que yo diseño.
+
+`src/models/structure.py` — `Estructura`: posición fija, `salud`/
+`salud_maxima`, `recibir_impacto_kamikaze(daño)` (default
+`ESTRUCTURA_DANO_POR_DRON=25`, 4 drones en promedio para tirar una,
+número elegido — no medido — para que sea un objetivo con cuerpo pero
+alcanzable por una fracción razonable del enjambre, no todo entero).
+Layout: 4 edificios agrupados cerca de (800,800), esquina OPUESTA al
+vehículo (que arranca en `HPM_ORIGIN`=(0,0)) — a propósito, para que el
+enjambre tenga una elección táctica real entre dos direcciones, no un
+objetivo "de paso".
+
+`SimulationEngine._elegir_objetivo_enjambre()` (nuevo, corre cada tick si
+`mision_activa`): entre el vehículo (si no destruido) y cada estructura
+no destruida, elige la más cercana al ANCLA de cohesión del enjambre
+(`swarm.formacion_x/y`, no un dron individual — es el punto que el
+modelo de movimiento realmente usa). Guarda cuál quedó activo en
+`_objetivo_actual` para que `_registrar_impactos_en_objetivo` sepa a
+quién dañar cuando llega un dron: si el objetivo activo era el vehículo,
+kamikaze (9.5) sin cambios; si era una estructura, le resta salud por
+CADA dron que llega ese tick (no solo el primero, como el vehículo). Un
+dron ya marcado `objetivo_alcanzado` no se ve afectado si el objetivo
+cambia después (redirige el resto del enjambre, no a los que ya
+llegaron). Si todo lo destruible ya cayó, el enjambre se queda sin
+objetivo (`objetivo_x/y=None`) — mismo estado ya manejado que
+`mision_activa=False`, sin caso especial.
+
+`estructuras_activas` (opt-in, `False` por defecto, deliberadamente
+APARTE de `mision_activa`/`con_mision` — mismo criterio que
+`kamikaze_activo`): Monte Carlo/coevolución con `con_mision=True` asumen
+un único objetivo posible; agregar estructuras ahí cambiaría en silencio
+qué miden `fraccion_alcanzo_objetivo`/`probabilidad_brecha`. Solo la app
+en vivo lo activa.
+
+15 tests nuevos (`TestEstructura` + `TestEstructurasAtacables`), 145
+tests de todo lo que toca `SimulationEngine`/experimentos sin
+regresiones. Verificado en vivo con la demo real corriendo sola (sin
+forzar nada a mano): el enjambre arrancó atacando el pueblito (más
+cerca que el vehículo desde su punto de partida), tiró el primer
+edificio a los t=33s, los 4 a los t=41s, y redirigió solo hacia el
+vehículo apenas no quedó nada más que atacar — comportamiento emergente
+correcto, no forzado. Snapshot (`GET /api/status`) ya expone
+`estructuras` y `mision.objetivo_tipo/objetivo_id`; probado que no rompe
+el frontend actual (consola limpia) aunque todavía no dibuja nada nuevo.
+
+**Falta, deliberadamente pospuesto** (confirmado con el usuario, se hace
+en fases — línea de vista ya cerrada, ver 9.8; scripts de Blender para
+los modelos 3D ya escritos, ver 9.9): la integración visual del
+frontend (cargar `arboles.glb`/`edificio.glb`/`trinchera.glb` en
+`render3d.js`, clonar una instancia por `Estructura` del snapshot,
+reflejar salud/destrucción visualmente, dispersar árboles/trinchera
+como props decorativos). El motor ya funciona y está probado
+independientemente de que exista lo visual.
+
+### 9.8 Línea de vista física — ✅ CERRADO
+
+La otra mitad del pedido "terreno físico, no solo decorativo" (9.7):
+edificios/árboles bloqueando el haz de verdad, no solo existiendo como
+objetivo atacable.
+
+`hpm_engine.linea_de_vista_bloqueada(origen_x, origen_y, destino_x,
+destino_y, obstaculos)` — intersección segmento-círculo estándar
+(fórmula cuadrática), `obstaculos` una lista de `(x, y, radio)`.
+Simplificación deliberada y documentada: el chequeo es 2D en el plano
+del suelo, sin altura de obstáculo ni trayectoria 3D del rayo — mismo
+criterio que "sin near-field" en `docs/FISICA_Y_MATEMATICA.md` §4 (no
+inventar un dato — altura de edificio — que no está medido). Bloqueo
+BINARIO (todo o nada), no atenuación graduada — a 2.45GHz un edificio
+real no deja pasar una fracción "razonable" de la señal, y un
+coeficiente de atenuación parcial sería un número inventado.
+
+Conectado en los TRES subsistemas que "ven" al enjambre, cada uno con
+`obstaculos: list | None = None` (default = cero obstáculos, idéntico a
+antes de esto para todo llamador existente):
+- `HPMWeapon.disparar()`: un dron geométricamente en el cono pero
+  detrás de un obstáculo NO recibe daño — ni se llama
+  `drone.recibir_daño` (cero efectos secundarios en salud/riesgo
+  latente). Sigue apareciendo en `eventos` con `"bloqueado": true` y
+  `probabilidad`/`neutralizado` en 0/False, para que quede visible que
+  estaba en el cono pero protegido, no que el arma lo ignoró.
+- `HPMissile.detonar()`: mismo criterio, para la detonación de área.
+- `TrackManager.actualizar()` (radar): un dron detectable por SNR pero
+  detrás de un obstáculo NO se detecta esta revisita — un radar real
+  tampoco ve a través de un edificio.
+
+`SimulationEngine._obstaculos_activos()` ensambla la lista desde
+`self.estructuras` no destruidas (`Estructura.radio_bloqueo`, nueva
+constante `ESTRUCTURA_RADIO_BLOQUEO_M=12`, más chico que el radio de
+impacto de la misión a propósito — "esto bloquea físicamente un haz" es
+un círculo más ajustado que "llegaste y contás como que llegaste"). Una
+estructura destruida deja de bloquear — un edificio caído no es un
+obstáculo sólido.
+
+**Bug real encontrado de paso, no introducido por esto**: el radar
+(`Swarm.actualizar` → `track_manager.actualizar`) usaba SIEMPRE
+`HPM_ORIGIN_X/Y` (la constante fija), incluso después de que el
+vehículo se hubiera reposicionado (9.6, "shoot and scoot") — quedaba
+mirando desde el punto viejo. `Swarm.actualizar()` ganó
+`origen_radar_x/y` (`None` default = comportamiento idéntico al de
+antes), y `SimulationEngine._tick` ahora pasa la posición ACTUAL del
+vehículo. Verificado con un test dedicado (mover el vehículo, dejarlo
+avanzar, confirmar que un dron cerca del nuevo origen se detecta — si el
+radar siguiera mirando desde el viejo, no lo haría).
+
+17 tests nuevos (`tests/test_linea_de_vista.py`, geometría + los tres
+subsistemas + integración vía `SimulationEngine`), 287 tests de todo lo
+que toca cañón/misil/radar/swarm/experimentos sin regresiones, suite
+completa corrida en background sin regresiones. Verificado con llamadas
+directas al motor real (mismo método exacto que usa `/api/fire` — no un
+mock): dron detrás de un edificio, visto desde el cañón, sale
+`bloqueado=true`, salud sin tocar; dron no alineado dispara normal;
+radar no detecta detrás de un obstáculo y sí sin él. No se pudo
+"cazar" en vivo por HTTP un disparo bloqueado ocurriendo naturalmente
+durante la demo (la ventana geométrica exacta — un dron pasando justo
+detrás de un edificio en el ángulo del cañón — es angosta y la
+convergencia de la misión es rápida, mismo problema de timing ya
+documentado en 9.1/9.5), pero el código que corre por HTTP es
+literalmente el mismo que se probó directo.
+
+### 9.9 Modelos 3D de escenario (árboles, edificio, trinchera) — ✅ CERRADO
+
+Segunda mitad de 9.7/geografía general: los tres scripts de Blender
+para el escenario rural (referencia visual "pueblo disperso, estilo
+guerra rural"), mismo patrón que `generar_lanzador_hpm.py`/
+`generar_dron.py` (materiales locale-safe por `node.type`/
+`input.identifier`, nunca por nombre visible — Blender en español
+rompe la búsqueda por nombre en silencio).
+
+- `tools/blender/generar_arboles.py` → `frontend/models/arboles.glb`:
+  3 variantes (bajo/mediano/alto) en un solo archivo — tronco cónico
+  de 8 lados + racimo de 2-3 icoesferas de follaje con jitter
+  (`random.Random(2026)`, semilla fija para reproducibilidad), dos
+  tonos de verde alternados. El frontend elegirá una variante al azar
+  por posición para que una fila de árboles no se vea repetida.
+- `tools/blender/generar_edificio.py` → `frontend/models/edificio.glb`:
+  casa rural atacable (ver `Estructura`, 9.7) con techo a dos aguas de
+  geometría real (dos paneles rotados que se encuentran en la
+  cumbrera — matemática derivada a mano con `hypot`/`atan2`, no
+  aproximada con una caja texturizada), chimenea, puerta y dos
+  ventanas. Genera la casa intacta únicamente — el tintado por daño
+  es responsabilidad de Three.js en el frontend (mismo patrón que
+  `setPlataformaDestruida` del vehículo), no de este script.
+- `tools/blender/generar_trinchera.py` → `frontend/models/trinchera.glb`:
+  parapetos de sacos de arena (dos filas, aparejadas, con jitter de
+  tamaño/posición para no leerse como clones) a los lados de una
+  franja de tierra removida. Se optó por sacos + tierra removida en
+  vez de una zanja cavada de verdad porque el suelo del mapa
+  (`buildGround` en `render3d.js`) es un plano liso sin relieve —
+  cavarlo de verdad exigiría deformar el terreno, un cambio de alcance
+  mayor no pedido. Puramente decorativo por ahora: a diferencia de los
+  edificios, no tiene salud ni bloquea línea de vista — eso no fue
+  pedido para la trinchera específicamente (solo los edificios se
+  confirmaron como "atacables con salud propia"; el terreno en general
+  como "bloquea línea de vista" ya se resolvió en 9.8 vía el radio de
+  bloqueo de `Estructura`, que la trinchera no tiene).
+
+Los tres scripts se corrieron en Blender (usuario) y los `.glb`
+resultantes se verificaron parseando el binario directo (header + chunk
+JSON), igual que vehículo/dron — sin capturas de pantalla:
+- `arboles.glb` (43.7 KB): 11 nodos (3 troncos + 8 esferas de follaje,
+  2+3+3 por variante), materiales `Tronco`/`Follaje1`/`Follaje2` con
+  color correcto (sin el gris `[0.8,0.8,0.8]` del bug de locale).
+- `edificio.glb` (37.1 KB): 7 nodos (`Edificio`, `Techo_Izquierdo/
+  Derecho`, `Chimenea`, `Puerta`, `Ventana_Izquierda/Derecha`),
+  materiales `Pared`/`Techo`/`Madera`/`Hueco` correctos.
+- `trinchera.glb` (730 KB): 95 nodos (`Trinchera` + 47 sacos por lado,
+  24+23, en 2 filas aparejadas), materiales `Saco`/`TierraRemovida`
+  correctos.
+
+Integración visual en `frontend/js/render3d.js` (mismo módulo IIFE,
+mismo patrón que vehículo/dron — `GLTFLoader` una vez, `clone(true)` +
+clonado de materiales por instancia):
+- **Edificios**: un `edificioTemplate` cargado una vez; cada
+  `Estructura` del snapshot (`snap.estructuras`) clona su propia
+  instancia la primera vez que aparece, en su posición real (fija, no
+  como los drones). Salud/destrucción se reflejan sobre esa MISMA
+  instancia cada tick — tiñendo gradualmente "Pared"/"Techo" hacia un
+  negro humo (`0x14100c`) proporcional a `1 - salud/salud_maxima`, y
+  "hundiendo" el modelo (`scale.y` hacia 0.25) cuando `destruida=true`
+  — mismo criterio barato que la caída de un dron: comunica destrucción
+  sin necesitar un modelo de escombros aparte. Un `spawnParticleBurst`
+  marca el momento exacto de la destrucción. Como lee `snap.estructuras`
+  en cada `updateSnapshot`, un `reset()` del backend (salud vuelve a
+  máxima, `destruida=false`) se refleja solo, sin lógica extra en
+  render3d.js.
+- **Árboles**: sin entidad en el backend (ver 9.9), así que se
+  dispersan en el CLIENTE, una sola vez, con un PRNG determinista
+  (`mulberry32`, semilla 2026 — misma semilla que los scripts de
+  Blender, por consistencia, no reproducibilidad científica: esto es
+  puramente decorativo) apenas se conocen el tamaño real del campo y
+  las posiciones reales de vehículo/estructuras — para no hacer brotar
+  un árbol encima de un edificio o del vehículo (radios de exclusión
+  45m/35m). 55 árboles, variante elegida al azar entre las 3 del
+  `.glb`, escala/rotación con jitter para no leerse como clones.
+- **Trinchera**: un único emplazamiento, colocado una vez 25m por
+  delante de la posición INICIAL del vehículo (hacia el centro del
+  campo, de donde viene el enjambre por defecto) — NO sigue al vehículo
+  si este se reposiciona después ("shoot and scoot", 9.6): una
+  trinchera real se cava una vez, no se reubica sola.
+
+Verificado en vivo (Chrome, backend real corriendo, demo activa): los 5
+`.glb` (dron/lanzador/edificio/árboles/trinchera) cargan con HTTP 200,
+consola sin errores. "Ver plataforma" mostró el vehículo Y la trinchera
+juntos, correctamente posicionados/orientados uno junto al otro. Los
+árboles se ven dispersos en la vista general (no se pudo acercar la
+cámara lo suficiente para confirmar su geometría en detalle por una
+limitación de la herramienta de automatización del navegador — el
+wheel-zoom de OrbitControls no respondió a los eventos simulados — pero
+cargan sin error y reutilizan exactamente el mismo código de
+instanciación ya confirmado funcionando para la trinchera).
+
+**Falta**: nada pendiente de esta fase. Como trabajo futuro (no pedido
+todavía): dar a la trinchera un `radio_bloqueo` propio si se decide que
+también debe bloquear línea de vista (hoy no lo hace — ver la
+justificación en el propio script), y/o un toggle de UI para
+mostrar/ocultar árboles si el mapa se siente sobrecargado.
+
+**Falta**: correr los tres scripts en Blender (el usuario), verificar
+los `.glb` resultantes, y la integración visual del frontend completa
+(ver nota al final de 9.7) — ninguna de las dos cosas empezó todavía.

@@ -82,6 +82,19 @@ function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
+// PRNG determinista chico (mulberry32) — el disperso de árboles necesita
+// ser reproducible entre recargas de la página (misma semilla que los
+// scripts de Blender, 2026) sin arrastrar una librería para esto.
+function mulberry32(seed) {
+  return function () {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 function makeMissileGeometry() {
   const geo = new THREE.ConeGeometry(3, 16, 8);
   geo.rotateZ(-Math.PI / 2);
@@ -183,6 +196,35 @@ const Render3D = (() => {
   // droneRecords._smoothX/Y) — sin esto, cada snapshot nuevo movería el
   // modelo en saltos discretos en vez de un desplazamiento fluido.
   const _smoothVehiculo = { x: null, z: null };
+  // Edificios atacables (tools/blender/generar_edificio.py →
+  // frontend/models/edificio.glb, ver src/models/structure.py):
+  // edificioTemplate es la escena cargada una vez; cada Estructura del
+  // snapshot (posición FIJA, a diferencia de los drones) clona su propia
+  // instancia la primera vez que aparece — nunca se recrea después,
+  // salud/destruida se reflejan tiñendo esa misma instancia.
+  let edificioTemplate = null;
+  let estructurasGroup = null;
+  const estructuraRecords = new Map(); // id -> { model, materiales, coloresOriginales, destruidaAntes }
+
+  // Árboles (tools/blender/generar_arboles.py → frontend/models/
+  // arboles.glb): puramente decorativos, sin entidad en el backend — no
+  // hay snapshot que traiga posiciones, así que se dispersan UNA vez en
+  // el cliente con una semilla fija (reproducible entre recargas), recién
+  // cuando se conocen el tamaño del campo y las estructuras reales (para
+  // no hacerlos brotar encima de un edificio o del vehículo).
+  let arbolesTemplates = null; // [Object3D, Object3D, Object3D], una por variante
+  let arbolesGroup = null;
+  let arbolesDispersados = false;
+
+  // Trinchera (tools/blender/generar_trinchera.py → frontend/models/
+  // trinchera.glb): un único emplazamiento fijo, delante del vehículo en
+  // su posición INICIAL (una trinchera se cava una vez, no sigue al
+  // vehículo si este hace "shoot and scoot" después) — puramente
+  // decorativa, sin salud ni bloqueo de línea de vista (ver 9.9 en
+  // docs/SEGUIMIENTO_SESION.md: eso no se pidió para la trinchera).
+  let trincheraTemplate = null;
+  let trincheraColocada = false;
+
   let radarRingMesh = null;
   let radarPingMesh = null;
   let trackLinesMesh = null;
@@ -239,6 +281,9 @@ const Render3D = (() => {
     buildHeatmapPlane();
     buildHpmCone();
     buildDroneTemplate();
+    buildEdificioTemplate();
+    buildArbolesTemplate();
+    buildTrincheraTemplate();
     configurarClickParaMover();
 
     resize();
@@ -257,6 +302,51 @@ const Render3D = (() => {
       undefined,
       (err) => {
         console.error("No se pudo cargar frontend/models/dron.glb:", err);
+      },
+    );
+  }
+
+  function buildEdificioTemplate() {
+    estructurasGroup = new THREE.Group();
+    scene.add(estructurasGroup);
+    new GLTFLoader().load(
+      "models/edificio.glb",
+      (gltf) => {
+        edificioTemplate = gltf.scene;
+      },
+      undefined,
+      (err) => {
+        console.error("No se pudo cargar frontend/models/edificio.glb:", err);
+      },
+    );
+  }
+
+  function buildArbolesTemplate() {
+    arbolesGroup = new THREE.Group();
+    scene.add(arbolesGroup);
+    new GLTFLoader().load(
+      "models/arboles.glb",
+      (gltf) => {
+        arbolesTemplates = ["Arbol_0", "Arbol_1", "Arbol_2"]
+          .map((nombre) => gltf.scene.getObjectByName(nombre))
+          .filter(Boolean);
+      },
+      undefined,
+      (err) => {
+        console.error("No se pudo cargar frontend/models/arboles.glb:", err);
+      },
+    );
+  }
+
+  function buildTrincheraTemplate() {
+    new GLTFLoader().load(
+      "models/trinchera.glb",
+      (gltf) => {
+        trincheraTemplate = gltf.scene;
+      },
+      undefined,
+      (err) => {
+        console.error("No se pudo cargar frontend/models/trinchera.glb:", err);
       },
     );
   }
@@ -553,6 +643,154 @@ const Render3D = (() => {
       trackLinesMesh.visible = false;
       trackGhostMesh.visible = false;
     }
+  }
+
+  // Tinte de daño de los edificios: mismo color "quemado" que usa el
+  // vehículo destruido (COLOR_QUEMADO más abajo), pero declarado acá
+  // aparte porque los edificios lo aplican GRADUALMENTE (proporcional a
+  // 1 - salud/salud_maxima), no como un interruptor todo-o-nada.
+  const MATERIALES_EDIFICIO_DANIABLES = ["Pared", "Techo"];
+  const _colorEdificioQuemado = new THREE.Color(0x14100c);
+
+  function ensureEstructuraModel(estructura) {
+    let rec = estructuraRecords.get(estructura.id);
+    if (!rec) {
+      rec = { model: null, destruidaAntes: false };
+      estructuraRecords.set(estructura.id, rec);
+    }
+    if (rec.model || !edificioTemplate) return rec;
+
+    const model = edificioTemplate.clone(true);
+    // clone(true) no clona materiales (ver mismo comentario en
+    // ensureDroneModel) — acá hace falta ADEMÁS porque "Pared" lo
+    // comparten dos nodos DENTRO de un mismo edificio (Edificio y
+    // Chimenea), así que un solo clone por nombre alcanza para toda la
+    // instancia, no uno por mesh.
+    const materiales = new Map();
+    model.traverse((obj) => {
+      if (!obj.isMesh || !obj.material) return;
+      const nombre = obj.material.name;
+      if (!materiales.has(nombre)) materiales.set(nombre, obj.material.clone());
+      obj.material = materiales.get(nombre);
+    });
+    rec.materiales = materiales;
+    rec.coloresOriginales = new Map(
+      [...materiales.entries()].map(([nombre, mat]) => [nombre, mat.color.clone()])
+    );
+
+    const pos = worldToThree(field, estructura.x, estructura.y, 0);
+    model.position.set(pos.x, 0, pos.z);
+    estructurasGroup.add(model);
+    rec.model = model;
+    return rec;
+  }
+
+  function actualizarEstructuras(estructuras) {
+    if (!estructuras) return;
+    for (const e of estructuras) {
+      const rec = ensureEstructuraModel(e);
+      if (!rec.model) continue; // template todavía no cargó
+
+      if (!rec.destruidaAntes && e.destruida) {
+        spawnParticleBurst(worldToThree(field, e.x, e.y, 4), COLOR.neutralizadoBlink);
+      }
+      rec.destruidaAntes = e.destruida;
+
+      const fraccionDano = 1 - Math.max(0, Math.min(1, e.salud / (e.salud_maxima || 1)));
+      const mezcla = e.destruida ? 0.85 : fraccionDano * 0.7;
+      for (const nombre of MATERIALES_EDIFICIO_DANIABLES) {
+        const mat = rec.materiales.get(nombre);
+        if (!mat) continue;
+        _color.copy(rec.coloresOriginales.get(nombre)).lerp(_colorEdificioQuemado, mezcla);
+        mat.color.copy(_color);
+      }
+      // Un edificio caído se hunde/aplasta un poco — mismo criterio barato
+      // que la caída de un dron: comunica "destruido" sin necesitar un
+      // modelo de escombros aparte.
+      const escalaObjetivo = e.destruida ? 0.25 : 1;
+      rec.model.scale.y = lerp(rec.model.scale.y, escalaObjetivo, 0.1);
+    }
+  }
+
+  const ARBOL_CANTIDAD = 55;
+  const ARBOL_ESCALA = 2.2; // mismo criterio "exagerado a distancia de combate" que vehículo/dron
+  const ARBOL_RADIO_EXCLUSION_ESTRUCTURA_M = 45;
+  const ARBOL_RADIO_EXCLUSION_VEHICULO_M = 35;
+
+  // Disperso decorativo de árboles: no hay posiciones en el backend (no
+  // son una entidad simulada, ver 9.9 en docs/SEGUIMIENTO_SESION.md), así
+  // que se generan acá con una semilla fija (misma semilla 2026 que los
+  // scripts de Blender, por consistencia) — reproducible entre recargas,
+  // no un disperso distinto cada vez que se refresca la página. Se corre
+  // UNA sola vez, apenas se conocen el tamaño real del campo y las
+  // posiciones reales de vehículo/estructuras (para no hacer brotar un
+  // árbol encima de un edificio o del vehículo).
+  function dispersarArboles(snap) {
+    if (arbolesDispersados || !arbolesTemplates || !arbolesTemplates.length) return;
+    arbolesDispersados = true;
+
+    const exclusiones = [];
+    if (snap.hpm) {
+      exclusiones.push({
+        x: snap.hpm.origen_x ?? 0,
+        y: snap.hpm.origen_y ?? 0,
+        r: ARBOL_RADIO_EXCLUSION_VEHICULO_M,
+      });
+    }
+    for (const e of snap.estructuras ?? []) {
+      exclusiones.push({ x: e.x, y: e.y, r: ARBOL_RADIO_EXCLUSION_ESTRUCTURA_M });
+    }
+
+    const rng = mulberry32(2026);
+    let colocados = 0;
+    let intentos = 0;
+    while (colocados < ARBOL_CANTIDAD && intentos < ARBOL_CANTIDAD * 20) {
+      intentos++;
+      const wx = rng() * field.width;
+      const wy = rng() * field.height;
+      if (exclusiones.some((z) => Math.hypot(wx - z.x, wy - z.y) < z.r)) continue;
+
+      const variante = arbolesTemplates[Math.floor(rng() * arbolesTemplates.length)];
+      const arbol = variante.clone(true);
+      const pos = worldToThree(field, wx, wy, 0);
+      arbol.position.set(pos.x, 0, pos.z);
+      arbol.rotation.y = rng() * Math.PI * 2;
+      arbol.scale.setScalar(ARBOL_ESCALA * (0.85 + rng() * 0.3));
+      arbolesGroup.add(arbol);
+      colocados++;
+    }
+  }
+
+  const TRINCHERA_DISTANCIA_M = 25; // metros por delante del vehículo, hacia el centro del campo
+
+  // Se coloca UNA vez, delante de la posición INICIAL del vehículo (una
+  // trinchera es un emplazamiento cavado de antemano, no algo que se
+  // reubica solo si el vehículo se mueve después — ver "shoot and scoot"
+  // en 9.6). "Delante" = hacia el centro del campo, de donde viene el
+  // enjambre en el layout por defecto.
+  function colocarTrinchera(snap) {
+    if (trincheraColocada || !trincheraTemplate || !snap.hpm) return;
+    trincheraColocada = true;
+
+    const origenX = snap.hpm.origen_x ?? 0;
+    const origenY = snap.hpm.origen_y ?? 0;
+    const centroX = field.width / 2;
+    const centroY = field.height / 2;
+    const dx = centroX - origenX;
+    const dy = centroY - origenY;
+    const dist = Math.hypot(dx, dy) || 1;
+    const dirX = dx / dist;
+    const dirY = dy / dist;
+
+    const wx = origenX + dirX * TRINCHERA_DISTANCIA_M;
+    const wy = origenY + dirY * TRINCHERA_DISTANCIA_M;
+    const pos = worldToThree(field, wx, wy, 0);
+    const model = trincheraTemplate.clone(true);
+    model.position.set(pos.x, 0, pos.z);
+    // Mismo helper/convención que usan drones y misiles para pasar de un
+    // ángulo "mundo" (atan2 estándar) a rotation.y de Three.
+    model.rotation.y = headingToRotationY(THREE.MathUtils.radToDeg(Math.atan2(dirY, dirX)));
+    scene.add(model);
   }
 
   function ensureDroneModel(rec) {
@@ -1028,6 +1266,9 @@ const Render3D = (() => {
     if (snap.missiles) updateMissiles(snap.missiles.misiles);
     if (snap.hpm) updateHpmCone(snap.hpm);
     if (snap.radar) updateRadarPing(snap.radar);
+    if (snap.estructuras) actualizarEstructuras(snap.estructuras);
+    dispersarArboles(snap);
+    colocarTrinchera(snap);
     if (viewMode === "physical" && snap.analytics?.heatmap) updateHeatmap(snap.analytics.heatmap);
   }
 

@@ -292,9 +292,28 @@ class Swarm:
                 llegaron.append(drone)
         return llegaron
 
-    def actualizar(self, dt: float) -> list[Drone]:
+    def actualizar(
+        self,
+        dt: float,
+        origen_radar_x: float | None = None,
+        origen_radar_y: float | None = None,
+        obstaculos: list[tuple[float, float, float]] | None = None,
+    ) -> list[Drone]:
         """Mueve todos los drones activos, resuelve colisiones con bordes,
         y avanza la misión si hay un objetivo configurado.
+
+        ``origen_radar_x/y`` (``None`` default): de dónde barre el radar —
+        antes SIEMPRE era ``HPM_ORIGIN_X/Y`` (la constante fija), aunque
+        el vehículo se hubiera reposicionado ("shoot and scoot", ver
+        ``HPMWeapon.iniciar_movimiento``); el radar quedaba mirando desde
+        el punto viejo. ``None`` conserva ese comportamiento (compatible
+        con todo llamador existente); ``SimulationEngine`` pasa la
+        posición ACTUAL del vehículo.
+
+        ``obstaculos``: línea de vista para el radar (ver
+        ``hpm_engine.linea_de_vista_bloqueada``) — un dron detrás de un
+        obstáculo no se detecta, sin importar SNR. ``None`` es CERO
+        obstáculos, idéntico al comportamiento de antes.
 
         Devuelve la lista de drones que llegaron al objetivo EN ESTE tick
         (vacía si no hay objetivo o nadie llegó) — ``SimulationEngine._tick``
@@ -365,9 +384,12 @@ class Swarm:
         # RADAR_REVISITA_S segundos toma una medición fresca por dron.
         self.track_manager.actualizar(
             self.drones, dt,
-            HPM_ORIGIN_X, HPM_ORIGIN_Y, HPM_ORIGIN_Z,
+            origen_radar_x if origen_radar_x is not None else HPM_ORIGIN_X,
+            origen_radar_y if origen_radar_y is not None else HPM_ORIGIN_Y,
+            HPM_ORIGIN_Z,
             RADAR_TX_POWER_W, RADAR_ANTENNA_GAIN_DBI, RADAR_FREQUENCY_GHZ,
             RADAR_RCS_M2, RADAR_NOISE_FLOOR_W,
+            obstaculos=obstaculos,
         )
 
         return self._detectar_impactos_en_objetivo()

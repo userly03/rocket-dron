@@ -28,6 +28,7 @@ from src.models.hpm_weapon import HPMWeapon
 from src.models.hpm_missile import MissileEstado
 from src.models.hpm_system import HPMissileSystem
 from src.models.jammer import Jammer
+from src.models.structure import Estructura
 from src.models.swarm import FormacionTipo, Swarm
 from src.utils.helpers import drone_to_dict
 from src.utils.reproducibilidad import rng as global_rng
@@ -82,6 +83,25 @@ class SimulationEngine:
     # después de una brecha — activar esto ahí cambiaría esos resultados
     # en silencio. Solo la app en vivo (src/main.py) lo activa.
     kamikaze_activo: bool = False
+    # Edificios atacables (ver src/models/structure.py): objetivos
+    # ALTERNATIVOS al vehículo — el enjambre elige el más cercano entre
+    # el vehículo (si no está destruido) y cada estructura no destruida
+    # (ver _elegir_objetivo_enjambre). Mismo criterio que kamikaze_activo:
+    # flag APARTE de mision_activa, no implícito — con_mision=True en
+    # Monte Carlo/coevolución asume UN solo objetivo posible (el arma);
+    # agregar estructuras ahí cambiaría en silencio qué mide
+    # fraccion_alcanzo_objetivo/probabilidad_brecha. Solo la app en vivo
+    # lo activa. Requiere mision_activa=True (si no, nadie tiene
+    # objetivo, con o sin estructuras).
+    estructuras_activas: bool = False
+    estructuras: list[Estructura] = field(default_factory=list, init=False)
+    # Qué objetivo está activo ESTE tick — ("vehiculo", None) o
+    # ("estructura", id). Lo fija _elegir_objetivo_enjambre, lo consume
+    # _registrar_impactos_en_objetivo para saber a quién dañar cuando
+    # llega un dron (sin esto, "llegó al objetivo" no dice a CUÁL).
+    _objetivo_actual: tuple[str, int | None] = field(
+        default=("vehiculo", None), init=False, repr=False
+    )
     estado: SimulationState = SimulationState.DETENIDA
     tiempo: float = 0.0
     tick: int = 0
@@ -112,6 +132,20 @@ class SimulationEngine:
         if self.mision_activa:
             self.swarm.objetivo_x = HPM_ORIGIN_X
             self.swarm.objetivo_y = HPM_ORIGIN_Y
+
+        # Edificios atacables: un pueblito chico (4 casas/depósito) en la
+        # esquina OPUESTA al vehículo (que arranca en HPM_ORIGIN=(0,0)) —
+        # a propósito, para que el enjambre tenga una elección táctica
+        # real entre dos direcciones distintas, no un objetivo "de
+        # paso" camino al vehículo. Layout propio, no medido — ver
+        # docs/SEGUIMIENTO_SESION.md por el criterio.
+        if self.estructuras_activas:
+            self.estructuras = [
+                Estructura(id=0, x=780.0, y=800.0, nombre="Casa 1"),
+                Estructura(id=1, x=820.0, y=795.0, nombre="Casa 2"),
+                Estructura(id=2, x=800.0, y=830.0, nombre="Depósito"),
+                Estructura(id=3, x=835.0, y=825.0, nombre="Casa 3"),
+            ]
 
         # Propagar el generador de esta instancia a los sub-sistemas que lo
         # consumen. ``swarm``/``missile_system`` llegan construidos por su
@@ -180,8 +214,11 @@ class SimulationEngine:
                     "activa": self.swarm.objetivo_x is not None,
                     "objetivo_x": self.swarm.objetivo_x,
                     "objetivo_y": self.swarm.objetivo_y,
+                    "objetivo_tipo": self._objetivo_actual[0],
+                    "objetivo_id": self._objetivo_actual[1],
                     "brechas": self.swarm.contar_objetivo_alcanzado(),
                 },
+                "estructuras": [e.to_dict() for e in self.estructuras],
                 "radar": {
                     "origen_x": HPM_ORIGIN_X,
                     "origen_y": HPM_ORIGIN_Y,
@@ -278,6 +315,9 @@ class SimulationEngine:
             self.jammer.detener()
             self.jammer.origen_x = HPM_ORIGIN_X
             self.jammer.origen_y = HPM_ORIGIN_Y
+            for estructura in self.estructuras:
+                estructura.reset()
+            self._objetivo_actual = ("vehiculo", None)
             self.analytics.reset()
             self.estado = SimulationState.DETENIDA
 
@@ -337,7 +377,7 @@ class SimulationEngine:
     ) -> dict[str, Any]:
         with self._lock:
             self.hpm.configurar(potencia, direccion, apertura_cono, duty_cycle)
-            eventos = self.hpm.disparar(self.swarm.drones)
+            eventos = self.hpm.disparar(self.swarm.drones, obstaculos=self._obstaculos_activos())
             rechazo = self.hpm.ultimo_rechazo
 
             if rechazo is not None:
@@ -487,6 +527,59 @@ class SimulationEngine:
         )
         return result
 
+    def _obstaculos_activos(self) -> list[tuple[float, float, float]]:
+        """Círculos ``(x, y, radio)`` que bloquean línea de vista este
+        tick — cada estructura NO destruida (ver ``Estructura.
+        radio_bloqueo``; una vez destruida deja de bloquear, un edificio
+        caído no es un obstáculo sólido). Lista vacía si
+        ``estructuras_activas`` está apagado (comportamiento idéntico al
+        de antes de que existiera esto) o si no queda ninguna en pie."""
+        return [
+            (e.x, e.y, e.radio_bloqueo) for e in self.estructuras if not e.destruida
+        ]
+
+    def _elegir_objetivo_enjambre(self) -> None:
+        """Elige, cada tick, cuál es el objetivo ACTUAL del enjambre entre
+        los candidatos vivos: el vehículo (si no está destruido) y cada
+        estructura no destruida (si ``estructuras_activas``) — el más
+        cercano al ancla de cohesión del enjambre (``formacion_x/y``, no
+        la posición de un dron individual: es el punto que el modelo de
+        movimiento realmente usa, ver ``Swarm._avanzar_formacion_hacia_
+        objetivo``). Sin estructuras activas (o con todas ya destruidas),
+        esto se reduce exactamente al comportamiento de antes de este
+        ítem: siempre el vehículo.
+
+        Guarda cuál quedó activo en ``self._objetivo_actual`` para que
+        ``_registrar_impactos_en_objetivo`` sepa a quién dañar cuando un
+        dron llega — un dron YA marcado ``objetivo_alcanzado`` no se ve
+        afectado si el objetivo cambia después (ver ``Swarm.actualizar``):
+        siguió atacando lo que tenía delante cuando llegó.
+        """
+        candidatos: list[tuple[str, int | None, float, float]] = []
+        if not self.hpm.destruido:
+            candidatos.append(("vehiculo", None, self.hpm.origen_x, self.hpm.origen_y))
+        if self.estructuras_activas:
+            for e in self.estructuras:
+                if not e.destruida:
+                    candidatos.append(("estructura", e.id, e.x, e.y))
+
+        if not candidatos:
+            # Todo destruido — no queda nada que atacar. Mismo estado que
+            # mision_activa=False: Swarm ya maneja objetivo_x/y=None sin
+            # romper nada (ver _avanzar_formacion_hacia_objetivo/
+            # _detectar_impactos_en_objetivo).
+            self.swarm.objetivo_x = None
+            self.swarm.objetivo_y = None
+            return
+
+        cx, cy = self.swarm.formacion_x, self.swarm.formacion_y
+        tipo, id_, x, y = min(
+            candidatos, key=lambda c: (c[2] - cx) ** 2 + (c[3] - cy) ** 2
+        )
+        self._objetivo_actual = (tipo, id_)
+        self.swarm.objetivo_x = x
+        self.swarm.objetivo_y = y
+
     def _registrar_impactos_en_objetivo(self, llegaron: list[Any]) -> None:
         """Logea una brecha de la defensa: uno o más drones llegaron al
         objetivo este tick (ver ``Swarm.actualizar``/``_detectar_impactos_
@@ -506,10 +599,14 @@ class SimulationEngine:
             self.tiempo, len(llegaron), [d.id for d in llegaron],
         )
 
+        tipo_objetivo, id_objetivo = self._objetivo_actual
+
         # Kamikaze (ver kamikaze_activo): el PRIMER dron que llega ya
         # inutiliza la plataforma — no hace falta que lleguen más para
         # que "importe" (una vez destruida, sigue destruida hasta reset).
-        if self.kamikaze_activo and not self.hpm.destruido:
+        # Solo si el objetivo ACTIVO este tick era el vehículo — si el
+        # enjambre estaba atacando una estructura, esto no aplica.
+        if tipo_objetivo == "vehiculo" and self.kamikaze_activo and not self.hpm.destruido:
             self.hpm.destruido = True
             self.missile_system.destruido = True
             self._log(
@@ -526,6 +623,34 @@ class SimulationEngine:
                 "servicio hasta reiniciar la simulación",
                 self.tiempo, llegaron[0].id,
             )
+
+        # Edificios atacables (ver estructuras_activas): a diferencia del
+        # vehículo, acá CADA dron que llega daña la estructura — tiene
+        # salud propia, no es un único impacto kamikaze (ver
+        # Estructura.recibir_impacto_kamikaze / ESTRUCTURA_DANO_POR_DRON).
+        elif tipo_objetivo == "estructura":
+            estructura = next((e for e in self.estructuras if e.id == id_objetivo), None)
+            if estructura is not None:
+                for drone in llegaron:
+                    if estructura.destruida:
+                        break
+                    destruida_ahora = estructura.recibir_impacto_kamikaze()
+                    self._log(
+                        "estructura_impactada",
+                        {
+                            "estructura_id": estructura.id,
+                            "nombre": estructura.nombre,
+                            "drone_id": drone.id,
+                            "salud_restante": estructura.salud,
+                            "destruida": estructura.destruida,
+                        },
+                    )
+                    if destruida_ahora:
+                        validacion_logger.warning(
+                            "--- ESTRUCTURA DESTRUIDA — t=%.2fs --- '%s' cayó tras "
+                            "el impacto del dron %s",
+                            self.tiempo, estructura.nombre, drone.id,
+                        )
 
     def _sembrar_memoria_amenaza(
         self, eventos: list[dict], impacto_x: float, impacto_y: float
@@ -722,16 +847,8 @@ class SimulationEngine:
         self.jammer.origen_x = self.hpm.origen_x
         self.jammer.origen_y = self.hpm.origen_y
 
-        # Misión ofensiva con vehículo móvil: el objetivo del enjambre
-        # sigue la posición ACTUAL del arma, no la de cuando arrancó la
-        # simulación — el enjambre "sabe" dónde está la amenaza ahora
-        # (decisión de diseño confirmada explícitamente, no asumida: un
-        # vehículo que se muda no debería volverse invulnerable al
-        # enjambre ya en vuelo). Barato: sobreescribir dos floats cada
-        # tick, sin evento ni lógica de detección aparte.
         if self.mision_activa:
-            self.swarm.objetivo_x = self.hpm.origen_x
-            self.swarm.objetivo_y = self.hpm.origen_y
+            self._elegir_objetivo_enjambre()
 
         # Memoria de amenaza (P2-E, Parte 2): el decaimiento es una función
         # del tiempo transcurrido, no del flocking — avanza siempre que
@@ -767,14 +884,18 @@ class SimulationEngine:
                 evento_riesgo["shot_id"], atribuido,
             )
 
+        obstaculos = self._obstaculos_activos()
+
         eventos_jamming: list[dict] = []
         if mover_enjambre:
-            impactos_objetivo = self.swarm.actualizar(dt)
+            impactos_objetivo = self.swarm.actualizar(
+                dt, self.hpm.origen_x, self.hpm.origen_y, obstaculos=obstaculos
+            )
             if impactos_objetivo:
                 self._registrar_impactos_en_objetivo(impactos_objetivo)
             eventos_jamming = self.jammer.actualizar(self.swarm.drones)
         eventos_misil = self.missile_system.actualizar_misiles(
-            self.swarm.drones, dt, track_manager=self.swarm.track_manager
+            self.swarm.drones, dt, track_manager=self.swarm.track_manager, obstaculos=obstaculos
         )
         self.tiempo += dt
         self.tick += 1

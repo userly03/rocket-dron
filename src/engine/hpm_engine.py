@@ -21,6 +21,8 @@ Motor HPM: dos modelos de probabilidad de neutralización.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 from src.config import (
@@ -923,3 +925,77 @@ def energia_absorbida_j(
     densidad_promedio = diag["densidad_potencia_w_m2"] * duty
     area_efectiva_m2 = max(float(cable_length_m), 1e-6) ** 2
     return float(densidad_promedio * area_efectiva_m2 * max(float(duracion_exposicion_s), 0.0))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Línea de vista (terreno físico — edificios/árboles bloqueando el haz)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Simplificación deliberada, documentada: el chequeo es 2D, en el plano
+# del suelo — no se modela la altura del obstáculo ni la trayectoria 3D
+# real del rayo (que sube/baja con la altitud del dron). Un dron que
+# vuela muy por encima de un edificio bajo también queda "bloqueado" acá,
+# lo cual es menos realista que un modelo con altura, pero evita inventar
+# una altura de edificio sin dato real que la respalde — mismo criterio
+# que el resto del proyecto usa para no inventar constantes (ver p. ej.
+# "sin near-field" en docs/FISICA_Y_MATEMATICA.md §4, misma sección de
+# limitaciones conocidas).
+
+
+def linea_de_vista_bloqueada(
+    origen_x: float,
+    origen_y: float,
+    destino_x: float,
+    destino_y: float,
+    obstaculos: list[tuple[float, float, float]] | None,
+) -> bool:
+    """
+    True si el segmento origen→destino pasa por CUALQUIER obstáculo
+    (una lista de círculos ``(x, y, radio)`` — ver ``Estructura.
+    radio_bloqueo`` en ``src/models/structure.py``). ``obstaculos=None``
+    o lista vacía siempre da False — es el valor por defecto de todo
+    llamador existente, así que sin obstáculos el comportamiento es
+    idéntico al de antes de que existiera esta función.
+
+    Bloqueo binario (todo o nada), no atenuación graduada: un edificio
+    real a 2.45GHz no deja pasar una fracción "razonable" de la señal,
+    la bloquea casi por completo — un coeficiente de atenuación parcial
+    sería un número inventado sin dato que lo respalde.
+    """
+    if not obstaculos:
+        return False
+    for cx, cy, radio in obstaculos:
+        if _segmento_intersecta_circulo(origen_x, origen_y, destino_x, destino_y, cx, cy, radio):
+            return True
+    return False
+
+
+def _segmento_intersecta_circulo(
+    p0x: float, p0y: float, p1x: float, p1y: float, cx: float, cy: float, radio: float
+) -> bool:
+    """Intersección segmento-círculo estándar (fórmula cuadrática sobre
+    el segmento parametrizado) — True si el segmento [p0,p1] toca o
+    atraviesa el círculo de centro (cx,cy) y radio ``radio``, en
+    cualquier punto entre p0 y p1 (no solo en la recta infinita)."""
+    dx, dy = p1x - p0x, p1y - p0y
+    fx, fy = p0x - cx, p0y - cy
+    a = dx * dx + dy * dy
+    if a < 1e-9:
+        # Segmento degenerado (origen == destino): solo importa si ese
+        # punto único ya está dentro del círculo.
+        return math.hypot(fx, fy) <= radio
+    b = 2.0 * (fx * dx + fy * dy)
+    c = fx * fx + fy * fy - radio * radio
+    discriminante = b * b - 4.0 * a * c
+    if discriminante < 0.0:
+        return False
+    raiz = math.sqrt(discriminante)
+    t1 = (-b - raiz) / (2.0 * a)
+    t2 = (-b + raiz) / (2.0 * a)
+    if 0.0 <= t1 <= 1.0 or 0.0 <= t2 <= 1.0:
+        return True
+    # El segmento entero podría estar DENTRO del círculo (ambas raíces
+    # fuera de [0,1] mismo lado a lado) — caso borde, poco probable acá
+    # (el origen es el arma, no suele estar dentro de un obstáculo), pero
+    # correcto tenerlo.
+    return t1 < 0.0 and t2 > 1.0

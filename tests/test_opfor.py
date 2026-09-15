@@ -26,6 +26,7 @@ from src.models.drone import (
     EstadoSalud,
     PerfilLostLink,
 )
+from src.models.structure import Estructura
 from src.models.swarm import Swarm
 from src.utils.helpers import distance
 
@@ -889,6 +890,181 @@ class TestVehiculoMovil:
         # saltó ni se congeló.
         assert sim.hpm.en_movimiento is True
         assert sim.hpm.origen_x == pytest.approx(x_parcial)
+        sim.shutdown()
+
+
+class TestEstructura:
+    """Estructura en aislado, sin motor de simulación — salud propia,
+    a diferencia del vehículo (un solo impacto kamikaze lo destruye)."""
+
+    def test_arranca_con_salud_maxima_y_sin_destruir(self):
+        e = Estructura(id=0, x=100.0, y=200.0)
+        assert e.salud == e.salud_maxima
+        assert e.destruida is False
+
+    def test_un_impacto_no_alcanza_para_destruirla(self):
+        e = Estructura(id=0, x=0.0, y=0.0)
+        destruida_ahora = e.recibir_impacto_kamikaze()
+        assert destruida_ahora is False
+        assert e.destruida is False
+        assert 0 < e.salud < e.salud_maxima
+
+    def test_suficientes_impactos_la_destruyen(self):
+        e = Estructura(id=0, x=0.0, y=0.0)
+        destruida_ahora = False
+        for _ in range(10):
+            destruida_ahora = e.recibir_impacto_kamikaze()
+            if destruida_ahora:
+                break
+        assert destruida_ahora is True
+        assert e.destruida is True
+        assert e.salud == 0.0
+
+    def test_impactos_sobre_estructura_ya_destruida_son_no_op(self):
+        e = Estructura(id=0, x=0.0, y=0.0)
+        for _ in range(10):
+            e.recibir_impacto_kamikaze()
+        assert e.destruida is True
+
+        destruida_ahora = e.recibir_impacto_kamikaze()
+
+        assert destruida_ahora is False  # no "vuelve" a destruirse
+        assert e.salud == 0.0
+
+    def test_reset_repara_del_todo(self):
+        e = Estructura(id=0, x=0.0, y=0.0)
+        for _ in range(10):
+            e.recibir_impacto_kamikaze()
+        assert e.destruida is True
+
+        e.reset()
+
+        assert e.destruida is False
+        assert e.salud == e.salud_maxima
+
+
+class TestEstructurasAtacables:
+    """El enjambre elige el objetivo más cercano entre el vehículo y las
+    estructuras (edificios) no destruidas — opt-in vía
+    estructuras_activas, deliberadamente separado de mision_activa/
+    con_mision (ver el comentario del campo en SimulationEngine)."""
+
+    def test_apagado_por_defecto_no_hay_estructuras(self):
+        sim = SimulationEngine(swarm_size=2, mision_activa=True)
+        assert sim.estructuras_activas is False
+        assert sim.estructuras == []
+        sim.shutdown()
+
+    def test_activado_crea_el_layout_por_defecto(self):
+        sim = SimulationEngine(swarm_size=2, mision_activa=True, estructuras_activas=True)
+        assert len(sim.estructuras) == 4
+        assert all(not e.destruida for e in sim.estructuras)
+        sim.shutdown()
+
+    def test_sin_estructuras_activas_el_objetivo_siempre_es_el_vehiculo(self):
+        """Mismo comportamiento que antes de este ítem, byte a byte."""
+        sim = SimulationEngine(swarm_size=2, mision_activa=True)
+        sim._elegir_objetivo_enjambre()
+        assert sim._objetivo_actual == ("vehiculo", None)
+        assert sim.swarm.objetivo_x == sim.hpm.origen_x
+        assert sim.swarm.objetivo_y == sim.hpm.origen_y
+        sim.shutdown()
+
+    def test_elige_el_candidato_mas_cercano_a_la_formacion(self):
+        sim = SimulationEngine(swarm_size=2, mision_activa=True, estructuras_activas=True)
+        # El enjambre arranca cerca del centro del campo — más cerca del
+        # pueblito (ver el layout en __post_init__) que del vehículo, que
+        # está en la esquina (HPM_ORIGIN_X/Y).
+        sim._elegir_objetivo_enjambre()
+        assert sim._objetivo_actual[0] == "estructura"
+
+        # Si en cambio el enjambre está pegado al vehículo, el vehículo
+        # gana.
+        sim.swarm.formacion_x, sim.swarm.formacion_y = HPM_ORIGIN_X, HPM_ORIGIN_Y
+        sim._elegir_objetivo_enjambre()
+        assert sim._objetivo_actual == ("vehiculo", None)
+        sim.shutdown()
+
+    def test_un_dron_que_llega_dana_la_estructura_no_la_destruye_solo(self):
+        sim = SimulationEngine(swarm_size=1, mision_activa=True, estructuras_activas=True)
+        estructura = sim.estructuras[0]
+        sim.swarm.drones[0].x, sim.swarm.drones[0].y = estructura.x, estructura.y
+        sim.swarm.formacion_x, sim.swarm.formacion_y = estructura.x, estructura.y
+
+        sim._tick(0.1, mover_enjambre=True)
+
+        assert sim._objetivo_actual == ("estructura", estructura.id)
+        assert 0 < estructura.salud < estructura.salud_maxima
+        assert estructura.destruida is False
+        eventos = [e for e in sim.logs if e["evento"] == "estructura_impactada"]
+        assert len(eventos) == 1
+        assert eventos[0]["datos"]["estructura_id"] == estructura.id
+        sim.shutdown()
+
+    def test_varios_drones_seguidos_la_destruyen_y_el_enjambre_redirige(self):
+        sim = SimulationEngine(swarm_size=20, mision_activa=True, estructuras_activas=True)
+        estructura = sim.estructuras[0]
+        for d in sim.swarm.drones:
+            d.x, d.y = estructura.x, estructura.y
+        sim.swarm.formacion_x, sim.swarm.formacion_y = estructura.x, estructura.y
+
+        sim._tick(0.1, mover_enjambre=True)
+
+        assert estructura.destruida is True
+        # El objetivo del PRÓXIMO tick ya no puede ser la estructura 0
+        # (destruida) — redirige a otra cosa (otra estructura o el
+        # vehículo), no se congela apuntando a algo que ya cayó.
+        sim._elegir_objetivo_enjambre()
+        assert sim._objetivo_actual != ("estructura", estructura.id)
+        sim.shutdown()
+
+    def test_kamikaze_en_vehiculo_no_toca_las_estructuras(self):
+        sim = SimulationEngine(
+            swarm_size=1, mision_activa=True, kamikaze_activo=True, estructuras_activas=True
+        )
+        sim.swarm.drones[0].x, sim.swarm.drones[0].y = HPM_ORIGIN_X, HPM_ORIGIN_Y
+        sim.swarm.formacion_x, sim.swarm.formacion_y = HPM_ORIGIN_X, HPM_ORIGIN_Y
+
+        sim._tick(0.1, mover_enjambre=True)
+
+        assert sim.hpm.destruido is True
+        assert all(e.salud == e.salud_maxima for e in sim.estructuras)
+        sim.shutdown()
+
+    def test_todo_destruido_el_enjambre_se_queda_sin_objetivo(self):
+        sim = SimulationEngine(
+            swarm_size=1, mision_activa=True, kamikaze_activo=True, estructuras_activas=True
+        )
+        sim.hpm.destruido = True
+        for e in sim.estructuras:
+            e.destruida = True
+
+        sim._elegir_objetivo_enjambre()
+
+        assert sim.swarm.objetivo_x is None
+        assert sim.swarm.objetivo_y is None
+        sim.shutdown()
+
+    def test_reset_repara_todas_las_estructuras_y_vuelve_al_vehiculo(self):
+        sim = SimulationEngine(swarm_size=1, mision_activa=True, estructuras_activas=True)
+        for e in sim.estructuras:
+            e.recibir_impacto_kamikaze()
+        sim._objetivo_actual = ("estructura", sim.estructuras[0].id)
+
+        sim.reset()
+
+        assert all(not e.destruida and e.salud == e.salud_maxima for e in sim.estructuras)
+        assert sim._objetivo_actual == ("vehiculo", None)
+        sim.shutdown()
+
+    def test_snapshot_incluye_estructuras_y_tipo_de_objetivo(self):
+        sim = SimulationEngine(swarm_size=2, mision_activa=True, estructuras_activas=True)
+        sim._elegir_objetivo_enjambre()
+
+        snap = sim._build_snapshot()
+
+        assert len(snap["estructuras"]) == 4
+        assert snap["mision"]["objetivo_tipo"] in ("vehiculo", "estructura")
         sim.shutdown()
 
 

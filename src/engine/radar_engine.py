@@ -234,6 +234,7 @@ class TrackManager:
         frequency_ghz: float,
         rcs_m2: float,
         noise_floor_w: float,
+        obstaculos: list[tuple[float, float, float]] | None = None,
     ) -> None:
         """
         Avanza el radar un paso ``dt``: propaga todos los tracks vivos, y —
@@ -245,7 +246,15 @@ class TrackManager:
         ``.z`` y un atributo ``.detectado`` asignable — es decir, cualquier
         ``Drone`` real. Se importa ``distance3d`` acá (no al tope del
         módulo) para no crear un ciclo con ``src.utils.helpers``.
+
+        ``obstaculos`` (línea de vista — ver ``hpm_engine.linea_de_vista_
+        bloqueada``): un dron detrás de un obstáculo NO se detecta esta
+        revisita, sin importar el SNR — un radar real tampoco ve a través
+        de un edificio. Se pierde el track igual que "fuera de rango/SNR"
+        (mismo camino, no un caso especial nuevo). ``None`` (default) es
+        CERO obstáculos, idéntico al comportamiento de antes de esto.
         """
+        from src.engine.hpm_engine import linea_de_vista_bloqueada
         from src.utils.helpers import distance3d
 
         self._propagar(dt)
@@ -263,6 +272,10 @@ class TrackManager:
             detectado, _probabilidad = evaluar_deteccion(
                 dist, pt_w, gain_dbi, frequency_ghz, rcs_m2, noise_floor_w
             )
+            if detectado and linea_de_vista_bloqueada(
+                origen_x, origen_y, drone.x, drone.y, obstaculos
+            ):
+                detectado = False
             track = self.tracks.get(drone.id)
 
             if not detectado:
