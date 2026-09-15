@@ -48,6 +48,11 @@ class FireRequest(BaseModel):
     )
 
 
+class MoverPlataformaRequest(BaseModel):
+    x: float = Field(ge=0, description="Destino X (metros) — se recorta a los límites del campo")
+    y: float = Field(ge=0, description="Destino Y (metros) — se recorta a los límites del campo")
+
+
 class StartRequest(BaseModel):
     formacion: str | None = Field(default=None, description="cuadrada, circular, aleatoria, linea o v")
     cantidad: int | None = Field(default=None, ge=1, le=500, description="Número de drones")
@@ -162,9 +167,22 @@ def set_speed(sim: SimulationDep, body: SpeedRequest) -> dict:
 
 @router.post("/fire")
 def fire_hpm(sim: SimulationDep, body: FireRequest | None = None) -> dict:
-    """Dispara el cañón HPM estático de tierra (cono direccional)."""
+    """Dispara el cañón HPM de tierra (cono direccional) — rechaza (200 OK
+    con mensaje, no error HTTP) si está en movimiento, destruido, o sin
+    presupuesto de energía/temperatura, ver HPMWeapon.disparar."""
     params = body or FireRequest()
     return sim.fire(params.potencia, params.direccion, params.apertura_cono, params.duty_cycle)
+
+
+@router.post("/hpm/mover")
+def mover_plataforma(sim: SimulationDep, body: MoverPlataformaRequest) -> dict:
+    """Ordena al vehículo (cañón + misil + jammer, mismo emplazamiento)
+    reposicionarse a (x, y) — "shoot and scoot": mientras viaja no puede
+    disparar ni lanzar misiles."""
+    result = sim.mover_plataforma(body.x, body.y)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("message", "No se pudo mover"))
+    return result
 
 
 @router.get("/drones")

@@ -35,6 +35,15 @@ FIELD_HEIGHT: float = float(os.getenv("FIELD_HEIGHT", "1000"))
 HPM_ORIGIN_X: float = float(os.getenv("HPM_ORIGIN_X", "0"))
 HPM_ORIGIN_Y: float = float(os.getenv("HPM_ORIGIN_Y", "0"))
 
+# Velocidad de reposicionamiento del vehículo lanzador ("shoot and scoot":
+# se mueve, se detiene, recién ahí puede disparar — ver HPMWeapon.
+# iniciar_movimiento/en_movimiento). ~30 km/h es un crucero campo traviesa
+# realista para un vehículo rastreado liviano (no de carretera, no a
+# velocidad máxima) — más rápido que eso empieza a competir en velocidad
+# con el propio enjambre (SWARM_AVANCE_VELOCIDAD_M_S=20) de forma que ya
+# no se lee como "reposicionar la batería" sino como una persecución.
+VEHICULO_VELOCIDAD_M_S: float = float(os.getenv("VEHICULO_VELOCIDAD_M_S", "8.3"))
+
 MISSILE_SPEED: float = float(os.getenv("MISSILE_SPEED", "400"))
 MISSILE_DEFAULT_POWER: float = float(os.getenv("MISSILE_DEFAULT_POWER", "50"))
 MISSILE_DEFAULT_RADIUS: float = float(os.getenv("MISSILE_DEFAULT_RADIUS", "100"))

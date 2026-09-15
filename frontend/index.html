@@ -153,7 +153,7 @@
 
         <aside class="control-panel panel" aria-label="Panel de control">
           <div class="control-section">
-            <h2 class="panel-title"><svg class="icon" aria-hidden="true"><use href="#i-gear"></use></svg> Cañón HPM <span class="panel-tag">Estático</span></h2>
+            <h2 class="panel-title"><svg class="icon" aria-hidden="true"><use href="#i-gear"></use></svg> Cañón HPM <span class="panel-tag" id="hpm-movimiento-tag">Estático</span></h2>
             <div class="control-group">
               <label for="power-slider">Potencia HPM <span class="control-value"><span id="power-value">45</span> kW</span></label>
               <input type="range" id="power-slider" min="10" max="100" value="45" step="1">
@@ -162,7 +162,9 @@
               <label for="direction-slider">Dirección HPM <span class="control-value"><span id="direction-value">45</span>°</span></label>
               <input type="range" id="direction-slider" min="0" max="359" value="45" step="1">
             </div>
-            <button type="button" id="btn-fire" class="btn btn-fire" title="Dispara el cañón HPM estático en la dirección y potencia configuradas"><svg class="icon" aria-hidden="true"><use href="#i-flame"></use></svg> DISPARAR CAÑÓN</button>
+            <button type="button" id="btn-fire" class="btn btn-fire" title="Dispara el cañón HPM en la dirección y potencia configuradas — rechaza si el vehículo está en movimiento"><svg class="icon" aria-hidden="true"><use href="#i-flame"></use></svg> DISPARAR CAÑÓN</button>
+            <button type="button" id="btn-mover-plataforma" class="btn" title="Reposiciona el vehículo (cañón + misil + jammer) — 'shoot and scoot': mientras viaja no puede disparar. Click en el mapa táctico para elegir destino."><svg class="icon" aria-hidden="true"><use href="#i-map"></use></svg> MOVER PLATAFORMA</button>
+            <div id="plataforma-movimiento-status" class="wta-hint hidden"></div>
           </div>
           <div class="control-section control-section-missile">
             <h2 class="panel-title"><svg class="icon" aria-hidden="true"><use href="#i-rocket"></use></svg> Misil HPM <span class="panel-tag">CHAMP</span></h2>

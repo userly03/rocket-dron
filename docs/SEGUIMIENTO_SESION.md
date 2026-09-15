@@ -526,3 +526,62 @@ documentada en 9.1, ahora con una consecuencia irreversible en vez de
 solo estadística. No es un bug, es el ritmo real que da esta calibración
 combinado con esta característica nueva — mencionado acá por si en algún
 momento se quiere ajustar el ritmo del "primer combate" de la demo.
+
+### 9.6 Vehículo móvil — "shoot and scoot" — ✅ CERRADO
+
+Pedido explícito, y resuelve por su cuenta la objeción física que yo
+mismo había puesto contra un vehículo móvil: un HPM real no puede apuntar
+con precisión en movimiento, pero SÍ puede reposicionarse ENTRE
+disparos — es la doctrina real de sistemas de defensa aérea de corto
+alcance (Pantsir y similares): se mueven, se detienen, recién ahí operan.
+
+`HPMWeapon.destino_x/y` (`None` = quieto) + `iniciar_movimiento`/
+`actualizar_movimiento(dt)`, llamado desde `HPMWeapon.actualizar` (mismo
+método que ya avanzaba enfriamiento/recarga cada tick). A
+`VEHICULO_VELOCIDAD_M_S=8.3` (~30km/h, crucero campo traviesa de un
+vehículo rastreado liviano — elegido para no competir en velocidad con
+el propio avance del enjambre, `SWARM_AVANCE_VELOCIDAD_M_S=20`, o dejaría
+de leerse como "reposicionar la batería" y pasaría a ser una
+persecución). `listo_para_disparar()`/`disparar()` rechazan en tránsito
+por el mismo canal que ya usaban destruido/energía/temperatura; el
+lanzador de misiles no tiene su propio `origen_x/y` (recibe la posición
+del cañón en cada lanzamiento), así que se gatea aparte en
+`SimulationEngine.launch_missile`. El jammer comparte vehículo — su
+`origen_x/y` se sincroniza con el del cañón cada tick.
+
+Decisión de diseño confirmada explícitamente con el usuario (no asumida):
+el objetivo del enjambre (misión ofensiva) sigue la posición ACTUAL del
+vehículo, no la de cuando arrancó la simulación — barato de implementar
+(sobreescribir `swarm.objetivo_x/y` cada tick si `mision_activa`), y con
+una consecuencia táctica real y no trivial: mudarse hacia el lado del
+mapa donde está el enjambre ACELERA el kamikaze en vez de evitarlo,
+verificado en vivo (moví el vehículo, el enjambre redirigió de inmediato
+y lo alcanzó bastante antes de lo que hubiera tardado quieto). Es
+comportamiento emergente correcto, no un bug — confirma que el sistema
+de misión y el de movimiento están genuinamente conectados.
+
+Hallazgo honesto, no decidido a propósito, dejado tal cual: si el
+kamikaze destruye la plataforma MIENTRAS está en tránsito, el vehículo
+de todos modos termina de llegar a destino — la destrucción apaga el
+emisor (`disparar()`/`lanzar()` rechazan), no el motor/tren de rodaje
+(`actualizar_movimiento` no chequea `destruido`). Defendible como está
+(el impacto fue sobre el emisor específicamente, según el propio mensaje
+de rechazo), pero no fue una decisión explícita — si en algún momento se
+quiere que un vehículo destruido quede totalmente inmóvil, es un chequeo
+de una línea.
+
+Frontend: botón "MOVER PLATAFORMA" arma un modo de click-en-el-mapa
+(`activarModoMover` en render3d.js, raycasting contra el plano del
+suelo, conversión a coordenadas del mundo); badge del panel alterna
+"Estático"/"En movimiento" leyendo directo del snapshot (no del estado
+que se congela mientras el usuario arrastra un slider); posición del
+vehículo suavizada con el mismo criterio de lerp que ya usan los drones,
+para que no salte entre snapshots.
+
+9 tests nuevos (`tests/test_opfor.py::TestVehiculoMovil`), 210 tests de
+todo lo que toca `HPMWeapon`/`SimulationEngine` sin regresiones.
+Verificado en vivo end-to-end: click en el mapa → POST /api/hpm/mover →
+vehículo visible moviéndose en el mapa 3D, badge y estado del panel
+correctos, "DISPARAR CAÑÓN"/"LANZAR MISIL" rechazados mientras viaja,
+llega exacto al destino elegido y vuelve a poder disparar, reset lo
+devuelve al origen.

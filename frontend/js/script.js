@@ -66,6 +66,9 @@
     scenarioSelect: document.getElementById("scenario-select"),
     btnLoadScenario: document.getElementById("btn-load-scenario"),
     btnFire: document.getElementById("btn-fire"),
+    btnMoverPlataforma: document.getElementById("btn-mover-plataforma"),
+    hpmMovimientoTag: document.getElementById("hpm-movimiento-tag"),
+    plataformaMovimientoStatus: document.getElementById("plataforma-movimiento-status"),
     btnLaunchMissile: document.getElementById("btn-launch-missile"),
     btnReloadMissile: document.getElementById("btn-reload-missile"),
     btnWtaPlan: document.getElementById("btn-wta-plan"),
@@ -673,6 +676,21 @@
       state.plataformaDestruida = snap.hpm.destruido === true;
       window.Render3D?.setPlataformaDestruida(state.plataformaDestruida);
     }
+    // Badge "Estático"/"En movimiento" — leído directo de snap.hpm (no de
+    // state.hpm), que solo se actualiza si el usuario no está arrastrando
+    // un slider ahora mismo — el estado de movimiento no tiene nada que
+    // ver con eso, siempre tiene que estar al día.
+    if (snap.hpm) {
+      if (snap.hpm.en_movimiento) {
+        ui.hpmMovimientoTag.textContent = "En movimiento";
+        ui.plataformaMovimientoStatus.textContent =
+          `Reposicionando a (${Math.round(snap.hpm.destino_x)}, ${Math.round(snap.hpm.destino_y)})…`;
+        ui.plataformaMovimientoStatus.classList.remove("hidden");
+      } else {
+        ui.hpmMovimientoTag.textContent = "Estático";
+        ui.plataformaMovimientoStatus.classList.add("hidden");
+      }
+    }
     if (snap.estado) { state.simEstado = snap.estado; updateSimBadge(snap.estado); }
     if (snap.tiempo !== undefined) state.simTime = snap.tiempo;
     if (snap.time_scale !== undefined) setActiveSpeedButton(snap.time_scale);
@@ -936,6 +954,23 @@
         }
         wsClient?.requestStatus();
       } catch (e) { addLog(e.message, "error"); }
+    });
+
+    ui.btnMoverPlataforma.addEventListener("click", () => {
+      // Arma el modo "el próximo click en el mapa 3D es el destino" —
+      // ver activarModoMover en render3d.js (hace la conversión de
+      // pantalla a coordenadas del mundo vía raycasting).
+      ui.btnMoverPlataforma.disabled = true;
+      ui.btnMoverPlataforma.textContent = "Click en el mapa para elegir destino…";
+      window.Render3D?.activarModoMover(async (x, y) => {
+        ui.btnMoverPlataforma.disabled = false;
+        ui.btnMoverPlataforma.innerHTML = `<svg class="icon" aria-hidden="true"><use href="#i-map"></use></svg> MOVER PLATAFORMA`;
+        try {
+          await api("/api/hpm/mover", { method: "POST", body: JSON.stringify({ x, y }) });
+          addLog(`Reposicionando vehículo a (${Math.round(x)}, ${Math.round(y)})`, "info");
+          wsClient?.requestStatus();
+        } catch (e) { addLog(e.message, "error"); }
+      });
     });
 
     ui.btnLaunchMissile.addEventListener("click", async () => {

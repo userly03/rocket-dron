@@ -772,3 +772,123 @@ class TestKamikaze:
         assert "fraccion_alcanzo_objetivo" in resultado
 
 
+class TestVehiculoMovil:
+    """"Shoot and scoot": el vehículo (cañón + misil + jammer, mismo
+    emplazamiento) puede reposicionarse, pero no dispara/lanza EN
+    TRÁNSITO — un HPM real necesita estar quieto para apuntar. El
+    objetivo del enjambre (misión ofensiva) sigue la posición ACTUAL del
+    arma, no la de cuando arrancó la simulación."""
+
+    def test_en_reposo_por_defecto_puede_disparar(self):
+        sim = SimulationEngine(swarm_size=2)
+        assert sim.hpm.en_movimiento is False
+        assert sim.hpm.listo_para_disparar() is True
+        sim.shutdown()
+
+    def test_mover_plataforma_la_pone_en_movimiento_y_bloquea_el_disparo(self):
+        sim = SimulationEngine(swarm_size=2)
+        r = sim.mover_plataforma(300.0, 300.0)
+        assert r["success"] is True
+        assert sim.hpm.en_movimiento is True
+        assert sim.hpm.listo_para_disparar() is False
+
+        eventos = sim.hpm.disparar(sim.swarm.drones)
+        assert eventos == []
+        assert "movimiento" in sim.hpm.ultimo_rechazo
+        sim.shutdown()
+
+    def test_lanzar_misil_en_movimiento_se_rechaza_sin_excepcion(self):
+        sim = SimulationEngine(swarm_size=2)
+        sim.mover_plataforma(300.0, 300.0)
+
+        resultado = sim.launch_missile(x=sim.hpm.origen_x, y=sim.hpm.origen_y)
+
+        assert resultado["success"] is False
+        assert "movimiento" in resultado["message"]
+        sim.shutdown()
+
+    def test_llega_al_destino_exacto_y_vuelve_a_poder_disparar(self):
+        sim = SimulationEngine(swarm_size=2)
+        sim.mover_plataforma(100.0, 0.0)  # 100m, a VEHICULO_VELOCIDAD_M_S=8.3 -> ~12s
+
+        for _ in range(300):  # 30s simulados, de sobra
+            sim._tick(0.1, mover_enjambre=False)
+            if not sim.hpm.en_movimiento:
+                break
+        else:
+            pytest.fail("el vehículo no llegó a destino en 30s simulados")
+
+        assert sim.hpm.origen_x == pytest.approx(100.0)
+        assert sim.hpm.origen_y == pytest.approx(0.0)
+        assert sim.hpm.listo_para_disparar() is True
+        sim.shutdown()
+
+    def test_jammer_sigue_al_vehiculo(self):
+        sim = SimulationEngine(swarm_size=2)
+        sim.mover_plataforma(50.0, 0.0)
+        for _ in range(100):
+            sim._tick(0.1, mover_enjambre=False)
+            if not sim.hpm.en_movimiento:
+                break
+        assert sim.jammer.origen_x == pytest.approx(sim.hpm.origen_x)
+        assert sim.jammer.origen_y == pytest.approx(sim.hpm.origen_y)
+        sim.shutdown()
+
+    def test_objetivo_del_enjambre_sigue_al_vehiculo_moviendose(self):
+        sim = SimulationEngine(swarm_size=1, mision_activa=True)
+        assert sim.swarm.objetivo_x == HPM_ORIGIN_X
+
+        sim.mover_plataforma(400.0, 0.0)
+        for _ in range(50):
+            sim._tick(0.1, mover_enjambre=False)
+        # Todavía en tránsito (400m a 8.3 m/s tarda ~48s) — el objetivo ya
+        # tiene que estar siguiendo la posición ACTUAL, no la de arranque.
+        assert sim.hpm.en_movimiento is True
+        assert sim.swarm.objetivo_x == pytest.approx(sim.hpm.origen_x)
+        assert sim.swarm.objetivo_x != HPM_ORIGIN_X
+        sim.shutdown()
+
+    def test_reset_detiene_el_movimiento_y_vuelve_al_origen(self):
+        sim = SimulationEngine(swarm_size=2)
+        sim.mover_plataforma(300.0, 300.0)
+        for _ in range(50):
+            sim._tick(0.1, mover_enjambre=False)
+        assert sim.hpm.en_movimiento is True
+
+        sim.reset()
+
+        assert sim.hpm.en_movimiento is False
+        assert sim.hpm.origen_x == HPM_ORIGIN_X
+        assert sim.hpm.origen_y == HPM_ORIGIN_Y
+        sim.shutdown()
+
+    def test_plataforma_destruida_no_puede_moverse(self):
+        sim = SimulationEngine(swarm_size=1, mision_activa=True, kamikaze_activo=True)
+        sim.swarm.drones[0].x, sim.swarm.drones[0].y = HPM_ORIGIN_X, HPM_ORIGIN_Y
+        sim._tick(0.1)
+        assert sim.hpm.destruido is True
+
+        r = sim.mover_plataforma(300.0, 300.0)
+
+        assert r["success"] is False
+        assert sim.hpm.en_movimiento is False
+        sim.shutdown()
+
+    def test_redirigir_a_mitad_de_camino_sobreescribe_el_destino(self):
+        sim = SimulationEngine(swarm_size=2)
+        sim.mover_plataforma(1000.0, 0.0)
+        for _ in range(20):  # avanza un poco, no llega
+            sim._tick(0.1, mover_enjambre=False)
+        assert sim.hpm.en_movimiento is True
+        x_parcial = sim.hpm.origen_x
+
+        sim.mover_plataforma(0.0, 0.0)  # cambia de destino a mitad de camino
+
+        assert sim.hpm.destino_x == 0.0
+        # Sigue en movimiento, pero ahora hacia el nuevo destino — no
+        # saltó ni se congeló.
+        assert sim.hpm.en_movimiento is True
+        assert sim.hpm.origen_x == pytest.approx(x_parcial)
+        sim.shutdown()
+
+

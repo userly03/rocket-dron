@@ -171,6 +171,18 @@ const Render3D = (() => {
   // reset sin tener que recordar los hex a mano acá.
   let plataformaDestruida = false;
   const coloresOriginalesVehiculo = new Map();
+  // "Mover plataforma": mientras está armado, el próximo click en el
+  // mapa se interpreta como destino (no como parte del control de
+  // órbita de OrbitControls, que usa drag, no click suelto) — ver
+  // configurarClickParaMover/activarModoMover.
+  let modoMoverActivo = false;
+  let callbackDestinoElegido = null;
+  const _raycaster = new THREE.Raycaster();
+  const _planoSuelo = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  // Suavizado de la posición del vehículo (mismo criterio que
+  // droneRecords._smoothX/Y) — sin esto, cada snapshot nuevo movería el
+  // modelo en saltos discretos en vez de un desplazamiento fluido.
+  const _smoothVehiculo = { x: null, z: null };
   let radarRingMesh = null;
   let radarPingMesh = null;
   let trackLinesMesh = null;
@@ -227,6 +239,7 @@ const Render3D = (() => {
     buildHeatmapPlane();
     buildHpmCone();
     buildDroneTemplate();
+    configurarClickParaMover();
 
     resize();
     started = true;
@@ -403,8 +416,18 @@ const Render3D = (() => {
     // cámara al vehículo en sí.
     lastHpmOrigin.x = origin.x;
     lastHpmOrigin.z = origin.z;
-    if (vehiculoGroup) vehiculoGroup.position.set(origin.x, 0, origin.z);
-    if (radarRingMesh) radarRingMesh.position.set(origin.x, 0.5, origin.z);
+    // Suavizado (mismo criterio que droneRecords._smoothX/Y): el
+    // vehículo ahora puede moverse ("shoot and scoot"), sin esto cada
+    // snapshot nuevo lo saltaría de golpe en vez de deslizarse.
+    if (_smoothVehiculo.x === null) {
+      _smoothVehiculo.x = origin.x;
+      _smoothVehiculo.z = origin.z;
+    } else {
+      _smoothVehiculo.x = lerp(_smoothVehiculo.x, origin.x, 0.25);
+      _smoothVehiculo.z = lerp(_smoothVehiculo.z, origin.z, 0.25);
+    }
+    if (vehiculoGroup) vehiculoGroup.position.set(_smoothVehiculo.x, 0, _smoothVehiculo.z);
+    if (radarRingMesh) radarRingMesh.position.set(_smoothVehiculo.x, 0.5, _smoothVehiculo.z);
 
     const dirDeg = hpm.direccion ?? 0;
     // Torreta_HPM mira +X en reposo, misma convención que este cono
@@ -1076,6 +1099,39 @@ const Render3D = (() => {
     });
   }
 
+  function configurarClickParaMover() {
+    renderer.domElement.addEventListener("click", (ev) => {
+      if (!modoMoverActivo) return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      const ndc = new THREE.Vector2(
+        ((ev.clientX - rect.left) / rect.width) * 2 - 1,
+        -((ev.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      _raycaster.setFromCamera(ndc, camera);
+      const punto = new THREE.Vector3();
+      if (_raycaster.ray.intersectPlane(_planoSuelo, punto)) {
+        // Inversa de worldToThree: three x/z -> mundo x/y.
+        const simX = punto.x + field.width / 2;
+        const simY = punto.z + field.height / 2;
+        const cb = callbackDestinoElegido;
+        desactivarModoMover();
+        cb?.(simX, simY);
+      }
+    });
+  }
+
+  function activarModoMover(callback) {
+    modoMoverActivo = true;
+    callbackDestinoElegido = callback;
+    if (canvas) canvas.style.cursor = "crosshair";
+  }
+
+  function desactivarModoMover() {
+    modoMoverActivo = false;
+    callbackDestinoElegido = null;
+    if (canvas) canvas.style.cursor = "";
+  }
+
   function verPlataforma() {
     // A diferencia de resetCamera()/setDefaultView() (siempre miran al
     // centro del mapa, donde nace el enjambre), esta apunta y acerca la
@@ -1116,6 +1172,7 @@ const Render3D = (() => {
   return {
     init, updateSnapshot, setViewMode, resetCamera, verPlataforma, resize,
     triggerCannonPulse, flashHits, setShowTracks, setWtaPlan, setPlataformaDestruida,
+    activarModoMover, desactivarModoMover,
   };
 })();
 

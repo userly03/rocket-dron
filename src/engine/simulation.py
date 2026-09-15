@@ -271,8 +271,13 @@ class SimulationEngine:
             )
             self.hpm.disparos = 0
             self.hpm.destruido = False
+            self.hpm.detener_movimiento()
+            self.hpm.origen_x = HPM_ORIGIN_X
+            self.hpm.origen_y = HPM_ORIGIN_Y
             self.missile_system.reset()
             self.jammer.detener()
+            self.jammer.origen_x = HPM_ORIGIN_X
+            self.jammer.origen_y = HPM_ORIGIN_Y
             self.analytics.reset()
             self.estado = SimulationState.DETENIDA
 
@@ -305,6 +310,23 @@ class SimulationEngine:
             self.jammer.detener()
         self._log("jamming_detenido")
         return {"message": "Jamming desactivado", "jammer": self.jammer.to_dict()}
+
+    def mover_plataforma(self, x: float, y: float) -> dict[str, Any]:
+        """Ordena al vehículo (cañón + misil + jammer, mismo emplazamiento)
+        reposicionarse a (x, y) — "shoot and scoot": mientras viaja no
+        puede disparar (ver HPMWeapon.listo_para_disparar), llega solo,
+        ver HPMWeapon.actualizar_movimiento en cada tick."""
+        x = float(min(max(x, 0.0), FIELD_WIDTH))
+        y = float(min(max(y, 0.0), FIELD_HEIGHT))
+        with self._lock:
+            if self.hpm.destruido:
+                return {
+                    "success": False,
+                    "message": "plataforma destruida — no puede moverse",
+                }
+            self.hpm.iniciar_movimiento(x, y)
+        self._log("plataforma_en_movimiento", {"destino_x": x, "destino_y": y})
+        return {"success": True, "message": f"Reposicionando a ({x:.0f}, {y:.0f})", "hpm": self.hpm.to_dict()}
 
     def fire(
         self,
@@ -401,6 +423,17 @@ class SimulationEngine:
     ) -> dict[str, Any]:
         """Lanza un misil HPM hacia el enjambre."""
         with self._lock:
+            if self.hpm.en_movimiento:
+                # Mismo criterio "shoot and scoot" que el cañón (ver
+                # HPMWeapon.listo_para_disparar) — el lanzador comparte
+                # vehículo, tampoco dispara en tránsito. HPMissileSystem
+                # no conoce el estado de movimiento del cañón (son clases
+                # separadas), así que se rechaza acá, no adentro de
+                # missile_system.lanzar().
+                return {
+                    "success": False,
+                    "message": "plataforma en movimiento — no puede lanzar en tránsito",
+                }
             result = self.missile_system.lanzar(
                 x=x,
                 y=y,
@@ -679,8 +712,26 @@ class SimulationEngine:
         # recarga avanzan con el reloj de la simulación, tanto en el bucle
         # de 60 FPS como en el runner de experimentos Monte Carlo (única
         # razón de ser de este método extraído) — un arma que nunca corre
-        # este tick nunca se enfría ni recarga.
+        # este tick nunca se enfría ni recarga. Movimiento incluido (ver
+        # HPMWeapon.actualizar) — mismo motivo.
         self.hpm.actualizar(dt)
+
+        # El jammer comparte vehículo con el cañón (mismo emplazamiento,
+        # ver __post_init__) — si el vehículo se reposicionó, el jammer
+        # se mueve con él, no se queda atrás en el punto viejo.
+        self.jammer.origen_x = self.hpm.origen_x
+        self.jammer.origen_y = self.hpm.origen_y
+
+        # Misión ofensiva con vehículo móvil: el objetivo del enjambre
+        # sigue la posición ACTUAL del arma, no la de cuando arrancó la
+        # simulación — el enjambre "sabe" dónde está la amenaza ahora
+        # (decisión de diseño confirmada explícitamente, no asumida: un
+        # vehículo que se muda no debería volverse invulnerable al
+        # enjambre ya en vuelo). Barato: sobreescribir dos floats cada
+        # tick, sin evento ni lógica de detección aparte.
+        if self.mision_activa:
+            self.swarm.objetivo_x = self.hpm.origen_x
+            self.swarm.objetivo_y = self.hpm.origen_y
 
         # Memoria de amenaza (P2-E, Parte 2): el decaimiento es una función
         # del tiempo transcurrido, no del flocking — avanza siempre que

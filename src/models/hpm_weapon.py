@@ -19,6 +19,7 @@ from src.config import (
     HPM_RECARGA_KW,
     HPM_TEMP_AMBIENTE_C,
     HPM_TEMP_MAX_C,
+    VEHICULO_VELOCIDAD_M_S,
 )
 from src.engine.hpm_engine import compute_target_parameters
 from src.models.drone import Drone, DroneEstado
@@ -77,6 +78,51 @@ class HPMWeapon:
     # sobre el emisor no se "enfría", necesita reparación (ver
     # SimulationEngine.reset()).
     destruido: bool = field(default=False, init=False)
+    # "Shoot and scoot": el vehículo puede reposicionarse, pero un HPM
+    # real necesita estar quieto para apuntar con precisión — no dispara
+    # EN TRÁNSITO, solo antes de arrancar a moverse o después de llegar
+    # (ver disparar()/listo_para_disparar()). destino_x/y no-None mientras
+    # está en camino; None en reposo (recién creado, o ya llegó).
+    destino_x: float | None = field(default=None, init=False)
+    destino_y: float | None = field(default=None, init=False)
+
+    @property
+    def en_movimiento(self) -> bool:
+        return self.destino_x is not None
+
+    def iniciar_movimiento(self, destino_x: float, destino_y: float) -> None:
+        """Ordena reposicionarse — no dispara mientras esté en camino
+        (ver disparar()). Redirigir un movimiento ya en curso es válido
+        (cambiar de destino a mitad de camino), simplemente sobreescribe
+        el destino anterior."""
+        self.destino_x = destino_x
+        self.destino_y = destino_y
+
+    def detener_movimiento(self) -> None:
+        """Cancela el movimiento en curso, quedándose donde esté AHORA
+        (no salta al destino) — listo para disparar de nuevo."""
+        self.destino_x = None
+        self.destino_y = None
+
+    def actualizar_movimiento(self, dt: float) -> None:
+        """Avanza hacia destino_x/y a VEHICULO_VELOCIDAD_M_S; al llegar,
+        se detiene sola (destino_x/y vuelven a None). Llamado desde
+        SimulationEngine._tick en cada tick, se mueva o no (no-op si
+        destino_x es None)."""
+        if self.destino_x is None or self.destino_y is None:
+            return
+        dx = self.destino_x - self.origen_x
+        dy = self.destino_y - self.origen_y
+        distancia = math.hypot(dx, dy)
+        paso = VEHICULO_VELOCIDAD_M_S * dt
+        if paso >= distancia:
+            self.origen_x = self.destino_x
+            self.origen_y = self.destino_y
+            self.destino_x = None
+            self.destino_y = None
+        else:
+            self.origen_x += dx / distancia * paso
+            self.origen_y += dy / distancia * paso
 
     def _energia_por_disparo_kj(self, potencia: float | None = None) -> float:
         """
@@ -94,10 +140,12 @@ class HPMWeapon:
         return p * HPM_DISPARO_DURACION_S
 
     def listo_para_disparar(self) -> bool:
-        """True si el arma no está destruida y tiene margen térmico y
-        energía para OTRO disparo."""
+        """True si el arma no está destruida, no está en tránsito
+        ("shoot and scoot": necesita estar quieta para apuntar), y tiene
+        margen térmico y energía para OTRO disparo."""
         return (
             not self.destruido
+            and not self.en_movimiento
             and self.temperatura_c < HPM_TEMP_MAX_C - _EPS_PRESUPUESTO
             and self.energia_actual_kj
             >= self._energia_por_disparo_kj() - _EPS_PRESUPUESTO
@@ -146,6 +194,13 @@ class HPMWeapon:
             self.ultimo_rechazo = (
                 "plataforma destruida — un dron kamikaze impactó el emisor, "
                 "no dispara hasta que se repare (reiniciar la simulación)"
+            )
+            return []
+
+        if self.en_movimiento:
+            self.ultimo_rechazo = (
+                "plataforma en movimiento — no puede apuntar con precisión "
+                "en tránsito, esperar a que llegue al destino"
             )
             return []
 
@@ -277,10 +332,12 @@ class HPMWeapon:
         )
 
     def actualizar(self, dt: float) -> None:
-        """Avanza enfriamiento y recarga un paso ``dt`` (llamado desde el
-        tick de la simulación, ver ``SimulationEngine._tick``)."""
+        """Avanza enfriamiento, recarga y movimiento un paso ``dt``
+        (llamado desde el tick de la simulación, ver
+        ``SimulationEngine._tick``)."""
         self.enfriar(dt)
         self.recargar(dt)
+        self.actualizar_movimiento(dt)
 
     def configurar(
         self,
@@ -315,4 +372,8 @@ class HPMWeapon:
             "listo_para_disparar": self.listo_para_disparar(),
             "ultimo_rechazo": self.ultimo_rechazo,
             "destruido": self.destruido,
+            "en_movimiento": self.en_movimiento,
+            "destino_x": self.destino_x,
+            "destino_y": self.destino_y,
+            "velocidad_m_s": VEHICULO_VELOCIDAD_M_S,
         }
