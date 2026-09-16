@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import threading
 import time
 from collections import deque
@@ -386,6 +387,30 @@ class SimulationEngine:
                     "success": False,
                     "message": "plataforma destruida — no puede moverse",
                 }
+            # Un destino DENTRO del radio de bloqueo de una estructura activa
+            # deja al vehículo dentro de su propio obstáculo: la geometría de
+            # linea_de_vista_bloqueada da bloqueado=True para CUALQUIER
+            # dirección cuando el origen del segmento cae dentro del círculo
+            # (el "disparo a través de su propio escombro"), así que cañón,
+            # misil y radar quedarían ciegos hacia todo el mapa, en silencio,
+            # sin ningún mensaje — bug encontrado en auditoría de backend
+            # (ronda 2). Se rechaza en vez de recortar el destino: no hay un
+            # borde "correcto" obvio del círculo hacia el que recortar sin
+            # más contexto de hacia dónde venía el vehículo.
+            for estructura in self.estructuras:
+                if estructura.destruida:
+                    continue
+                dist = math.hypot(x - estructura.x, y - estructura.y)
+                if dist <= estructura.radio_bloqueo:
+                    return {
+                        "success": False,
+                        "message": (
+                            f"destino a {dist:.0f}m del centro de "
+                            f"'{estructura.nombre or estructura.id}' — dentro de "
+                            f"su radio de bloqueo ({estructura.radio_bloqueo:.0f}m), "
+                            "el vehículo quedaría ciego hacia todo el mapa"
+                        ),
+                    }
             self.hpm.iniciar_movimiento(x, y)
         self._log("plataforma_en_movimiento", {"destino_x": x, "destino_y": y})
         return {"success": True, "message": f"Reposicionando a ({x:.0f}, {y:.0f})", "hpm": self.hpm.to_dict()}
@@ -916,8 +941,16 @@ class SimulationEngine:
             if impactos_objetivo:
                 self._registrar_impactos_en_objetivo(impactos_objetivo)
             eventos_jamming = self.jammer.actualizar(self.swarm.drones)
+        # Recalculado, NO la variable `obstaculos` de la línea 909: swarm.
+        # actualizar() de arriba puede haber destruido una estructura recién
+        # (impacto kamikaze registrado en _registrar_impactos_en_objetivo) —
+        # reusar la lista vieja dejaba a esa estructura bloqueando línea de
+        # vista para el misil durante el resto de ESTE mismo tick, aunque
+        # `estructura.destruida` ya fuera True (bug encontrado en auditoría
+        # de backend, ronda 2).
         eventos_misil = self.missile_system.actualizar_misiles(
-            self.swarm.drones, dt, track_manager=self.swarm.track_manager, obstaculos=obstaculos
+            self.swarm.drones, dt, track_manager=self.swarm.track_manager,
+            obstaculos=self._obstaculos_activos(),
         )
         self.tiempo += dt
         self.tick += 1

@@ -420,9 +420,39 @@ class ExperimentRecord:
 class ExperimentManager:
     """Ejecuta experimentos en un hilo background y expone progreso/resultados."""
 
+    # Sin este techo, self._records crece sin límite durante toda la vida
+    # del proceso — a diferencia de coevolucion_jobs.py, que documenta el
+    # mismo trade-off de "vive en memoria, sin expiración" explícitamente
+    # como aceptable para una herramienta de un solo usuario, acá se
+    # corrige en vez de solo documentar porque con con_preview=True un
+    # solo registro puede pesar más de 1MB (fotogramas completos de una
+    # réplica) — con t_max_s hasta 600s (ExperimentRequest en routes.py),
+    # bastantes experimentos largos con preview sí importan en memoria
+    # real. 200 es generoso para una sesión de trabajo típica (auditoría
+    # de backend, ronda 2).
+    MAX_EXPERIMENTOS_GUARDADOS = 200
+
     def __init__(self) -> None:
         self._records: dict[str, ExperimentRecord] = {}
         self._lock = threading.Lock()
+
+    def _podar_registros_viejos(self) -> None:
+        """Descarta los experimentos TERMINADOS (completado/error) más
+        viejos si se pasó el límite. Nunca poda uno "corriendo" — un
+        experimento activo nunca debería desaparecer de golpe de
+        ``/api/experiments``, aunque eso implique que el proceso pueda
+        superar el techo brevemente mientras hay muchos corriendo a la
+        vez (caso raro dado el costo de correr uno). Llamar solo con
+        ``self._lock`` ya adquirido."""
+        exceso = len(self._records) - self.MAX_EXPERIMENTOS_GUARDADOS
+        if exceso <= 0:
+            return
+        # dict preserva orden de inserción == orden de creación.
+        terminados = [
+            exp_id for exp_id, r in self._records.items() if r.status != "corriendo"
+        ]
+        for exp_id in terminados[:exceso]:
+            del self._records[exp_id]
 
     def start(self, cfg: ExperimentConfig, con_preview: bool = False) -> str:
         exp_id = f"exp-{uuid.uuid4().hex[:8]}"
@@ -448,6 +478,7 @@ class ExperimentManager:
         )
         with self._lock:
             self._records[exp_id] = record
+            self._podar_registros_viejos()
 
         hilo = threading.Thread(
             target=self._run,

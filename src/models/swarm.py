@@ -284,7 +284,21 @@ class Swarm:
             return []
         llegaron = []
         for drone in self.drones:
-            if drone.estado_salud == EstadoSalud.NEUTRALIZADO or drone.objetivo_alcanzado:
+            # `aterrizado`: un dron con perfil de contingencia ATERRIZAR
+            # (falla de enlace, ver Drone.mover) queda inerte en el piso
+            # bajo NINGÚN control propio — no "llegó" al objetivo, cayó
+            # cerca por casualidad. Sin este chequeo, precisamente cuando
+            # el jammer FUNCIONA (fuerza un aterrizaje forzoso cerca del
+            # objetivo) ese dron contaba igual como brecha exitosa de la
+            # misión ofensiva — contaminaba probabilidad_brecha, una
+            # métrica científica del proyecto, en el escenario donde la
+            # defensa tuvo éxito (bug encontrado en auditoría de backend,
+            # ronda 2).
+            if (
+                drone.estado_salud == EstadoSalud.NEUTRALIZADO
+                or drone.objetivo_alcanzado
+                or drone.aterrizado
+            ):
                 continue
             dist = math.hypot(drone.x - self.objetivo_x, drone.y - self.objetivo_y)
             if dist <= SWARM_OBJETIVO_RADIO_IMPACTO_M:

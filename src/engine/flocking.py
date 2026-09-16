@@ -288,7 +288,16 @@ def compute_headings(
         if total_x == 0 and total_y == 0:
             return drone.angulo
         angulo_deseado = math.degrees(math.atan2(total_y, total_x)) % 360
-        giro = float(np.clip(angle_difference(drone.angulo, angulo_deseado), -max_giro, max_giro))
+        # min/max de Python, no np.clip: angle_difference siempre devuelve
+        # un float plano (ver helpers.py), así que acotarlo es un clip
+        # ESCALAR — np.clip paga el despacho completo de un ufunc de numpy
+        # (validación de tipo, maquinaria de reduce) por un solo número,
+        # más caro que el cálculo en sí. Llamado una vez POR DRON, por
+        # tick: con 500 drones era, después de vectorizar separación/
+        # alineación/cohesión, el costo dominante que quedaba (auditoría
+        # de backend, ronda 2, medido con cProfile).
+        giro = angle_difference(drone.angulo, angulo_deseado)
+        giro = max(-max_giro, min(max_giro, giro))
         return (drone.angulo + giro) % 360
 
     if n < 2:
@@ -317,15 +326,43 @@ def compute_headings(
     np.fill_diagonal(dist, np.inf)
     vecinos = dist < BOIDS_NEIGHBOR_RADIUS
 
+    # Separación/alineación/cohesión, VECTORIZADAS sobre todos los drones a
+    # la vez (matriz n×n de vecinos × producto matricial), no un np.mean/
+    # np.sum por dron dentro del loop de abajo. Antes de esto, con 500
+    # drones (el máximo de StartRequest.cantidad), un tick tardaba ~235ms
+    # contra un presupuesto de 16.7ms a 60fps — ~14x sobre presupuesto,
+    # medido con cProfile: 2000 llamadas a np.mean por tick (4 por dron),
+    # cada una pagando el overhead de despacho de numpy sobre un array
+    # chico, que para ese tamaño es mayor que el cálculo en sí (auditoría
+    # de backend, ronda 2). La red de vecinos (matriz `vecinos`) y la
+    # física de cada término son EXACTAMENTE las mismas — esto es una
+    # reescritura de CÓMO se suma/promedia, no de QUÉ se suma/promedia.
+    vecinos_f = vecinos.astype(np.float64)
+    n_vecinos = vecinos_f.sum(axis=1)
+    # Evita 0/0 en las filas sin vecinos — el resultado ahí no se usa
+    # (esas filas van por la rama "sin vecinos" del loop de abajo).
+    n_vecinos_seguro = np.where(n_vecinos > 0, n_vecinos, 1.0)
+
+    inv_dist = 1.0 / np.maximum(dist, 1e-6)
+    sep_dx_todos = np.sum(dx * inv_dist * vecinos_f, axis=1)
+    sep_dy_todos = np.sum(dy * inv_dist * vecinos_f, axis=1)
+
+    align_dx_todos = (vecinos_f @ vx) / n_vecinos_seguro
+    align_dy_todos = (vecinos_f @ vy) / n_vecinos_seguro
+
+    centroide_x_todos = (vecinos_f @ xs) / n_vecinos_seguro
+    centroide_y_todos = (vecinos_f @ ys) / n_vecinos_seguro
+    coh_dx_todos = centroide_x_todos - xs
+    coh_dy_todos = centroide_y_todos - ys
+
     resultado: dict[int, float] = {}
 
     for i, drone in enumerate(drones):
         home_dx, home_dy = _home_vector(drone, home_x, home_y)
         threat_dx, threat_dy = _threat_vector(drone)
         mision_dx, mision_dy = _final_approach_vector(drone, objetivo_x, objetivo_y)
-        mask = vecinos[i]
 
-        if not np.any(mask):
+        if n_vecinos[i] == 0:
             resultado[drone.id] = _girar_hacia(
                 drone,
                 BOIDS_HOME_WEIGHT * home_dx + BOIDS_THREAT_WEIGHT * threat_dx + BOIDS_MISSION_WEIGHT * mision_dx,
@@ -333,32 +370,18 @@ def compute_headings(
             )
             continue
 
-        # Separación: vector que aleja del vecino, ponderado por 1/distancia
-        # (empuje más fuerte cuanto más cerca — evita colisiones).
-        inv_dist = 1.0 / np.maximum(dist[i, mask], 1e-6)
-        sep_dx = float(np.sum(dx[i, mask] * inv_dist))
-        sep_dy = float(np.sum(dy[i, mask] * inv_dist))
-
-        # Alineación: promedio del vector de velocidad (rumbo) de los vecinos.
-        align_dx = float(np.mean(vx[mask]))
-        align_dy = float(np.mean(vy[mask]))
-
-        # Cohesión: dirección hacia el centroide de posición de los vecinos.
-        coh_dx = float(np.mean(xs[mask])) - drone.x
-        coh_dy = float(np.mean(ys[mask])) - drone.y
-
         total_x = (
-            BOIDS_SEPARATION_WEIGHT * sep_dx
-            + BOIDS_ALIGNMENT_WEIGHT * align_dx
-            + BOIDS_COHESION_WEIGHT * coh_dx
+            BOIDS_SEPARATION_WEIGHT * sep_dx_todos[i]
+            + BOIDS_ALIGNMENT_WEIGHT * align_dx_todos[i]
+            + BOIDS_COHESION_WEIGHT * coh_dx_todos[i]
             + BOIDS_HOME_WEIGHT * home_dx
             + BOIDS_THREAT_WEIGHT * threat_dx
             + BOIDS_MISSION_WEIGHT * mision_dx
         )
         total_y = (
-            BOIDS_SEPARATION_WEIGHT * sep_dy
-            + BOIDS_ALIGNMENT_WEIGHT * align_dy
-            + BOIDS_COHESION_WEIGHT * coh_dy
+            BOIDS_SEPARATION_WEIGHT * sep_dy_todos[i]
+            + BOIDS_ALIGNMENT_WEIGHT * align_dy_todos[i]
+            + BOIDS_COHESION_WEIGHT * coh_dy_todos[i]
             + BOIDS_HOME_WEIGHT * home_dy
             + BOIDS_THREAT_WEIGHT * threat_dy
             + BOIDS_MISSION_WEIGHT * mision_dy

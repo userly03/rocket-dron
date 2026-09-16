@@ -1023,3 +1023,121 @@ ticks intermedios (donde vivía el bug 2).
 Verificado: 141/141 tests dirigidos (coevolución, línea de vista, radar
 dinámico, simulación, targeting) y 552/552 de la suite completa, sin
 regresiones.
+
+### 9.12 Auditoría de backend, segunda ronda — ✅ CERRADO
+
+Pedido explícito del usuario tras cerrar la primera ronda (§9.11): auditar
+de nuevo, más profundo, apuntando a lo que la primera pasada no cubrió en
+detalle — modelos de entidad completos, interacción entre las features
+NUEVAS de esta sesión (estructuras + línea de vista + movimiento del
+vehículo + misión ofensiva), calidad de la propia suite de tests, y
+gestión de recursos/rendimiento con medición real. Otra vez 3 forks en
+paralelo por ángulo, cada uno con instrucción explícita de traer
+propuestas de mejora concretas con su razón.
+
+**Bugs reales, verificados y corregidos:**
+
+1. **Un dron aterrizado por falla de enlace contaba como brecha**
+   (`swarm.py::_detectar_impactos_en_objetivo`). El chequeo de llegada
+   excluía `NEUTRALIZADO` y `objetivo_alcanzado` previo, pero no
+   `aterrizado` — justo cuando el jammer FUNCIONA (fuerza un aterrizaje
+   forzoso, perfil ATERRIZAR de P2-E) y ese dron cae cerca del objetivo
+   por casualidad, se contaba igual como éxito de la misión ofensiva.
+   Contaminaba `probabilidad_brecha` (métrica científica reportada por
+   `/api/experiments`) en el escenario exacto donde la defensa tuvo
+   éxito. Fix: excluir también `drone.aterrizado`.
+
+2. **Una estructura destruida DENTRO de un tick seguía bloqueando línea
+   de vista para el resto de ESE MISMO tick** (`simulation.py::_tick`).
+   `obstaculos = self._obstaculos_activos()` se calculaba una vez al
+   principio del tick y se reutilizaba tal cual para
+   `missile_system.actualizar_misiles()`, que corre DESPUÉS de
+   `swarm.actualizar()` — que puede destruir una estructura vía impacto
+   kamikaze en la misma llamada. Ventana de un tick, pero real y
+   reproducible. Fix: recalcular `self._obstaculos_activos()` justo antes
+   de la llamada al misil, no reusar la variable vieja.
+
+3. **El vehículo podía autobloquearse la línea de vista** si se movía
+   encima o cerca del `radio_bloqueo` de una estructura
+   (`hpm_engine.py::_segmento_intersecta_circulo` + `mover_plataforma`).
+   Cuando el origen del segmento cae DENTRO del círculo de un obstáculo,
+   la ecuación cuadrática da bloqueado para CUALQUIER dirección — el
+   vehículo "dispara a través de su propio escombro". `mover_plataforma()`
+   no validaba proximidad a estructuras, así que nada impedía posicionar
+   el vehículo exactamente sobre una — cañón/misil/radar quedaban ciegos
+   hacia todo el mapa, permanentemente, sin ningún mensaje de error. Fix:
+   `mover_plataforma()` ahora rechaza (mismo patrón que el resto del
+   método: `{"success": False, "message": ...}`, ya expuesto como 400 por
+   `POST /api/hpm/mover`) un destino dentro del radio de bloqueo de
+   cualquier estructura NO destruida. Se rechaza en vez de recortar al
+   borde más cercano: no hay un borde "correcto" obvio sin más contexto
+   de hacia dónde venía el vehículo — decisión de producto que se dejó
+   señalada, no una que hiciera falta inventar.
+
+**Rendimiento, medido antes y después (no especulado):**
+
+4. **Con 500 drones (el máximo que permite `StartRequest.cantidad`), un
+   tick tardaba 235ms contra un presupuesto de 16.7ms a 60fps — ~14x
+   sobre presupuesto.** `cProfile` señaló la causa exacta:
+   `flocking.py::compute_headings` llamaba `np.mean`/`np.sum` UNA VEZ POR
+   DRON dentro de un loop Python (separación, alineación, cohesión) — con
+   500 drones son miles de llamadas numpy por tick, cada una pagando el
+   overhead de despacho de un ufunc sobre un array chico, más caro que el
+   cálculo en sí.
+
+   Fix en dos pasos, cada uno verificado por separado:
+   - Separación/alineación/cohesión reescritas como operaciones
+     matriciales sobre TODOS los drones a la vez (`vecinos_f @ vx`, etc.)
+     en vez de una reducción numpy por dron dentro del loop — la red de
+     vecinos y la física de cada término son exactamente las mismas,
+     cambia solo CÓMO se suma/promedia. **Verificado con equivalencia
+     numérica EXACTA** contra la versión anterior (`git show HEAD:...` +
+     comparación directa en 10 escenarios distintos, incluyendo n=1, n=2,
+     n=500, con/sin amenaza activa, con/sin misión activa): diferencia
+     máxima 0.0 grados en todos los casos. Resultado: 235ms → 76ms
+     (3.1x).
+   - `_girar_hacia` usaba `np.clip` sobre un ESCALAR (un solo float) para
+     acotar el giro — reemplazado por `min`/`max` de Python puro
+     (`angle_difference` ya devuelve un float plano, no hay nada que
+     `np.clip` aporte ahí salvo overhead de ufunc). Re-verificada la
+     equivalencia numérica exacta después de este segundo cambio (sigue
+     en 0.0 grados). Resultado: 76ms → 70ms.
+
+   **Estado final: 235ms → 70ms (3.3x), sigue 4.2x sobre presupuesto a
+   swarm_size=500.** Con el tamaño por defecto real (`SWARM_SIZE=50`, lo
+   que corre la demo/app en vivo) el margen es amplio: 2.9ms/tick, 0.18x
+   del presupuesto. A 100 drones ya está al límite (0.84x); arriba de 200
+   sigue por sobre presupuesto. Cerrar el resto del gap en el caso
+   extremo (500) exigiría tocar más código caliente (radar, cálculo de
+   acoplamiento de susceptibilidad, construcción del snapshot — todos
+   aparecen en el segundo profile) — se dejó así a propósito: el hallazgo
+   original apuntaba específicamente al patrón de `flocking.py`, y seguir
+   optimizando código no señalado por la auditoría para un caso de borde
+   que la demo real nunca alcanza sería alcance no pedido.
+
+5. **`ExperimentManager._records` crecía sin límite**, a diferencia de
+   `coevolucion_jobs.py`, que documenta el mismo trade-off ("vive en
+   memoria, sin expiración") explícitamente como aceptable para una
+   herramienta de un solo usuario. Con `con_preview=True` un solo registro
+   puede pesar más de 1MB (fotogramas completos de una réplica), y
+   `ExperimentRequest` permite `t_max_s` hasta 600s — un proceso de vida
+   larga con varios experimentos largos sí acumula memoria real. Fix:
+   `MAX_EXPERIMENTOS_GUARDADOS = 200`, poda los TERMINADOS
+   (completado/error) más viejos al superar el techo — nunca poda uno
+   corriendo. Verificado con un smoke test directo (poda los más viejos
+   cuando corresponde, nunca poda uno activo).
+
+**Gaps de test reales encontrados, NO cerrados en este ítem** (quedan
+para más adelante, ya señalados con precisión si hace falta volver):
+ningún test combina `mover_plataforma`/vehículo-en-movimiento con
+`estructuras_activas=True` a la vez (el cruce exacto donde vive el bug 3
+de esta ronda); ningún test fija como contrato explícito que un dron con
+`objetivo_alcanzado=True` puede recibir fuego después y quedar contado
+simultáneamente como brecha Y como neutralizado (parece el comportamiento
+narrativo correcto, pero nunca se verificó a propósito).
+
+Verificado: 230/230 tests dirigidos y 552/552 de la suite completa, sin
+regresiones. Bonus no buscado: la suite completa tardó 6:14 contra los
+19:46 de la corrida anterior (3.2x más rápida) — la vectorización de
+`flocking.py` acelera también a los tests, que corren el motor real, no
+mockeado.
