@@ -40,7 +40,7 @@ Lo que sigue se apoya en haber leído ese paper. Por eso es específico y no gen
 
 ## 1. Lo que el paper hace y el simulador no
 
-### 1.1 El Monte Carlo implementado no es el Monte Carlo del paper 🔴
+### 1.1 El Monte Carlo implementado no es el Monte Carlo del paper — severidad alta
 
 Es el hallazgo central. El paper hace **10.000 tiradas variando 7 parámetros del
 modelo**:
@@ -70,7 +70,7 @@ distribuciones distintas. `cos²(Uniform[0,π])` tiene masa concentrada cerca de
 (forma arcoseno); `Uniform[0.3, 1.0]` es plana. **El modelo subestima sistemáticamente
 la varianza del resultado.**
 
-### 1.2 El estimador no tiene señal 🔴
+### 1.2 El estimador no tiene señal — severidad alta
 
 `run_replica` devuelve `exito = (conteo["neutralizado"] >= total)` — es
 **P(aniquilación total del enjambre)**, no "probabilidad de baja" como dice el
@@ -94,7 +94,7 @@ espacio de operación el estimador no tiene señal.
 inválido — los drones de una misma réplica comparten geometría, semilla y
 configuración, no son Bernoulli independientes. La unidad de muestreo es la réplica.
 
-### 1.3 El umbral calibrado absorbió el sesgo del Monte Carlo 🔴
+### 1.3 El umbral calibrado absorbió el sesgo del Monte Carlo — severidad alta
 
 El paper modela **cinco subsistemas** con sigmoides independientes:
 
@@ -124,7 +124,7 @@ El paper lo dice explícitamente: las predicciones deterministas (83 % @ 20 m, 2
 `P_kill = 1 − Π(1 − pᵢ)`, más las distribuciones de §1.1 — y los 51.4 %/13.1 % **salen**
 en vez de ajustarse.
 
-### 1.4 El modelo de resonancia no es el del paper 🟡
+### 1.4 El modelo de resonancia no es el del paper — severidad media
 
 El paper **no** usa una lorentziana en frecuencia. Usa:
 
@@ -143,12 +143,12 @@ Tres diferencias concretas con `hpm_engine.frequency_coupling`:
    tensión inducida escala con la longitud efectiva.
 3. `η_pol = cos²φ` con piso 0.1, contra `Uniform[0.3, 1.0]`.
 
-### 1.5 El duty cycle sí coincide; la corrección temporal es un añadido sin respaldo 🟡
+### 1.5 El duty cycle sí coincide; la corrección temporal es un añadido sin respaldo — severidad media
 
 Separando las dos mitades de P1-03:
 
 - **Duty cycle:** el paper escala el pico con el duty (1 % duty → 500 kW pico → el
-  campo a 40 m supera los 1.100 V/m). El código hace exactamente eso. ✅
+  campo a 40 m supera los 1.100 V/m). El código hace exactamente eso.
 - **`g(τ) = min(√(τ/τ_ref), 3.0)`:** el paper **no** incorpora escalado temporal. Es un
   añadido del proyecto, sin cita, y el `3.0` es un número mágico que está haciendo el
   trabajo de un cambio de régimen físico.
@@ -180,7 +180,7 @@ instancias pequeñas.
 
 ## 3. Dependencias rotas y desacoples arquitectónicos
 
-### 3.1 `_rng` global compartido entre hilos 🔴
+### 3.1 `_rng` global compartido entre hilos — severidad alta
 
 El propio docstring de `experiments.py` lo confiesa:
 
@@ -196,7 +196,7 @@ también se corrompen mutuamente.
 **Causa raíz de orden:** P1-02 (reproducibilidad) era el cimiento de P1-01 (Monte
 Carlo) y se implementó después. El código lleva la cicatriz.
 
-### 3.2 El radar comparte frecuencia con el arma 🔴
+### 3.2 El radar comparte frecuencia con el arma — severidad alta
 
 `Swarm.actualizar` pasa `HPM_FREQUENCY_GHZ` a `evaluar_deteccion`, y la ecuación de
 radar lleva `λ²`:
@@ -213,7 +213,7 @@ efecto instrumental.
 Es el experimento estrella de P2-04 ("¿a qué frecuencia conviene atacar?") invalidado
 por un acoplamiento de una línea.
 
-### 3.3 P2-05 no es aditivo — rompe la premisa del encabezado del checklist 🔴
+### 3.3 P2-05 no es aditivo — rompe la premisa del encabezado del checklist — severidad alta
 
 El checklist afirma que *"cada ítem es aditivo (no rompe el resto)"*. P2-05 no lo es.
 
@@ -236,7 +236,7 @@ Segundo obstáculo: `evaluar_deteccion` es determinista (`p ≥ 0.5`) **a propó
 documentado como anti-parpadeo. Un modelo de revisita reintroduce estructura temporal y
 ese hack tiene que salir.
 
-### 3.4 `DroneEstado` mezcla salud con enlace 🟡
+### 3.4 `DroneEstado` mezcla salud con enlace — severidad media
 
 Prerrequisito de P2-06 que el checklist no lista. `DroneEstado` combina **salud**
 (`ACTIVO`/`DANADO`/`NEUTRALIZADO`) con **enlace** (`INTERFERIDO`) en un solo enum:
@@ -251,7 +251,7 @@ Bug relacionado: `Swarm.actualizar` excluye los `INTERFERIDO` de `compute_headin
 que **un dron interferido desaparece del cálculo de flocking de sus vecinos**. Sigue
 físicamente ahí; sus vecinos deberían seguir separándose de él.
 
-### 3.5 P3-08 (FDTD) corrige un régimen inalcanzable 🔴 — sobra
+### 3.5 P3-08 (FDTD) corrige un régimen inalcanzable — severidad alta, sobra
 
 Plato `D = 0.6 m`, `f = 2.45 GHz` → `λ = 0.1224 m`:
 
@@ -270,7 +270,7 @@ Además el empalme es dimensionalmente traicionero: la función de Green **2D** 
 esconde ese problema, no lo resuelve. Un solver TEz 2D tampoco puede representar un
 plato 3D ni el acoplamiento 3D del dron.
 
-### 3.6 P3-09 (thermal runaway): el presupuesto energético falla por ~10⁹ 🔴
+### 3.6 P3-09 (thermal runaway): el presupuesto energético falla por ~10⁹ — severidad alta
 
 Llevar una celda 18650 a runaway térmico requiere del orden de **10–20 kJ** inyectados
 en la celda. Un pulso de 100 ns a 500 V/m acopla **microjoules** a una estructura de
@@ -284,7 +284,7 @@ front-end de GPS/RF** — exactamente los cinco subsistemas que el paper modela
 diferida de bajas al disparo original**. Eso cambia la curva de efectividad y es
 operativamente real. Hay que cambiarle el mecanismo, no tirarlo.
 
-### 3.7 P3-10 (coevolución) está bloqueado por la métrica, no por la dependencia 🔴
+### 3.7 P3-10 (coevolución) está bloqueado por la métrica, no por la dependencia — severidad alta
 
 El fitness sale del runner MC, y ese fitness es `p̂ = P(aniquilación total)`, que **vale
 0 en casi todo el espacio de parámetros** (§1.2). Un GA con fitness constante 0 no tiene
@@ -294,7 +294,7 @@ El checklist declara `deps: requiere P1-01`. Pero P1-01 *existe* y aun así P3-1
 puede funcionar. La dependencia real es *"requiere que P1-01 tenga un estimador con
 señal"*.
 
-### 3.8 P3-07 (WTA) tiene un sesgo de Jensen no mencionado 🟡
+### 3.8 P3-07 (WTA) tiene un sesgo de Jensen no mencionado — severidad media
 
 Con P2-04 activo el acoplamiento varía por dron, así que "bajas esperadas de un cluster"
 requiere agregar sobre la **distribución** de acoplamiento del cluster. Hacerlo con el
@@ -305,14 +305,14 @@ acoplamiento **medio** da un estimador sesgado, porque la sigmoide es no lineal
 
 | # | Desacople | Severidad | Bloquea |
 |---|---|---|---|
-| 1 | MC varía solo el enjambre, no los parámetros del modelo | 🔴 | Toda conclusión cuantitativa |
-| 2 | `p̂` = P(aniquilación total) → estimador sin señal | 🔴 | P3-10, y la lectura de P1-03/P2-04 |
-| 3 | `_rng` global compartido entre hilos | 🔴 | Reproducibilidad de experimentos |
-| 4 | Radar comparte `HPM_FREQUENCY_GHZ` | 🔴 | El experimento estrella de P2-04 |
-| 5 | P2-05 exige reescribir todos los consumidores de posición | 🔴 | Calibración existente |
-| 6 | `DroneEstado` mezcla salud y enlace | 🟡 | P2-06 |
-| 7 | P3-08 corrige `r < 5.9 m` en un campo de 1000 m | 🔴 | (esfuerzo inútil) |
-| 8 | P3-09 falla el presupuesto energético por ~10⁹ | 🔴 | (premisa insostenible) |
+| 1 | MC varía solo el enjambre, no los parámetros del modelo | Alta | Toda conclusión cuantitativa |
+| 2 | `p̂` = P(aniquilación total) → estimador sin señal | Alta | P3-10, y la lectura de P1-03/P2-04 |
+| 3 | `_rng` global compartido entre hilos | Alta | Reproducibilidad de experimentos |
+| 4 | Radar comparte `HPM_FREQUENCY_GHZ` | Alta | El experimento estrella de P2-04 |
+| 5 | P2-05 exige reescribir todos los consumidores de posición | Alta | Calibración existente |
+| 6 | `DroneEstado` mezcla salud y enlace | Media | P2-06 |
+| 7 | P3-08 corrige `r < 5.9 m` en un campo de 1000 m | Alta | (esfuerzo inútil) |
+| 8 | P3-09 falla el presupuesto energético por ~10⁹ | Alta | (premisa insostenible) |
 
 ---
 
@@ -320,7 +320,7 @@ acoplamiento **medio** da un estimador sesgado, porque la sigmoide es no lineal
 
 Encontrados leyendo el árbol, no derivados de ningún ítem.
 
-### 4.1 El panel físico publica un tercer modelo que no mata a nadie 🔴
+### 4.1 El panel físico publica un tercer modelo que no mata a nadie — severidad alta
 
 `PhysicsAnalytics.get_physics_panel` expone `probabilidad_referencia`, que sale de
 `gaussian_neutralization_prob` (`P = 1 − exp(−k·P·exp(−r²/2σ²))`), y publica ese
@@ -334,26 +334,26 @@ Encontrados leyendo el árbol, no derivados de ningún ítem.
 física en la UI que no gobierna nada — el pecado exacto que `FISICA_Y_MATEMATICA.md`
 declara haber corregido. `HPM_COUPLING_K = 0.42` es peso muerto en la ruta `friis`.
 
-### 4.2 `run_replica` descarta los eventos de `_tick()` 🟡
+### 4.2 `run_replica` descarta los eventos de `_tick()` — severidad media
 
 Nunca llama `_process_missile_events`, así que `analytics.record_missile_detonation` no
 corre en Monte Carlo. Las bajas sí ocurren (dentro de `detonar`), pero el experimento
 queda sin diagnóstico por disparo y sin curva de efectividad.
 
-### 4.3 El jammer es el único arma inmune a la huella de susceptibilidad 🟡
+### 4.3 El jammer es el único arma inmune a la huella de susceptibilidad — severidad media
 
 `Jammer._en_zona_de_efecto` usa `campo_e_v_m` (no `campo_e_efectivo_v_m`) y no pasa
 `cable_length_m` / `polarization`. Defendible para CW, pero es una inconsistencia sin
 documentar: P2-04 aplica a cañón y misil, no al jammer.
 
-### 4.4 El taper angular es incoherente entre modelos 🟡
+### 4.4 El taper angular es incoherente entre modelos — severidad media
 
 `friis_diagnostics` aplica `cos²` a la **densidad de potencia**, y después
 `efield_from_power_density` saca la raíz → en amplitud queda `cos¹`. El modelo `legacy`
 aplica `cos²` directo a la **probabilidad**. Ninguno de los dos es un patrón de antena
 real.
 
-### 4.5 Aritmética de daño dimensionalmente vacía 🟡
+### 4.5 Aritmética de daño dimensionalmente vacía — severidad media
 
 ```python
 dano = probabilidad * potencia * 0.5     # probabilidad × kW × 0.5 = "puntos de salud"
@@ -362,7 +362,7 @@ dano = probabilidad * potencia * 0.5     # probabilidad × kW × 0.5 = "puntos d
 Presente en `Drone.recibir_daño` y `HPMissile.detonar`. Es el último resto de los
 "puntos de daño arbitrarios" que `FISICA_Y_MATEMATICA.md` §5.4 declara haber eliminado.
 
-### 4.6 `requirements.txt` incompleto 🟡
+### 4.6 `requirements.txt` incompleto — severidad media
 
 `scipy 1.18.0` y `pandas 3.0.3` están instalados en el venv y no declarados. No encontré
 imports en `src/`, pero el entorno no es reproducible desde `requirements.txt`.

@@ -141,7 +141,7 @@ solo con la lógica de ingeniería que la motivó originalmente.
 
 | Fuente | Tipo de aporte | Acción concreta |
 |---|---|---|
-| Ondas de agitación (starlings) | Brecha real encontrada | ✅ **Implementado** — `flocking.propagate_alarm`, P2-E Parte 4, 5 tests nuevos |
+| Ondas de agitación (starlings) | Brecha real encontrada | **Implementado** — `flocking.propagate_alarm`, P2-E Parte 4, 5 tests nuevos |
 | Chen & Kolokolnikov 2014 | Hipótesis testeable | Barrido de potencia × formación con el estimador ya corregido — ver `research/BARRIDO_DEPREDADOR_PRESA.md` |
 | Olson et al. 2013 | Anclaje teórico | Cita para cuando P3-B se documente como hallazgo propio — no cambia código |
 | Raptores / punto fijo | Validación retroactiva | Anotar en `FISICA_Y_MATEMATICA.md` que el targeting por centroide coincide con estrategia de caza real — no cambia código |

@@ -148,7 +148,7 @@ V_res = V_ind · [ 1 + (Q−1)·exp( −(L − λ₀/2)² / (2σ_L²) ) ]
    dispersión la empeoraría.
 2. **Falta el factor `L_eff = L/2`** — mismo motivo: no está confirmado que forme
    parte del pipeline real, y agregarlo sin esa confirmación no es defendible.
-3. ✅ **Corregido (2026-09-13):** la polarización ya usa `cos²(Uniform[0,π])` con
+3. **Corregido (2026-09-13):** la polarización ya usa `cos²(Uniform[0,π])` con
    piso 0.1 en el motor principal, no solo en `parametros.py` — ver hallazgo 14 de
    `docs/FISICA_Y_MATEMATICA.md`.
 

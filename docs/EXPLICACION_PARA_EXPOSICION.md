@@ -287,6 +287,89 @@ no una regla de "sí" o "no" fija. Esto refleja que un arma real de este
 tipo tampoco tiene un efecto idéntico disparo a disparo, porque cada dron
 individual tiene variación real de fabricación y de exposición al campo.
 
+### 18. El radar no conoce la posición verdadera: sigue una estimación
+
+Hasta acá, "detectado" parecía una etiqueta binaria e inmediata. En
+realidad el radar mantiene, para cada dron detectado, una posición y una
+velocidad **estimadas** — no las verdaderas — que actualiza de dos formas:
+en cada instante de simulación, proyectando hacia adelante según el último
+movimiento estimado (como estimar dónde está un auto que se perdió de
+vista un segundo, asumiendo que siguió en línea recta); y, solo cada
+cierto intervalo (un barrido periódico, como el de una antena de radar
+real que gira), con una medición fresca que corrige esa estimación. Si un
+dron sale de rango, maniobra de forma demasiado abrupta para que la
+estimación la explique, o queda detrás de un obstáculo, el sistema
+"pierde" ese seguimiento — y hay que volver a detectarlo desde cero en el
+próximo barrido, sin memoria de su velocidad anterior.
+
+### 19. Un segundo sensor: detección pasiva por radiofrecuencia
+
+El radar tiene una limitación física real: la señal que usa para detectar
+viaja de ida (del radar al dron) y de vuelta (la reflexión, del dron al
+radar), así que se debilita con la distancia elevada a la **cuarta**
+potencia — cae muy rápido, y por eso el radar tiene un alcance práctico
+limitado. Existe otra forma de detectar un dron que no depende de hacer
+rebotar nada: **escuchar la propia emisión del dron** — la señal de radio
+que usa para recibir órdenes de su operador. Esa señal viaja en una sola
+dirección (del dron al receptor), así que se debilita solo con el cuadrado
+de la distancia, igual que la propia arma (§5) — mucho más lentamente que
+la del radar. Un receptor pasivo de este tipo puede detectar, entonces, a
+mucha más distancia que el radar con la misma tecnología, siempre que haya
+línea de vista — es una técnica real de guerra electrónica (detección
+pasiva de emisiones, distinta del radar activo).
+
+### 20. El terreno también puede ocultar a un dron
+
+Además de los obstáculos artificiales (edificios), el simulador tiene en
+cuenta el relieve real del terreno (colinas) para decidir si un arma o un
+sensor tienen línea de vista directa hacia un dron — una colina entre el
+punto de emisión y el dron puede bloquear el disparo o la detección, igual
+que un edificio. En la práctica, esto casi nunca afecta a un dron volando
+a su altitud normal de crucero (las colinas del escenario son
+deliberadamente suaves), pero sí afecta a un dron que perdió altitud —
+por ejemplo, uno que aterrizó de forma forzosa porque el jammer lo dejó
+sin control (§13): a poca altura, el terreno sí puede tapar la línea de
+vista.
+
+### 21. Dos cañones, un solo plan: asignación arma-blanco optimizada
+
+El simulador puede operar con dos cañones HPM fijos, en dos posiciones
+distintas del campo, en vez de uno solo. Cuando hay más de un blanco (o
+grupo de blancos) que armas disponibles para dispararles en ese instante,
+surge un problema de decisión real: ¿qué arma le dispara a qué blanco,
+para causar la mayor cantidad de bajas esperadas en conjunto? Este
+problema tiene nombre en la literatura de defensa (asignación arma-blanco,
+o *Weapon-Target Assignment*), y el simulador lo resuelve con un
+optimizador que agrupa los blancos detectados y reparte los disparos
+disponibles entre los dos cañones, en vez de que cada uno decida por su
+cuenta.
+
+### 22. Cuánto cuesta defenderse
+
+Un cañón HPM no se consume al disparar (§8) — pero sí tiene un costo de
+oportunidad: electricidad, mantenimiento, el costo del sistema mismo
+amortizado por disparo. El simulador reporta ese costo, en dólares, por
+cada plan de tiro, y lo compara contra el costo estimado de un dron
+hostil comparable (un dron FPV comercial). A la distancia típica en la
+que opera el escenario de demostración, ese número da un plan de tiro que
+cuesta del orden de **cien veces** más que el dron que neutraliza — un
+dato incómodo pero real, y exactamente el tipo de pregunta que un
+análisis serio de un sistema de defensa antidrones tiene que poder
+responder, no solo "¿funciona?" sino "¿a qué costo?".
+
+### 23. Cómo se valida que el simulador mide lo que dice medir
+
+Además de simular, el proyecto se audita a sí mismo con tres herramientas:
+correr la simulación miles de veces con variaciones aleatorias (**Monte
+Carlo**) para obtener una distribución de resultados con incertidumbre en
+vez de un único número; medir, de esos miles de resultados, **qué
+parámetro no calibrado domina la varianza** del resultado (análisis de
+sensibilidad), para saber si una conclusión depende de física real o de un
+número inventado; y **recuperar la curva que el motor realmente produce**
+a partir de esos resultados (ajustándola matemáticamente) y contrastarla
+contra la curva que se configuró, para confirmar que el motor hace lo que
+su configuración dice que hace, en vez de asumirlo.
+
 ---
 
 ## Guion resumido 
@@ -306,3 +389,15 @@ individual tiene variación real de fabricación y de exposición al campo.
    opción económica contra drones baratos). Además, un radar de detección
    previo al ataque y un jammer que niega el control sin dañar nada.
 6. El enjambre se mueve solo, de forma reactiva, no como blancos fijos.
+7. El radar no conoce la posición verdadera: sigue una estimación que
+   puede perderse. Un segundo sensor, pasivo, detecta la propia emisión
+   del dron y alcanza más lejos que el radar. El relieve del terreno
+   también puede bloquear la línea de vista de ambos.
+8. Con dos cañones y varios blancos a la vez, un optimizador decide qué
+   arma le dispara a qué blanco para maximizar las bajas esperadas — y el
+   sistema reporta cuánto cuesta esa defensa en dólares, comparado contra
+   el costo de un dron hostil.
+9. El proyecto se valida a sí mismo: miles de corridas Monte Carlo,
+   análisis de qué parámetro domina la incertidumbre del resultado, y
+   verificación de que el motor realmente produce la curva que dice
+   producir.

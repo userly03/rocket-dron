@@ -4,6 +4,16 @@
 > vivo (con casillas para marcar) es [`../CHECKLIST_MEJORAS.md`](../CHECKLIST_MEJORAS.md).
 > Este documento explica **el porqué y el orden**; el checklist dice **qué tocar**.
 
+> **Estado: las cuatro fases (P0–P3) están completadas.** Este documento se
+> escribió como plan, antes de ejecutarlo — se conserva tal cual porque el
+> *razonamiento* (por qué este orden y no otro) sigue siendo la explicación
+> correcta de la arquitectura actual, aunque cada ítem ya esté implementado.
+> "El techo actual" de la sección siguiente describe el estado del proyecto
+> **antes** de este roadmap, no el estado actual. Ver la tabla de
+> trazabilidad al final para el mapeo completo plan → implementación, y
+> `docs/SEGUIMIENTO_SESION.md` para el registro sesión por sesión de cómo se
+> fue cerrando cada fase.
+
 ## La meta
 
 Que este simulador sea un **instrumento de medición defendible**, no una demo. El
@@ -170,7 +180,7 @@ Reescritura de P1-01. Es la fase que levanta el techo.
 
 ## Fase P2 — Física que cambia números en el rango real (semanas)
 
-### P2-A · Análisis de sensibilidad global (Morris → Sobol) ⭐
+### P2-A · Análisis de sensibilidad global (Morris → Sobol) — mayor salto científico de la fase
 - **Qué:** descomposición de varianza de la probabilidad de baja sobre los ~20 parámetros
   libres. Screening de Morris primero (barato), índices de Sobol después.
 - **Dónde:** nuevo `src/engine/sensitivity.py` sobre `experiments.py`; endpoint
@@ -200,7 +210,7 @@ Reescritura de P1-01. Es la fase que levanta el techo.
 - **Done:** el endpoint devuelve `E₅₀` y `σ_E` ajustados con IC, y un test verifica que
   recuperan los valores de entrada dentro del IC cuando se corre contra el propio modelo.
 
-### P2-C · Dos rayos (reflexión en tierra) + patrón de antena real ⭐
+### P2-C · Dos rayos (reflexión en tierra) + patrón de antena real
 **Reemplaza P3-08 (FDTD), que se corta.**
 - **Qué:** interferencia directo/reflejado sobre tierra, y un patrón de antena con taper
   y lóbulos laterales en lugar del hack `cos²`.
@@ -219,7 +229,7 @@ Reescritura de P1-01. Es la fase que levanta el techo.
   para la geometría (emisor a `z = 8 m`); un test verifica la posición del primer nulo
   contra el cálculo analítico de diferencia de camino; sin impacto en el bucle de 60 FPS.
 
-### P2-D · Modelo upset-vs-damage con fallo latente ⭐
+### P2-D · Modelo upset-vs-damage con fallo latente
 **Reemplaza la premisa de P3-09; conserva su maquinaria.**
 - **Qué:** dos umbrales por subsistema (*upset* recuperable / *damage* permanente) y una
   tasa de riesgo para fallo diferido. Reemplaza la aritmética
@@ -370,10 +380,10 @@ P1-C  5 subsistemas, eslabón más débil        M    (leer el PDF antes)
 P1-D  test de regresión de calibración        S    ← protege todo lo demás
 P1-E  Wunsch-Bell por tramos                  S
 ─────────────────────────────────────────────────  la física que importa
-P2-A  sensibilidad global (Morris → Sobol)    M    ⭐ mayor salto científico
+P2-A  sensibilidad global (Morris → Sobol)    M    mayor salto científico
 P2-B  dosis-respuesta por máxima verosimilitud M
-P2-C  dos rayos + patrón de antena            M    ⭐ reemplaza P3-08
-P2-D  upset/damage + fallo latente            M    ⭐ reemplaza P3-09
+P2-C  dos rayos + patrón de antena            M    reemplaza P3-08
+P2-D  upset/damage + fallo latente            M    reemplaza P3-09
 P2-E  OPFOR reactivo + lost-link              M    (estado partido primero)
 P2-F  presupuesto energético del arma         S/M  ← da sentido a P3-A
 P2-G  radar dinámico (2 pasos)                L    ← el más disruptivo, al final
@@ -384,16 +394,16 @@ P3-B  coevolución genética                    L    ← gated por P1-A
 
 ## Trazabilidad con el checklist original
 
-| Original | Destino | Estado |
+| Original | Destino | Estado final |
 |---|---|---|
-| P1-01 Monte Carlo | P1-A + P1-B | implementado pero **defectuoso** → reescribir |
-| P1-02 Reproducibilidad | P0-B | implementado, con carrera de hilos → arreglar |
-| P1-03 Duty cycle | P1-E | implementado; duty ✅, `g(τ)` sin respaldo → citar |
-| P2-04 Susceptibilidad | P0-A + P1-C | implementado; modelo distinto al del paper |
-| P2-05 Radar dinámico | P2-G | pendiente, replanteado en 2 pasos |
-| P2-06 OPFOR + lost-link | P2-E | pendiente, + prerrequisito de estado partido |
-| P3-07 WTA | P3-A | pendiente, criterio de done corregido |
-| P3-08 FDTD | ~~cortado~~ → P2-C | régimen inalcanzable |
-| P3-09 Thermal runaway | P2-D | premisa cortada, maquinaria conservada |
-| P3-10 Coevolución | P3-B | pendiente, gated por P1-A |
-| — | P1-D, P2-A, P2-B, P2-F | **nuevos** |
+| P1-01 Monte Carlo | P1-A + P1-B | reescrito — estimador con IC por bootstrap, distribuciones sobre parámetros (`src/engine/experiments.py`, `parametros.py`) |
+| P1-02 Reproducibilidad | P0-B | corregido — RNG por réplica inyectado (`src/utils/reproducibilidad.py`) |
+| P1-03 Duty cycle | P1-E | implementado — ley de daño por tramos, duty cycle citado (`tests/test_duty_cycle.py`) |
+| P2-04 Susceptibilidad | P0-A + P1-C | implementado — radar/arma con frecuencias independientes, 5 subsistemas (`hpm_engine.py`) |
+| P2-05 Radar dinámico | P2-G | implementado — `TrackManager` con barrido y filtro α-β-γ (`radar_engine.py`, `tests/test_radar_dinamico.py`) |
+| P2-06 OPFOR + lost-link | P2-E | implementado — estado partido salud/enlace, perfiles lost-link (`tests/test_opfor.py`) |
+| P3-07 WTA | P3-A | implementado — asignación arma-blanco optimizada (`targeting.py`, `tests/test_targeting.py`) |
+| P3-08 FDTD | ~~cortado~~ → P2-C | implementado — propagación de dos rayos + patrón de antena real (`propagation.py`) |
+| P3-09 Thermal runaway | P2-D | implementado — modelo upset/damage con fallo latente (premisa original cortada, maquinaria conservada) |
+| P3-10 Coevolución | P3-B | implementado — algoritmo genético arma↔enjambre, frontera de Pareto (`coevolution.py`, `tests/test_coevolution.py`) |
+| — | P1-D, P2-A, P2-B, P2-F | implementados — test de regresión de calibración, sensibilidad global (`sensitivity.py`), dosis-respuesta (`GET /api/dosis-respuesta`), presupuesto energético del arma (`tests/test_presupuesto_arma.py`) |

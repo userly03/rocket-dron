@@ -18,20 +18,20 @@
 ## Ya implementado en v1 (verificado, con reservas)
 
 - [x] **P1-01 · Monte Carlo + IC95%** — `src/engine/experiments.py`, `/api/experiments`.
-      ⚠️ **Defectuoso:** el estimador es `P(aniquilación total)` y vale 0 casi siempre
+      **Defectuoso:** el estimador es `P(aniquilación total)` y vale 0 casi siempre
       (medido: 1 baja en 240 exposiciones → `p̂=0`, `IC=[0, 0.32]`); y el MC varía solo
       la geometría del enjambre, no los parámetros del modelo. **Se reescribe en P1-A/P1-B.**
 - [x] **P1-02 · Reproducibilidad: RNG sembrado + manifest + export** —
       `src/utils/reproducibilidad.py`, `/api/export`, `/api/manifest`.
-      ⚠️ **Carrera de hilos:** `_rng` es global de módulo y lo comparten el hilo de
+      **Carrera de hilos:** `_rng` es global de módulo y lo comparten el hilo de
       experimentos y el de simulación en vivo. **Se arregla en P0-B.**
 - [x] **P1-03 · Duty cycle: daño por pico y duración de pulso** — `HPM_DUTY_CYCLE`,
       `pulse_coupling_factor`, pico/promedio en el panel.
-      ⚠️ El duty cycle coincide con el paper; `g(τ)=min(√(τ/τ_ref),3.0)` es un añadido
+      El duty cycle coincide con el paper; `g(τ)=min(√(τ/τ_ref),3.0)` es un añadido
       sin cita y el `3.0` es un número mágico. **Se fundamenta en P1-E.**
 - [x] **P2-04 · Huella de susceptibilidad: resonancia + polarización** —
       `frequency_coupling`, `susceptibility_coupling_factor`, sorteo por dron.
-      ⚠️ Modelo distinto al del paper (lorentziana en frecuencia vs gaussiana en
+      Modelo distinto al del paper (lorentziana en frecuencia vs gaussiana en
       longitud; falta `L_eff=L/2`; polarización con distribución no física).
       **Se corrige en P1-C; su experimento estrella está confundido hasta P0-A.**
 
@@ -100,7 +100,7 @@
       secundario. **Medido con la config por defecto:** `fraccion_media = 0.0056`,
       `IC = [0, 0.0139]` — contra `p̂ = 0.0`, `IC = [0, 0.3244]` de v1: **el IC es
       23× más estrecho y el punto ya no es 0**.
-      ⚠ **CORRECCIÓN (2026-09-12, hallazgo de P2-A):** ese `0.0056` es real como
+      **CORRECCIÓN (2026-09-12, hallazgo de P2-A):** ese `0.0056` es real como
       salida del modelo, pero **a 700 m el 90.7 % de la probabilidad por dron es piso
       de la sigmoide, no física** (ver P1-F). El estimador funciona; lo que mide a rango
       largo está dominado por un artefacto del modelo de daño. La afirmación "el
@@ -265,7 +265,7 @@
       verifica como test de implementación, NO como validación física; el contenido
       falsable de P1-E son la continuidad, los exponentes y el techo.
 
-- [x] **P1-F · 🔴 Eliminar el piso de la sigmoide: logística en `ln E`, no en `E`**
+- [x] **P1-F · Eliminar el piso de la sigmoide: logística en `ln E`, no en `E`**
       *(encontrado por P2-A el 2026-09-12 — no estaba en v1 ni en v2)*
       qué: la sigmoide de daño es logística en `E` y tiene soporte en todo ℝ, pero el
       campo eléctrico es POSITIVO. Consecuencia estructural: **`P(E=0) ≠ 0`.** Medido:
@@ -331,7 +331,7 @@
       **se agravó** — la suma de `S_T` de los parámetros no calibrados pasó de 0.43-0.59
       a **0.45-0.69**, y a 60 m es el **69 %** de la varianza. §3.8 actualizada.
 
-- [x] **P1-G · 🔴 Los tres números del paper son mutuamente inconsistentes**
+- [x] **P1-G · Los tres números del paper son mutuamente inconsistentes**
       *(hallazgo derivado de P1-F, no es trabajo de código)*
       51.4 % @ 20 m y 13.1 % @ 40 m fijan `b = 2.81`; el alcance de 90 % de baja de
       ~18 m exige `b = 20.32` — factor **7.2**. Entre 497 y 552 V/m (+11 % de campo) la
@@ -354,7 +354,7 @@
 > **P1-F**, un artefacto que domina el 90 % de la probabilidad reportada en todo el
 > rango de combate por defecto. Eso es exactamente para lo que servía el ítem.
 
-- [x] **P2-A · ⭐ Análisis de sensibilidad global (Morris → Sobol)**
+- [x] **P2-A · Análisis de sensibilidad global (Morris → Sobol)**
       qué: descomposición de varianza de la probabilidad de baja sobre los ~20 parámetros
       libres. Screening de Morris primero, índices de Sobol después.
       toca: nuevo `src/engine/sensitivity.py`, `/api/sensitivity`.
@@ -379,7 +379,7 @@
       · **La polarización domina:** `S₁`=0.571, `S_T`=0.647. Confirma por
         descomposición de varianza lo que §3.6 había estimado a mano (55 % del CV) —
         ahora con una fracción que *suma*, no una diferencia de varianzas.
-      · **⚠ Los dos que siguen NO están calibrados:** `coupling_field_efficiency`
+      · **Los dos que siguen NO están calibrados:** `coupling_field_efficiency`
         (`S_T`=0.272, el parámetro provisional de P1-C bloqueado) y `pulse_duration_ns`
         (`S_T`=0.159, la extensión Wunsch-Bell que no viene del paper). **Juntos
         aportan 43-59 % de la varianza según la distancia.** Es el hallazgo central: hay
@@ -420,7 +420,7 @@
       `E₅₀=700` (deliberadamente distinto) dan `recupera_la_calibracion=False` con el IC
       sin tocar el valor real configurado.
 
-- [x] **P2-C · ⭐ Dos rayos (reflexión en tierra) + patrón de antena real**
+- [x] **P2-C · Dos rayos (reflexión en tierra) + patrón de antena real**
       *(reemplaza P3-08, cortado)*
       qué: interferencia directo/reflejado sobre tierra y patrón de antena con taper y
       lóbulos laterales, en lugar del hack `cos²` (que además es incoherente: `cos²` sobre
@@ -447,7 +447,7 @@
       Integrado sobre el ángulo sólido, Airy ve **3.2× más potencia**. O sea: el modelo
       **subestima la letalidad fuera de eje** — con `cos²` un enjambre justo fuera del
       haz es perfectamente seguro.
-      ⚠ **MI PROPIA JUSTIFICACIÓN DE ESTE ÍTEM ERA FALSA.** El roadmap decía que la
+      **MI PROPIA JUSTIFICACIÓN DE ESTE ÍTEM ERA FALSA.** El roadmap decía que la
       reflexión en tierra "convierte la altitud en variable táctica: un enjambre puede
       volar en un nulo". A 2.45 GHz las franjas miden **0.76 m a 100 m y 5.35 m a 700 m**,
       con **22–157 ciclos** en la banda de vuelo (40–160 m), y el dron oscila ±4 m:
@@ -463,7 +463,7 @@
       altura del emisor o la amplitud de oscilación — porque entonces la conclusión
       cambia.
 
-- [x] **P2-D · ⭐ Upset vs damage + fallo latente**
+- [x] **P2-D · Upset vs damage + fallo latente**
       *(reemplaza la premisa de P3-09; conserva su maquinaria)*
       qué: dos umbrales por subsistema (*upset* recuperable / *damage* permanente) y tasa
       de riesgo para fallo diferido. Reemplaza `dano = probabilidad*potencia*0.5`
@@ -490,7 +490,7 @@
       julios) reemplaza `probabilidad·potencia·0.5`. `A_efectiva = cable_length_m²`: no
       introduce parámetro libre nuevo, reutiliza la huella de susceptibilidad ya sorteada.
       Verificado: escala exactamente ×4 al duplicar el cable, ×2 al duplicar la duración.
-      🔴 **Encontré y corregí mi propio error de diseño antes de cerrar el ítem:** el
+      **Encontré y corregí mi propio error de diseño antes de cerrar el ítem:** el
       primer valor del hazard rate (`2.0/s`) parecía razonable mirado un tick, pero
       integrado sobre la cola de decaimiento (`P(falla eventual)=1-exp(-h₀·τ)`) daba
       **99.3% de muerte eventual** medido por simulación — contradecía el propio propósito
@@ -552,7 +552,7 @@
       Corregida además una inconsistencia preexistente: la rama `n<2` de
       `compute_headings` no aplicaba `BOIDS_HOME_WEIGHT` al término home, a diferencia
       de las otras dos ramas.
-      ⚠ **nota:** `RTH` orbita alrededor del centro al llegar (no puede frenar). Es
+      **nota:** `RTH` orbita alrededor del centro al llegar (no puede frenar). Es
       consistente con el modelo de velocidad constante del simulador, pero un RTH real
       aterriza o mantiene posición al llegar. Anotado, no corregido.
 
@@ -585,7 +585,7 @@
       modelado, no dato del paper (arXiv:2602.08477 no publica presupuesto térmico).
       El rechazo propaga limpio al API (mensaje explícito, sin excepción, sin
       contabilizar un disparo falso) — verificado.
-      ⚠ **nota menor:** el interlock es PRE-disparo, así que el último disparo permitido
+      **nota menor:** el interlock es PRE-disparo, así que el último disparo permitido
       puede sobrepasar el límite (medido: termina en 125.625 °C con `HPM_TEMP_MAX_C` =
       125). Es defendible —un interlock real chequea antes de disparar, no a mitad— pero
       el panel muestra `temperatura_c > temperatura_max_c`, que se lee como error.
@@ -740,7 +740,7 @@
 
 ## Deuda técnica menor (sin fase asignada)
 
-- [x] `run_replica` descarta los eventos de `_tick()`. ✅ **CERRADO (2026-09-12).**
+- [x] `run_replica` descarta los eventos de `_tick()`. **CERRADO (2026-09-12).**
       Ahora procesa `eventos_misil`/`eventos_jamming` con los mismos métodos que usa el
       bucle interactivo (`_process_missile_events`/`_process_jamming_events`), así que
       una detonación de misil durante Monte Carlo deja el mismo rastro en `analytics`
@@ -748,7 +748,7 @@
       misil lanzado en una réplica sintética termina en `shot_history` con
       `tipo="misil"`, y una réplica completa con arma "misil" deja entradas en
       `distance_stats`.
-- [x] El jammer es el único arma inmune a la huella de susceptibilidad. ✅ **CERRADO
+- [x] El jammer es el único arma inmune a la huella de susceptibilidad. **CERRADO
       (2026-09-12).** Corregido de forma parcial y deliberada: `_en_zona_de_efecto` ahora
       aplica `susceptibility_coupling_factor(cable_length_m=None, polarization=...)`, o
       sea que el **mismatch de polarización SÍ afecta** al jammer (verificado: a r=700 m
@@ -758,14 +758,14 @@
       resonancia de cableado modela acoplamiento incidental a un arnés no apantallado que
       no fue diseñado como antena; el enlace de control sí tiene una antena receptora
       deliberada, sintonizada a su banda, sin ese desajuste aleatorio.
-- [x] `requirements.txt` no declara `scipy`/`pandas`. ✅ **VERIFICADO, sin acción
+- [x] `requirements.txt` no declara `scipy`/`pandas`. **VERIFICADO, sin acción
       necesaria (2026-09-12).** `grep -rln "import scipy\|import pandas" src/ tests/`
       no devuelve nada: ninguno de los dos se usa en el proyecto. Son ruido preexistente
       del venv (probablemente de otra herramienta instalada en el mismo entorno), no una
       dependencia real — de hecho `experiments.py` y `sensitivity.py` documentan
       explícitamente que evitan `scipy` a propósito para que `requirements.txt` siga
       siendo la fuente de verdad del entorno. Añadirlos declararía una dependencia falsa.
-- [x] **`check_shot_invariants` da falsos positivos desde P2-04.** ✅ **CERRADO
+- [x] **`check_shot_invariants` da falsos positivos desde P2-04.** **CERRADO
       (2026-09-12).** Los eventos de `HPMWeapon.disparar` y `HPMissile.detonar` ahora
       llevan `factor_acoplamiento`; el chequeo exige offset angular **y** acoplamiento
       comparable (tolerancia relativa 15 %) antes de exigir monotonía, y degrada sin
@@ -777,7 +777,7 @@
       (`_mismo_offset`, ±2°), pero la huella de susceptibilidad añadió una segunda
       variable por dron: dos drones a la misma distancia y mismo offset pueden tener
       acoplamientos `√(η·pol)` muy distintos. Observado en corridas reales:
-      `[VALIDACIÓN] ⚠ la probabilidad no decrece con la distancia: d=898.67m→p=0.0097
+      `[VALIDACIÓN] la probabilidad no decrece con la distancia: d=898.67m→p=0.0097
       vs d=899.1m→p=0.0244`. El invariante es correcto solo a acoplamiento
       comparable; hay que añadir esa condición al chequeo o el log se llena de
       advertencias que no son defectos.

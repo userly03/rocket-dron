@@ -211,6 +211,39 @@ radar necesita cierto SNR mínimo para poder distinguir un blanco real del
 ruido — es el concepto detrás del umbral de detección del radar del
 simulador.
 
+**Track / seguimiento (*tracking*)**: el radar no le pasa al arma la
+posición verdadera de cada dron — mantiene un `Track` por blanco, con
+posición y velocidad **estimadas**, que se actualiza de dos formas: cada
+tick por propagación (dead-reckoning, "camina solo" entre mediciones) y,
+solo en cada revisita del barrido, con una medición fresca. Un track se
+pierde si el blanco sale de rango/SNR, si una maniobra abrupta rompe la
+predicción, o si la línea de vista se bloquea.
+
+**Filtro α-β-γ**: una técnica clásica de seguimiento de blancos (variante
+simplificada de un filtro de Kalman, sin su aparato estadístico completo)
+que corrige la posición/velocidad/aceleración ESTIMADAS de un track en
+proporción al residual (diferencia entre lo que el filtro predecía y lo
+que la medición fresca encontró). Tres ganancias fijas (α, β, γ) — una
+para cada orden de corrección — en vez de una matriz de covarianza que se
+recalcula sola.
+
+**Enlace unidireccional vs. bidireccional (detección pasiva vs. radar)**:
+un radar es bidireccional — transmite una señal, espera que rebote en el
+blanco, y recibe esa reflexión: la atenuación por distancia se aplica DOS
+veces (`r⁴`). Un sensor pasivo que escucha la emisión propia del blanco
+(su enlace de control/telemetría, no una señal propia reflejada) es
+unidireccional: la atenuación se aplica UNA sola vez (`r²`, ecuación de
+Friis). Por eso un receptor pasivo alcanza mucho más lejos que un radar a
+igual potencia — es doctrina real de guerra electrónica (ESM/RWR), no una
+particularidad de este simulador.
+
+**WTA (*Weapon-Target Assignment* / asignación arma-blanco)**: el problema
+de optimización de decidir qué arma dispara a qué blanco cuando hay más
+blancos que capacidad de fuego disponible en el instante, buscando
+maximizar el daño esperado total. Es NP-difícil en el caso general; este
+simulador lo resuelve con una heurística *greedy* más búsqueda local,
+validada contra fuerza bruta exacta en instancias chicas.
+
 ---
 
 ## 5. Drones y contramedidas (el panorama que preguntaste)
@@ -278,20 +311,46 @@ de fibra óptica volvieron obsoleto al jamming clásico — pero no al HPM.
 **Monte Carlo**: correr una simulación miles de veces con variaciones
 aleatorias (potencia, ángulo, umbral) para obtener una distribución de
 resultados con incertidumbre, en vez de un único número determinístico. Es
-lo que hace el paper que usamos de referencia (10,000 corridas) y lo que
-todavía NO hace nuestro simulador de forma sistemática (anotado como
-pendiente).
+lo que hace el paper que usamos de referencia (10,000 corridas) — y, desde
+que se implementó el motor de experimentos (`src/engine/experiments.py`,
+`GET/POST /api/experiments`), también lo que hace este simulador: réplicas
+headless en background, con estadística agregada.
 
 **Ley de los grandes números**: si repetís un experimento aleatorio muchas
 veces, el promedio de los resultados converge al valor teórico esperado.
 Es la base para poder decir "corrí 1000 simulaciones y el 30% cayó, lo cual
-coincide con la probabilidad teórica calculada" — una forma de
-autovalidación que todavía no implementamos de forma automatizada.
+coincide con la probabilidad teórica calculada". Este simulador lo usa de
+dos formas: en el motor Monte Carlo (arriba) y, más directamente, en la
+**curva dosis-respuesta recuperada** (`GET /api/dosis-respuesta`): en vez
+de confiar en que el motor hace lo que su configuración dice, se ajusta
+por máxima verosimilitud la curva que el motor REALMENTE produce y se
+contrasta contra la configurada — cerrando el lazo en vez de asumirlo.
 
 **Intervalo de confianza**: en vez de decir "51.4% de probabilidad", decir
 "51.4% ± 1.0%" — reconociendo que hay incertidumbre en la medición/
-estimación. El paper de referencia sí reporta esto; nuestro simulador
-todavía no.
+estimación. El paper de referencia lo reporta así; la curva
+dosis-respuesta recuperada de este simulador también, con un intervalo del
+95% obtenido por *bootstrap* (remuestreo con reemplazo de las réplicas
+simuladas, no una fórmula analítica cerrada).
+
+**Análisis de sensibilidad global (Morris + Sobol)**: en vez de preguntar
+"¿qué pasa si cambio ESTE parámetro solo?" (sensibilidad local), pregunta
+"de toda la varianza del resultado, ¿qué fracción explica cada
+parámetro, considerando que TODOS varían a la vez?". El screening de
+Morris es barato y dice qué parámetros importan poco; Sobol (más caro)
+da el reparto exacto de varianza (`S₁` efecto principal, `S_T` efecto
+total con interacciones). Este simulador lo usa para responder la
+pregunta que de verdad importa: qué parámetro **no calibrado** domina el
+resultado — ver `amenazas_a_la_validez` en `GET /api/sensibilidad`.
+
+**Algoritmo genético / coevolución**: una técnica de optimización que
+imita la selección natural — una población de candidatos (acá, arma y
+enjambre a la vez) se evalúa, los mejores se combinan/mutan para producir
+la siguiente generación, y se repite. En *coevolución*, ambos bandos
+evolucionan a la vez, cada uno contra el mejor rival de la generación
+anterior, buscando una **frontera de Pareto** (el conjunto de soluciones
+donde mejorar a un bando ya no es posible sin empeorar al otro) en vez de
+un único "ganador".
 
 **FDTD / Método de Momentos**: técnicas de simulación electromagnética
 "de verdad" (resuelven numéricamente las ecuaciones de Maxwell sobre una

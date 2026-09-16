@@ -37,7 +37,15 @@ veces cuando la auditoría encontró errores (ver el historial completo en
       ├─ Boids (src/engine/flocking.py): separación + alineación + cohesión
       │  + regla de "zona de patrulla" → nuevo rumbo de cada dron
       ├─ Drone.mover(): nueva posición x,y,z (oscilación de altitud)
-      ├─ Radar (src/engine/radar_engine.py): ¿cada dron queda "detectado"?
+      ├─ TrackManager (src/engine/radar_engine.py): barrido periódico con
+      │  filtro α-β-γ — el arma NO conoce la posición verdadera, solo la
+      │  posición ESTIMADA de cada track, que puede perderse por rango,
+      │  maniobra evasiva o línea de vista bloqueada (obstáculos o relieve
+      │  real del terreno, src/engine/terreno.py)
+      ├─ Sensor RF pasivo, si está activo (src/engine/rf_sensor.py): un
+      │  dron que el radar no detecta (fuera de su rango, que cae con r⁴)
+      │  puede detectarse igual por su propia emisión (enlace de Friis
+      │  unidireccional, r²) — se OR-ea con el radar, misma línea de vista
       └─ Jammer, si está activo (src/models/jammer.py): ¿queda "interferido"?
    b) Si hay un misil en vuelo (src/models/hpm_missile.py):
       ├─ Guiado PN hacia el blanco fijado (si guiado=True)
@@ -45,13 +53,21 @@ veces cuando la auditoría encontró errores (ver el historial completo en
       └─ ¿debe_detonar? (fusible de proximidad — detona en el punto de
          máxima cercanía real, no en el primer cruce del umbral)
 
-3. Disparo (cañón, src/models/hpm_weapon.py) o detonación (misil):
+3. Disparo (cañón, src/models/hpm_weapon.py, en uno o dos nodos fijos) o
+   detonación (misil):
    ├─ Por cada dron: distancia 3D real + ángulo respecto al eje del arma
    ├─ Densidad de potencia (Friis) → campo E (V/m) → sigmoide → probabilidad
    ├─ Si el dron es "blindado": se reduce la probabilidad (espacio de momios)
    └─ Sorteo aleatorio: ¿cae o no?
 
-4. Todo esto se transmite al frontend por WebSocket cada tick, y cada
+4. Planificación (src/engine/targeting.py, bajo demanda, no cada tick):
+   ├─ Agrupa los TRACKS detectados en clusters
+   ├─ Asignación arma-blanco (WTA) greedy + búsqueda local, con cesión de
+   │  blanco entre los dos nodos de defensa, maximizando bajas esperadas
+   └─ Reporta el costo en USD del plan (costo-intercambio) contra el
+      presupuesto real de energía/munición — sin cambiar qué optimiza
+
+5. Todo esto se transmite al frontend por WebSocket cada tick, y cada
    evento importante se imprime en la terminal con sus números reales
    (src/engine/validation.py) — incluye autochequeos de consistencia física.
 ```
@@ -75,6 +91,9 @@ resumen operativo — qué fórmula corre en cada situación.)
 | 8 | Reynolds 1987 (separación+alineación+cohesión+patrulla) | Rumbo del enjambre | `flocking.py` |
 | 9 | Navegación proporcional: `giro = N·(Δángulo_LOS/dt)` | Guiado del misil | `hpm_missile.py` |
 | 10 | Distancia 3D (`√(Δx²+Δy²+Δz²)`) | Toda evaluación de daño/detección (slant range) | `helpers.py::distance3d` |
+| 11 | `Pr = Pt·Gt·Gr·λ²/(4π·r)²` (Friis, enlace unidireccional) | Sensor RF pasivo — a diferencia de la #7 (radar, r⁴), acá la señal solo recorre el camino de ida | `rf_sensor.py` |
+| 12 | Filtro α-β-γ (corrección de posición/velocidad/aceleración proporcional al residual de medición) | Posición ESTIMADA de cada track del radar, no la real | `radar_engine.py::TrackManager` |
+| 13 | Ray-marching 3D contra el relieve (`altura_terreno(x,y)` muestreada a lo largo del rayo) | Línea de vista bloqueada por una colina, no solo por obstáculos artificiales | `terreno.py`, `hpm_engine.py::_relieve_bloquea_rayo` |
 
 ---
 
@@ -142,6 +161,38 @@ números reales, recién verificados contra el código actual.
   significa que este tipo de arma es de **defensa de punto/corto alcance**,
   no de largo alcance (coincide con cómo se despliegan los sistemas reales,
   ver `ESTADO_DEL_ARTE_HPM.md` §3).
+
+### 4.6 Extensiones que cambian esta matriz, no solo el conteo de código
+
+Tres capacidades agregadas después de la matriz de arriba modifican el
+cuadro de forma sustantiva, no cosmética — la verificación numérica
+completa (con los números reales, no aproximados) está en
+`SEGUIMIENTO_SESION.md` §9.13-9.14:
+
+- **Sensor RF pasivo**: el radar (fila 4.3) tiene un techo de alcance
+  real dentro del mapa (cae con `r⁴`). El sensor RF, con la potencia de
+  emisión típica de un dron FPV, detecta hasta ~3948m — casi 3 veces la
+  diagonal del mapa de 1000×1000m. Con línea de vista libre, esto
+  elimina en la práctica el "punto ciego por distancia" que tenía el
+  radar solo; la única defensa real pasa a ser bloquear la línea de
+  vista, no alejarse.
+- **Relieve real del terreno**: bloquea la línea de vista de forma
+  prácticamente inerte contra un dron en vuelo normal (0/3000 casos en
+  una búsqueda numérica sobre geometrías realistas, con la amplitud de
+  colinas del frontend) pero significativa contra un blanco cerca del
+  suelo — un dron aterrizado por falla de enlace, por ejemplo (64.3% de
+  bloqueo). No es una limitación del terreno: es una característica
+  física correcta, verificada antes de integrarse.
+- **Defensa multi-nodo**: dos cañones fijos con cesión de blanco en el
+  WTA no duplican la capacidad de derribo por dron — la mejora real es
+  poder cubrir dos frentes de ataque simultáneos sin que el optimizador
+  tenga que elegir entre ellos.
+
+Sobre el costo: a la distancia típica de la demo (~600m), el plan de
+tiro óptimo cuesta del orden de **100 veces** el precio de un dron
+hostil comparable (FPV comercial) — un dato que la crítica original de
+esta sesión pedía explícitamente y que antes no se reportaba en ningún
+lugar del simulador.
 
 ---
 
@@ -346,7 +397,11 @@ no es eso.
    la probabilidad 800x en vez de 2.5x, un fusible de proximidad que
    detonaba en el peor momento posible, entre otros) — todo documentado
    con el número exacto del error y la corrección. Eso es más riguroso que
-   la mayoría de los prototipos de este tipo, sean o no militares.
+   la mayoría de los prototipos de este tipo, sean o no militares. El
+   mismo criterio se sostuvo en las rondas de auditoría y en cada
+   feature agregada después (ver `SEGUIMIENTO_SESION.md` para el
+   registro completo, sesión por sesión): cada mejora se verificó
+   numéricamente antes de integrarse al motor, no después.
 2. **La integración coherente de varias capas** (detección, daño
    direccional, daño de área, negación de enlace, comportamiento de
    enjambre reactivo, heterogeneidad de blindaje) que interactúan de forma

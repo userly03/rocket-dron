@@ -33,7 +33,7 @@ Se revisó cada fórmula del proyecto contra literatura real (ver
 | 6 | La tabla de configuración del README tenía datos obsoletos (`HPM_K_CONSTANT` listado como `0.015` en la tabla, pero `250` en el texto). | Baja | **Corregido**. |
 | 7 | El blindaje heterogéneo (§8.1) multiplicaba el umbral de campo E por 2.5× para simular drones "blindados" — pero al vivir ese umbral dentro de una sigmoide no lineal, la reducción real de probabilidad resultaba de **14× a 821×** según la distancia (no 2.5×), dejando a los drones blindados prácticamente invencibles en todo el rango de combate real (probabilidad ~0.003%-0.03% a 80-200m). | **Alta** (blindaje inutilizable) | **Corregido**: `apply_hardening_odds()` aplica la reducción en espacio de momios (`odds = p/(1-p)`, dividido por el factor) en vez de desplazar el umbral — da una reducción consistente de 1×-2.5× en todo el rango, no un colapso exponencial. Ver [§8.1](#81-blindaje-heterogéneo-srcmodelsdronepy-srcmodelsswarmpy). |
 | 8 | `PhysicsAnalytics.get_physics_panel` publicaba `probabilidad_referencia`, `formula` y `coupling_k` derivados de `gaussian_neutralization_prob` (`P = 1 - exp(-k·P·exp(-r²/2σ²))`) — un TERCER modelo que ni `friis` ni `legacy` usan para decidir bajas (`Drone.recibir_daño`/`HPMissile.calcular_daño` nunca lo llaman), pintado en el frontend (`charts.js`, `index.html`) como si fuera la física gobernante. Exactamente el defecto que esta misma tabla dice haber corregido en otros hallazgos. | **Alta** (número físico en pantalla que no gobierna nada) | **Corregido** (P0-C): `get_physics_panel` ya no publica `probabilidad_referencia` ni `coupling_k`; `formula` refleja siempre el modelo activo (`legacy`: `P = 1 - exp(-k·potencia/d²)` con `HPM_K_CONSTANT`, la k que ese modelo sí usa; `friis`: la cadena Friis→E→sigmoide ya correcta). `gaussian_neutralization_prob` se conserva, documentada como modelo de visualización exclusivo de `get_heatmap`. Frontend actualizado para no mostrar `coupling_k`. Auditoría §4.1. |
-| 9 | **La sigmoide de daño es logística en `E`, que tiene soporte en todo ℝ, pero el campo eléctrico es positivo — de ahí que `P(E=0) = 2.30%` (modelo agregado) y `3.30%` (OR-gate de 5 subsistemas).** Más allá de ~97 m más de la mitad de la probabilidad reportada es ese piso, y a 700 m —el rango de combate por defecto, con el enjambre circular a 500-900 m— el **90.7%** del número es artefacto. Afecta retroactivamente la lectura de la métrica de P1-A. Encontrado por el análisis de sensibilidad ([§3.8](#38-análisis-de-sensibilidad-global-morris--sobol)), no buscado. | **Alta** (todo el rango de combate por defecto está en zona de artefacto) | ✅ **CORREGIDO (P1-F)**: la log-logística `P = 1/(1+(E₅₀/E)^b)` da `P(0)=0` exacto y ajusta los dos puntos publicados con residuo **0.0000 pp** (contra −1.92 pp del modelo actual) con los mismos 2 parámetros. `HPM_LINK_FUNCTION = "log_logistica"` es el default; la logística queda seleccionable. La calibración se movió a 0.4677/0.1113 (más CERCA del paper a 20 m: −4.63 pp contra −7.84 pp). A 700 m la probabilidad cayó un factor 630. Ver [§3.7](#37--el-piso-de-la-sigmoide-pe0--0---corregido-p1-f). |
+| 9 | **La sigmoide de daño es logística en `E`, que tiene soporte en todo ℝ, pero el campo eléctrico es positivo — de ahí que `P(E=0) = 2.30%` (modelo agregado) y `3.30%` (OR-gate de 5 subsistemas).** Más allá de ~97 m más de la mitad de la probabilidad reportada es ese piso, y a 700 m —el rango de combate por defecto, con el enjambre circular a 500-900 m— el **90.7%** del número es artefacto. Afecta retroactivamente la lectura de la métrica de P1-A. Encontrado por el análisis de sensibilidad ([§3.8](#38-análisis-de-sensibilidad-global-morris--sobol)), no buscado. | **Alta** (todo el rango de combate por defecto está en zona de artefacto) | **CORREGIDO (P1-F)**: la log-logística `P = 1/(1+(E₅₀/E)^b)` da `P(0)=0` exacto y ajusta los dos puntos publicados con residuo **0.0000 pp** (contra −1.92 pp del modelo actual) con los mismos 2 parámetros. `HPM_LINK_FUNCTION = "log_logistica"` es el default; la logística queda seleccionable. La calibración se movió a 0.4677/0.1113 (más CERCA del paper a 20 m: −4.63 pp contra −7.84 pp). A 700 m la probabilidad cayó un factor 630. Ver [§3.7](#37--el-piso-de-la-sigmoide-pe0--0---corregido-p1-f). |
 | 10 | **Los tres números publicados del paper son mutuamente inconsistentes.** 51.4 % @ 20 m y 13.1 % @ 40 m fijan un parámetro de forma `b = 2.81`; el alcance de 90 % de baja de ~18 m exige `b = 20.32` — un factor **7.2**. Entre 497 y 552 V/m (+11 % de campo) la probabilidad tendría que saltar de 51.4 % a 90 %. Ocurre bajo cualquier ajuste de dos parámetros, logística incluida. | Media (afecta qué se puede exigir al simulador, no al simulador en sí) | **Diagnosticado, no corregible desde acá**: es un problema de la referencia. Explicación más probable (inferencia): los 18 m salen de su curva **determinista**, no de la Monte Carlo contra la que el simulador calibra — los puntos deterministas dan `b ≈ 4.3-5.8`, mismo orden. Consecuencia: el criterio de aceptación de P1-E (18 m/88 m) **nunca fue alcanzable**, lo que explica retroactivamente por qué la brecha no cerraba. Fijado como aritmética verificable en `tests/test_duty_cycle.py`. Ver [§3.7.1](#371--los-tres-números-publicados-del-paper-son-mutuamente-inconsistentes). |
 | 11 | **El taper angular `cos²` no es el patrón de ninguna antena real**: sin lóbulos laterales, forma independiente de `D` y `λ`, y **exactamente cero fuera del cono nominal**. Contra el patrón de Airy (apertura circular, física establecida) la discrepancia es de +7.2 dB a 6° y **+28.9 dB a 7.4°**, y Airy integra **3.2× más potencia** sobre el ángulo sólido. O sea que el modelo **subestima la letalidad fuera de eje**: con `cos²` un enjambre justo fuera del haz es perfectamente seguro, con un patrón real recibe ~30 % del campo del eje y el primer nulo no llega hasta 14.4°. | Media (afecta blancos fuera de eje, no la calibración en eje) | **Implementado como opt-in** (`PROPAGATION_ANTENNA_PATTERN="airy"`), no activado por defecto porque mueve la calibración de §3.4. Validado contra las posiciones y niveles analíticos de Airy (HPBW 12.05°, nulo a 14.40°, lóbulo a −17.57 dB exacto). Ver [§3.9.1](#391-el-taper-cos-no-es-el-patrón-de-ninguna-antena). |
 | 12 | **Mi propia justificación de P2-C era falsa a 2.45 GHz.** El roadmap afirmaba que la reflexión en tierra *"convierte la altitud en variable táctica: un enjambre puede volar en un nulo"*. Las franjas miden **0.76 m a 100 m y 5.35 m a 700 m**, con 22–157 ciclos en la banda de vuelo (40–160 m), y el dron oscila ±4 m: cruza varias franjas por oscilación. Es el mismo error de escala que motivó cortar P3-08, cometido en su reemplazo. | Media (invalida una conclusión del roadmap, no el código) | **Corregido en el diseño**: el efecto se implementa pero su uso correcto es **estadístico** — `⟨|F|²⟩ = 2` exacto, o sea que el espacio libre **subestima la potencia media sobre tierra en 3.01 dB** (verificado en 6 combinaciones de frecuencia y rango), más una dispersión p5–p95 de −16 a +6 dB que entra como varianza. La altitud sí es táctica por debajo de ~0.5 GHz, y `franja_resoluble()` lo dice. Ver [§3.9.2](#392--la-altitud-no-es-variable-táctica-a-245-ghz). |
@@ -250,9 +250,9 @@ estado estacionario   g(τ) = const = (τ₂/τ₁)^(1/4)
 **Continuidad.** Los tres tramos están anclados al mismo `τ₁`, así que empalman
 en valor por construcción:
 
-- en `τ₁`: `(τ₁/τ₁)^(1/2) = 1 = (τ₁/τ₁)^(1/4)` ✓
+- en `τ₁`: `(τ₁/τ₁)^(1/2) = 1 = (τ₁/τ₁)^(1/4)`
 - en `τ₂`: la rama de difusión vale `(τ₂/τ₁)^(1/4)`, que es literalmente la
-  constante del tramo estacionario ✓
+  constante del tramo estacionario
 
 `g` es continua, no derivable en los quiebres — lo físicamente esperado en un
 cambio de régimen. Verificado numéricamente en
@@ -316,7 +316,7 @@ pudo extraer no declara la duración de pulso de su modo pulsado**, así que
 esto queda como hipótesis a confirmar contra el PDF, no como explicación
 establecida. También puede ser simple redondeo de 18 y 88.
 
-### 3.6 Modelo de 5 subsistemas (OR-gate) — ✅ CERRADO con criterio relajado (§3.6.1)
+### 3.6 Modelo de 5 subsistemas (OR-gate) — CERRADO con criterio relajado (§3.6.1)
 
 **Estado: implementado, validado con un margen más ancho que el que el paper
 declara para sí mismo (±5pp, no ±1.0/±0.7pp) — ver §3.6.1 para el porqué y
@@ -533,7 +533,7 @@ CADA distancia por separado también varía suave: 0.425 (20m) → 0.436 (25m)
 0.45, no una dispersión caótica.
 
 **Conclusión honesta:** con 5 puntos en vez de 2, y separando la validación
-del campo (✅ cierra, con precisión) de la del modelo de daño (queda un
+del campo (cierra, con precisión) de la del modelo de daño (queda un
 residuo pequeño y suave, no cierra dentro de los márgenes ±1.0/±0.7pp que
 el paper declara SOLO para sus dos puntos de calibración, 20m y 40m), P1-C
 pasa de "no cierra por decenas de puntos, sin patrón claro" a "el campo
@@ -589,7 +589,7 @@ original — los tres hechos, cada uno con su propio test) y
 reserva alguna — esa sí cierra exactamente con el criterio original del
 paper).
 
-### 3.7 ✅ El piso de la sigmoide: `P(E=0) ≠ 0` — CORREGIDO (P1-F)
+### 3.7 El piso de la sigmoide: `P(E=0) ≠ 0` — CORREGIDO (P1-F)
 
 **Hallado por el análisis de sensibilidad (§3.8), no buscado.** Fue el defecto
 más consecuente encontrado, y estaba a la vista desde el principio.
@@ -699,7 +699,7 @@ cinco** (150/30, 200/40, 250/50, 300/60, 350/70). **Hallazgo propio: la columna
 independiente** — el paper describe los cinco subsistemas con un único parámetro
 de forma y cinco umbrales, aunque presente diez números.
 
-#### 3.7.1 🔴 Los tres números publicados del paper son mutuamente inconsistentes
+#### 3.7.1 Los tres números publicados del paper son mutuamente inconsistentes
 
 Consecuencia inesperada de haber ajustado bien. El paper publica:
 
@@ -819,7 +819,7 @@ Lecturas, en orden de importancia:
    metodológica importa: una fracción de varianza **suma**; una diferencia de
    varianzas al apagar un factor, no.
 
-2. **⚠ Los dos parámetros que siguen NO están calibrados.**
+2. **Los dos parámetros que siguen NO están calibrados.**
    `coupling_field_efficiency` es el parámetro **provisional** de §3.6 (P1-C
    bloqueado) y `pulse_duration_ns` gobierna la extensión Wunsch-Bell de §3.5,
    que no viene del paper. **Juntos aportan entre el 45 % y el 69 % de la
@@ -909,7 +909,7 @@ correctas para su arquetipo — `70λ/D` describe un plato con taper de
 alimentador, Airy el de iluminación uniforme, que es el peor caso en lóbulos
 laterales.
 
-#### 3.9.2 🔴 La altitud NO es variable táctica a 2.45 GHz
+#### 3.9.2 La altitud NO es variable táctica a 2.45 GHz
 
 **Hallazgo que cambió el diseño de este ítem, y corrige mi propia
 justificación.** El roadmap decía que la reflexión en tierra *"convierte la
@@ -1012,7 +1012,7 @@ La zona `[P_damage, P_upset)` tiene ancho apreciable en el rango de combate
 | 40 m | 0.1113 | 0.7610 | 0.650 |
 | 60 m | 0.0385 | 0.5047 | 0.466 |
 
-#### 🔴 Hallazgo 13: mi primer cálculo del hazard rate daba 99 % de muerte, no "usualmente se recupera"
+#### Hallazgo 13: mi primer cálculo del hazard rate daba 99 % de muerte, no "usualmente se recupera"
 
 El diseño original fijaba `DRONE_RIESGO_LATENTE_MAX_POR_S = 2.0` con la
 justificación (incorrecta) de que "la probabilidad de fallar CADA SEGUNDO"

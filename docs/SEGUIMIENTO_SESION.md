@@ -61,9 +61,9 @@ cambia de estado. Todo lo de acá tiene el detalle completo en
 
 | Paper | Qué aporta | Estado de aplicación |
 |---|---|---|
-| Chen & Kolokolnikov (2014), arXiv:1403.3250 | Régimen no monótono: fuerza del depredador determina escape/confusión/persecución/captura | ✅ Barrido corrido — ver §6. No apareció la curva de 4 regímenes (el arma no persigue, a diferencia del modelo del paper), pero sí una transición real de meseta baja→alta en formación compacta |
+| Chen & Kolokolnikov (2014), arXiv:1403.3250 | Régimen no monótono: fuerza del depredador determina escape/confusión/persecución/captura | Barrido corrido — ver §6. No apareció la curva de 4 regímenes (el arma no persigue, a diferencia del modelo del paper), pero sí una transición real de meseta baja→alta en formación compacta |
 | Olson et al. (2013), arXiv:1209.3330 | Confusión del depredador basta para evolucionar enjambramiento (algoritmo evolutivo) | Anclaje teórico para P3-B (coevolución), ya implementado — no cambia código |
-| Attanasi et al., Nature Physics / arXiv:1303.7097 | Ondas de agitación en bandadas: la alarma se propaga más rápido que el grupo | ✅ **Implementado** — ver §6, `flocking.propagate_alarm` (P2-E, Parte 4) |
+| Attanasi et al., Nature Physics / arXiv:1303.7097 | Ondas de agitación en bandadas: la alarma se propaga más rápido que el grupo | **Implementado** — ver §6, `flocking.propagate_alarm` (P2-E, Parte 4) |
 | Nature Communications (raptores, PMC9399121) | Rapaces reales apuntan a un punto fijo del enjambre, no persiguen individuos | Valida una decisión ya tomada: `HPMissileSystem.lanzar` ya apunta al centroide — no requiere cambio |
 
 ---
@@ -99,7 +99,7 @@ vale la pena portar.
 
 ## 3. Frontend — qué falta exponer
 
-- **Panel "Experimentos Monte Carlo"** — ✅ **CERRADO.** Expone
+- **Panel "Experimentos Monte Carlo"** — **CERRADO.** Expone
   `/api/experiments` (el estimador corregido: `fraccion_media` + IC por
   bootstrap, CV, percentiles, con la métrica vieja `aniquilación total` al
   lado para que se vea la diferencia). Backend sin cambios, solo UI nueva
@@ -123,7 +123,7 @@ usuario consiga algo nuevo.
 
 ---
 
-## 4. Reordenamiento UI/UX — ✅ CERRADO
+## 4. Reordenamiento UI/UX — CERRADO
 
 Auditoría, propuesta y navegación real en 4 vistas
 (Operación/Planificación/Análisis Físico/Laboratorio), todo implementado.
@@ -149,7 +149,7 @@ cañón real de punta a punta.
 
 ---
 
-## 5. Reproducción visual de una réplica (Monte Carlo + coevolución) — ✅ CERRADO
+## 5. Reproducción visual de una réplica (Monte Carlo + coevolución) — CERRADO
 
 Pedido del usuario: que Laboratorio no se sienta "una terminal" — no solo
 números, sino ver drones/misiles/cañón moviéndose, igual que en Operación,
@@ -198,7 +198,7 @@ se planteó.
 
 ---
 
-## 6. Migración de paleta — ✅ CERRADO
+## 6. Migración de paleta — CERRADO
 
 Implementación de `docs/propuesta_identidad_visual.html` (la propuesta que
 ya se le había mostrado al usuario). Separa dos roles que antes competían
@@ -255,7 +255,7 @@ usuario la pida.
 
 ---
 
-## 7. Iconografía — ✅ CERRADO
+## 7. Iconografía — CERRADO
 
 Reemplazo de los ~28 emoji distintos de la UI por un set propio de
 iconos de línea (24×24, trazo, sin relleno salvo acentos puntuales) —
@@ -299,7 +299,7 @@ estado, play/pausa en el reproductor) probados disparando corridas reales
 Las dos piezas de investigación biomimética que quedaban abiertas (§1.5),
 ambas cerradas.
 
-### 8.1 Propagación de alarma entre vecinos — ✅ CERRADO
+### 8.1 Propagación de alarma entre vecinos — CERRADO
 
 Brecha real de literatura (Attanasi et al., ondas de agitación en
 bandadas de estorninos) implementada: `src/engine/flocking.py::
@@ -324,7 +324,7 @@ incluyendo el central: un dron que **nunca fue impactado directamente**
 idéntico con la ganancia en 0 (mismo patrón falsable que ya usaba P2-E
 Parte 2). 27/27 tests de `test_opfor.py` pasan, sin regresiones.
 
-### 8.2 Barrido depredador-presa (Chen & Kolokolnikov) — ✅ CERRADO
+### 8.2 Barrido depredador-presa (Chen & Kolokolnikov) — CERRADO
 
 `research/barrido_depredador_presa.py` + `research/
 BARRIDO_DEPREDADOR_PRESA.md` (nota completa con números, IC95% y
@@ -351,7 +351,7 @@ lo haría un evaluador externo: el enjambre era prey puro, patrullaba sin
 misión — "¿lo pararon a tiempo?" no era una pregunta que el modelo
 pudiera responder. Cerrado en 3 fases.
 
-### 9.1 Motor — ✅ CERRADO (ver commit `feat(swarm): misión ofensiva`)
+### 9.1 Motor — CERRADO (ver commit `feat(swarm): misión ofensiva`)
 
 El enjambre avanza hacia un objetivo (por defecto, el propio arma —
 "ataca la batería que lo enfrenta"). Un dron que llega queda marcado
@@ -375,7 +375,7 @@ Activado por defecto SOLO en la app en vivo — Monte Carlo y coevolución
 NO, para no invalidar en silencio la calibración ya hecha con el
 enjambre estático. 8 tests nuevos, suite completa sin regresiones.
 
-### 9.2 Frontend mínimo — ✅ CERRADO
+### 9.2 Frontend mínimo — CERRADO
 
 Sin esto, la app en vivo (que ahora mueve al enjambre por defecto) se
 vería como un bug — drones agrupándose y "desapareciendo" cerca del
@@ -386,7 +386,7 @@ entrada nueva en la leyenda y en el registro de eventos. Verificado en
 vivo: demo real acumuló 36 brechas visibles antes de que se agotara el
 tiempo de prueba.
 
-### 9.3 Monte Carlo — ✅ CERRADO
+### 9.3 Monte Carlo — CERRADO
 
 `ExperimentConfig.con_mision` (opt-in, apagado por defecto). Punto de
 diseño importante: el objetivo tiene que seguir la posición REAL del
@@ -405,7 +405,7 @@ prueba explícitamente que resultados de ANTES de este ítem, sin los
 campos nuevos, no rompen `_summarize`). Verificado en vivo en el
 navegador con y sin el checkbox activado, consola limpia.
 
-### 9.4 Coevolución contra la brecha — ✅ CERRADO
+### 9.4 Coevolución contra la brecha — CERRADO
 
 Pedido explícito del usuario ("que la coevolución evolucione también
 contra probabilidad_brecha"), la extensión que 9.3 dejó deliberadamente
@@ -470,7 +470,7 @@ devolvió la API; corrida con el checkbox apagado no mostró ese bloque y
 `con_mision: false`/campos `null` en la respuesta — consola sin errores
 en ambos casos.
 
-### 9.5 Kamikaze — el dron que llega inutiliza la plataforma de verdad — ✅ CERRADO
+### 9.5 Kamikaze — el dron que llega inutiliza la plataforma de verdad — CERRADO
 
 Hasta acá "brecha" (9.4) era una marca estadística — el dron llegaba, se
 congelaba, no le pasaba nada al cañón. Pedido explícito: que llegar
@@ -527,7 +527,7 @@ solo estadística. No es un bug, es el ritmo real que da esta calibración
 combinado con esta característica nueva — mencionado acá por si en algún
 momento se quiere ajustar el ritmo del "primer combate" de la demo.
 
-### 9.6 Vehículo móvil — "shoot and scoot" — ✅ CERRADO
+### 9.6 Vehículo móvil — "shoot and scoot" — CERRADO
 
 Pedido explícito, y resuelve por su cuenta la objeción física que yo
 mismo había puesto contra un vehículo móvil: un HPM real no puede apuntar
@@ -586,7 +586,7 @@ correctos, "DISPARAR CAÑÓN"/"LANZAR MISIL" rechazados mientras viaja,
 llega exacto al destino elegido y vuelve a poder disparar, reset lo
 devuelve al origen.
 
-### 9.7 Edificios atacables — motor cerrado, falta visual y línea de vista — 🟡 PARCIAL
+### 9.7 Edificios atacables — motor cerrado, falta visual y línea de vista — PARCIAL
 
 Pedido explícito: un pueblito de edificios que el enjambre también pueda
 elegir atacar, cada uno con su propia salud (a diferencia del vehículo,
@@ -645,7 +645,7 @@ reflejar salud/destrucción visualmente, dispersar árboles/trinchera
 como props decorativos). El motor ya funciona y está probado
 independientemente de que exista lo visual.
 
-### 9.8 Línea de vista física — ✅ CERRADO
+### 9.8 Línea de vista física — CERRADO
 
 La otra mitad del pedido "terreno físico, no solo decorativo" (9.7):
 edificios/árboles bloqueando el haz de verdad, no solo existiendo como
@@ -710,7 +710,7 @@ convergencia de la misión es rápida, mismo problema de timing ya
 documentado en 9.1/9.5), pero el código que corre por HTTP es
 literalmente el mismo que se probó directo.
 
-### 9.9 Modelos 3D de escenario (árboles, edificio, trinchera) — ✅ CERRADO
+### 9.9 Modelos 3D de escenario (árboles, edificio, trinchera) — CERRADO
 
 Segunda mitad de 9.7/geografía general: los tres scripts de Blender
 para el escenario rural (referencia visual "pueblo disperso, estilo
@@ -808,7 +808,7 @@ también debe bloquear línea de vista (hoy no lo hace — ver la
 justificación en el propio script), y/o un toggle de UI para
 mostrar/ocultar árboles si el mapa se siente sobrecargado.
 
-### 9.10 Relieve del terreno (colinas) y textura de tierra — ✅ CERRADO
+### 9.10 Relieve del terreno (colinas) y textura de tierra — CERRADO
 
 El usuario reportó que la textura de tierra de 9.9 se veía mal (se leía
 como estática de TV, no tierra) y preguntó, como decisión de diseño, si
@@ -937,7 +937,7 @@ usuario tras la auditoría):
    la MISMA posición (sin duplicar la fórmula) y agregarla a la lista de
    exclusión (radio 25m).
 
-### 9.11 Auditoría de backend — ✅ CERRADO
+### 9.11 Auditoría de backend — CERRADO
 
 Pedido explícito del usuario tras cerrar el relieve del terreno: auditar
 el backend (~12.000 líneas) con el mismo rigor que el frontend —
@@ -1024,7 +1024,7 @@ Verificado: 141/141 tests dirigidos (coevolución, línea de vista, radar
 dinámico, simulación, targeting) y 552/552 de la suite completa, sin
 regresiones.
 
-### 9.12 Auditoría de backend, segunda ronda — ✅ CERRADO
+### 9.12 Auditoría de backend, segunda ronda — CERRADO
 
 Pedido explícito del usuario tras cerrar la primera ronda (§9.11): auditar
 de nuevo, más profundo, apuntando a lo que la primera pasada no cubrió en
@@ -1152,7 +1152,7 @@ un solo nodo/sensor, cero dimensión de costo, terreno decorativo) y se
 implementaron 5 propuestas concretas, en el orden pedido.
 
 **1. Capa de costo-intercambio (`src/config.py`, `targeting.py`,
-`experiments.py`)** — ✅ CERRADO. El WTA optimizaba/el Monte Carlo medía
+`experiments.py`)** — CERRADO. El WTA optimizaba/el Monte Carlo medía
 bajas esperadas, nunca costo — una asignación "óptima" en física puede
 ser pésima en doctrina (gastar un misil de $50k contra un dron de $1k).
 Tres constantes nuevas (`COSTO_DISPARO_CANION_USD=25`,
@@ -1168,7 +1168,7 @@ la demo (~600m), el plan óptimo cuesta **106x** el precio de un dron
 hostil — confirma la crítica original con un número. Wireado también en
 el frontend (Planificación y Laboratorio).
 
-**2. Superficie de validez en la UI** — ✅ CERRADO. El análisis de
+**2. Superficie de validez en la UI** — CERRADO. El análisis de
 sensibilidad (`amenazas_a_la_validez`, qué parámetro domina la varianza
 y no está calibrado) YA EXISTÍA como panel en la pestaña Laboratorio,
 pero requería que el usuario lo pidiera a mano — invisible durante la
@@ -1184,7 +1184,7 @@ fuera de su rango calibrado en el uso normal de la app, y ahora eso se
 ve sin tener que ir a buscar el panel de sensibilidad.
 
 **3. Defensa multi-nodo, alcance acotado — 2 cañones fijos con cesión de
-blanco** — ✅ CERRADO. Alcance deliberadamente recortado (confirmado con
+blanco** — CERRADO. Alcance deliberadamente recortado (confirmado con
 el usuario antes de implementar, ver la pregunta de esta sesión): un
 SEGUNDO `HPMWeapon` fijo (`SimulationEngine.hpm_b`, posición
 `HPM_NODO_B_ORIGIN_X/Y=(1000,1000)`, esquina opuesta al nodo A y lejos
@@ -1237,12 +1237,12 @@ Verificado: 213/213 tests dirigidos (targeting, simulación, opfor,
 experimentos, coevolución) y 552/552 de la suite completa, sin
 regresiones tras las 3 features.
 
-### 9.14 Crítica de "científico militar" — features 4 y 5 (relieve real + sensor RF) — ✅ CERRADO
+### 9.14 Crítica de "científico militar" — features 4 y 5 (relieve real + sensor RF) — CERRADO
 
 Continuación de §9.13: las últimas dos de las 5 propuestas, en el mismo
 orden que pidió el usuario.
 
-**4. Línea de vista con relieve real del terreno** — ✅ CERRADO. Hasta
+**4. Línea de vista con relieve real del terreno** — CERRADO. Hasta
 acá, `linea_de_vista_bloqueada` solo conocía obstáculos artificiales
 (círculos de estructuras) — las colinas que el frontend YA dibuja
 (`render3d.js`, ruido de valor con semillas fijas) no afectaban a la
@@ -1280,7 +1280,7 @@ el jugador veía en pantalla.
   correcta (colinas suaves protegen objetivos bajos, no aeronaves en
   vuelo), no un bug.
 
-**5. Sensor RF pasivo (ESM)** — ✅ CERRADO. El radar (`radar_engine.py`)
+**5. Sensor RF pasivo (ESM)** — CERRADO. El radar (`radar_engine.py`)
 es monoestático — transmite y recibe su propia reflexión, ida y vuelta,
 de ahí que su alcance caiga con `r⁴` y tenga un techo real DENTRO del
 mapa (1000×1000m). Un sensor pasivo que solo ESCUCHA la emisión propia
