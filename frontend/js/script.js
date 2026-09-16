@@ -33,6 +33,8 @@
     metricMunition: document.getElementById("metric-munition"),
     metricEnergy: document.getElementById("metric-energy"),
     metricPeak: document.getElementById("metric-peak"),
+    metricValidez: document.getElementById("metric-validez"),
+    metricValidezCard: document.getElementById("metric-validez-card"),
     munitionDisplay: document.getElementById("munition-display"),
     simStateBadge: document.getElementById("sim-state-badge"),
     logList: document.getElementById("log-list"),
@@ -46,6 +48,11 @@
     powerValue: document.getElementById("power-value"),
     directionSlider: document.getElementById("direction-slider"),
     directionValue: document.getElementById("direction-value"),
+    hpmBSection: document.getElementById("hpm-b-section"),
+    powerSliderB: document.getElementById("power-slider-b"),
+    powerValueB: document.getElementById("power-value-b"),
+    directionSliderB: document.getElementById("direction-slider-b"),
+    directionValueB: document.getElementById("direction-value-b"),
     missilePowerSlider: document.getElementById("missile-power-slider"),
     missilePowerValue: document.getElementById("missile-power-value"),
     missileRadiusSlider: document.getElementById("missile-radius-slider"),
@@ -67,6 +74,7 @@
     scenarioSelect: document.getElementById("scenario-select"),
     btnLoadScenario: document.getElementById("btn-load-scenario"),
     btnFire: document.getElementById("btn-fire"),
+    btnFireB: document.getElementById("btn-fire-b"),
     btnMoverPlataforma: document.getElementById("btn-mover-plataforma"),
     hpmMovimientoTag: document.getElementById("hpm-movimiento-tag"),
     plataformaMovimientoStatus: document.getElementById("plataforma-movimiento-status"),
@@ -76,6 +84,7 @@
     btnWtaExecute: document.getElementById("btn-wta-execute"),
     wtaSummary: document.getElementById("wta-summary"),
     wtaTotal: document.getElementById("wta-total"),
+    wtaCosto: document.getElementById("wta-costo"),
     wtaList: document.getElementById("wta-list"),
     btnLabSensibilidad: document.getElementById("btn-lab-sensibilidad"),
     labSensDistancia: document.getElementById("lab-sens-distancia"),
@@ -144,6 +153,8 @@
     lastFireWallTime: null,
     processedLogKeys: new Set(),
     userAdjustingHpm: false,
+    userAdjustingHpmB: false,
+    hpmBOrigen: null,
     plataformaDestruida: false,
     demoRunning: false,
     wtaPlan: null,
@@ -156,6 +167,11 @@
     coevoRunsLocal: [],
     expConMisionActual: false,
     coevoConMisionActual: false,
+    // Rango de distancias contra el que el modelo de daño está calibrado
+    // (dos puntos publicados, arXiv:2602.08477 — ver CALIBRACION_DISTANCIA_M
+    // en src/engine/validation.py). Se llena una vez desde /api/calibracion
+    // al arrancar, no se inventa acá — ver loadCalibracion().
+    calibracionRangoM: null,
   };
 
   let wsClient = null;
@@ -272,9 +288,14 @@
   // (tracks, no la posición real — ver P2-G) y sugiere qué disparo
   // conviene a cuál grupo. Es una sugerencia para confirmar, no un
   // disparo automático — el usuario decide si ejecutarla.
-  function bearingHaciaCentroide(cx, cy) {
-    const dx = cx - state.hpm.origen_x;
-    const dy = cy - state.hpm.origen_y;
+  function bearingHaciaCentroide(cx, cy, origenX = state.hpm.origen_x, origenY = state.hpm.origen_y) {
+    // origenX/Y por defecto = nodo A, pero el rumbo depende de DESDE
+    // DÓNDE se dispara — un plan WTA con defensa multi-nodo puede asignar
+    // un disparo al nodo B, y calcular el rumbo desde el origen del nodo
+    // A ahí daría una dirección incorrecta (ver ui.btnWtaExecute, que
+    // pasa el origen del nodo que corresponda por cada ítem del plan).
+    const dx = cx - origenX;
+    const dy = cy - origenY;
     return ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
   }
 
@@ -289,22 +310,39 @@
       return;
     }
     ui.wtaTotal.textContent = plan.bajas_esperadas_total.toFixed(2);
+    // Costo-intercambio (ver src/config.py "Costo-intercambio" y
+    // targeting.py::planificar_asignacion): reporta, no cambia la
+    // asignación — el WTA sigue optimizando bajas esperadas.
+    const costo = plan.costo_intercambio;
+    if (costo && costo.razon_costo_vs_dron_hostil != null) {
+      ui.wtaCosto.textContent =
+        `$${costo.costo_total_usd.toLocaleString("es-AR")} · ` +
+        `${costo.razon_costo_vs_dron_hostil.toFixed(1)}x el costo de un dron hostil`;
+    } else if (costo) {
+      ui.wtaCosto.textContent = `$${costo.costo_total_usd.toLocaleString("es-AR")}`;
+    } else {
+      ui.wtaCosto.textContent = "—";
+    }
     ui.wtaSummary.classList.remove("hidden");
     ui.btnWtaExecute.classList.remove("hidden");
-    // Agrupado por (cluster, arma): con pocos clusters y mucho presupuesto
-    // disponible, la asignación óptima suele apilar varios disparos del
-    // mismo tipo sobre el mismo grupo — listar cada uno por separado sería
-    // repetitivo sin agregar información.
+    // Agrupado por (cluster, arma, nodo): con pocos clusters y mucho
+    // presupuesto disponible, la asignación óptima suele apilar varios
+    // disparos del mismo tipo sobre el mismo grupo — listar cada uno por
+    // separado sería repetitivo sin agregar información. El nodo entra a
+    // la clave para que la cesión de blanco entre cañón A y cañón B
+    // (defensa multi-nodo) se vea como dos líneas distintas, no se
+    // mezcle en una sola "Cañón ×N" que no dice cuál disparó cuánto.
     const grupos = new Map();
     for (const a of asign) {
-      const key = `${a.cluster_id}:${a.tipo}`;
+      const key = `${a.cluster_id}:${a.tipo}:${a.nodo || "a"}`;
       const g = grupos.get(key) ?? { ...a, n: 0, bajas_suma: 0 };
       g.n += 1;
       g.bajas_suma += a.bajas_esperadas_aisladas;
       grupos.set(key, g);
     }
     ui.wtaList.innerHTML = [...grupos.values()].map((g) => {
-      const arma = g.tipo === "canion" ? `${Icon("flame")} Cañón` : `${Icon("rocket")} Misil`;
+      const sufijoNodo = g.nodo === "b" ? " B" : (g.tipo === "canion" ? " A" : "");
+      const arma = g.tipo === "canion" ? `${Icon("flame")} Cañón${sufijoNodo}` : `${Icon("rocket")} Misil`;
       const cuenta = g.n > 1 ? `${g.n}× ` : "";
       return `<li class="wta-${g.tipo}">${cuenta}${arma} → cluster ${g.cluster_id} (${g.cluster_tamano} drones), ~${g.bajas_suma.toFixed(2)} bajas esp.</li>`;
     }).join("");
@@ -471,6 +509,25 @@
   function renderExpResultado(resumen, conMision) {
     const cv = resumen.cv === null ? "—" : resumen.cv.toFixed(4);
     const at = resumen.aniquilacion_total;
+    // Costo-intercambio (ver src/config.py "Costo-intercambio"): cuánto
+    // costó, en total, defenderse en estas réplicas, y si esa defensa fue
+    // económicamente razonable frente a lo que cuesta el dron que se
+    // neutraliza — no solo "cuántos derribamos".
+    let bloqueCosto = "";
+    const ci = resumen.costo_intercambio;
+    if (ci && ci.disparos_realizados > 0) {
+      const porNeutralizado = ci.costo_por_neutralizado_usd == null
+        ? "sin bajas — costo por neutralizado indefinido"
+        : `$${ci.costo_por_neutralizado_usd.toLocaleString("es-AR")} por dron neutralizado` +
+          (ci.razon_costo_vs_dron_hostil != null
+            ? ` (${ci.razon_costo_vs_dron_hostil.toFixed(1)}x el costo de un dron hostil)`
+            : "");
+      bloqueCosto = `
+      <div style="margin-top:6px"><strong>Costo-intercambio:</strong>
+        $${ci.costo_total_usd.toLocaleString("es-AR")} en ${ci.disparos_realizados} disparo(s) —
+        ${porNeutralizado}
+      </div>`;
+    }
     let bloqueMision = "";
     if (conMision) {
       const pb = resumen.probabilidad_brecha;
@@ -494,6 +551,7 @@
         (IC95% Wilson: ${at.ic95_wilson[0].toFixed(4)}–${at.ic95_wilson[1].toFixed(4)})
       </div>
       <div class="wta-hint" style="margin-top:6px">Si la primaria es &gt; 0 y la vieja da 0, es la diferencia que documenta <code>research/NOTA_ESTIMADOR_CIEGO.md</code>: hubo bajas reales que la métrica vieja no puede ver.</div>
+      ${bloqueCosto}
       ${bloqueMision}
     `;
     ui.expResult.classList.remove("hidden");
@@ -668,6 +726,23 @@
       ui.directionSlider.value = Math.round(state.hpm.direccion);
       ui.directionValue.textContent = Math.round(state.hpm.direccion);
     }
+    // Nodo B (defensa multi-nodo, alcance acotado): snap.hpm_b es null si
+    // esta instancia no lo tiene activo — el panel se queda oculto (ver
+    // el atributo `hidden` en index.html) en vez de mostrar controles
+    // para un arma que no existe.
+    if (snap.hpm_b) {
+      ui.hpmBSection.hidden = false;
+      // Nodo B nunca se mueve — el origen es seguro de sincronizar
+      // siempre (a diferencia de potencia/dirección, no depende de si
+      // el usuario está arrastrando un slider ahora mismo).
+      state.hpmBOrigen = { x: snap.hpm_b.origen_x, y: snap.hpm_b.origen_y };
+      if (!state.userAdjustingHpmB) {
+        ui.powerSliderB.value = snap.hpm_b.potencia;
+        ui.powerValueB.textContent = Math.round(snap.hpm_b.potencia);
+        ui.directionSliderB.value = Math.round(snap.hpm_b.direccion);
+        ui.directionValueB.textContent = Math.round(snap.hpm_b.direccion);
+      }
+    }
     // Sincronizado desde el snapshot (no solo desde el evento de log): un
     // cliente que recién conecta o recarga la página después del impacto
     // no vio "plataforma_destruida" en logs_recientes (solo trae lo
@@ -701,6 +776,7 @@
     window.Render3D?.updateSnapshot(snap);
     updateMetrics(snap);
     updateRiesgoLatente(snap.drones);
+    actualizarValidezModelo(snap);
     snap.logs_recientes?.forEach((e) => { const f = formatBackendLog(e); if (f) addLog(f.msg, f.type); });
   }
 
@@ -725,6 +801,67 @@
       });
     } catch (err) {
       addLog(`Error cargando escenarios: ${err.message}`, "error");
+    }
+  }
+
+  // Superficie de validez (ver /api/calibracion y CALIBRACION_DISTANCIA_M en
+  // src/engine/validation.py): el modelo de daño está calibrado contra DOS
+  // puntos de datos publicados, no contra todo el rango de distancias que
+  // el mapa permite — fuera de ese rango, una probabilidad reportada es una
+  // EXTRAPOLACIÓN del modelo, no algo verificado contra datos reales. Antes
+  // esto solo se veía si el usuario entraba a la pestaña Laboratorio y
+  // apretaba "Sensibilidad" a mano; se llama una vez al arrancar (es
+  // estático, no depende del estado en vivo de la simulación) y se usa
+  // cada snapshot para avisar EN LA OPERACIÓN, no solo en el laboratorio.
+  async function loadCalibracion() {
+    try {
+      const { puntos } = await api("/api/calibracion");
+      const distancias = Object.values(puntos).map((p) => p.distancia_m);
+      state.calibracionRangoM = { min: Math.min(...distancias), max: Math.max(...distancias) };
+    } catch (err) {
+      addLog(`Error cargando rango de calibración: ${err.message}`, "error");
+    }
+  }
+
+  // Distancia del vehículo al dron ACTIVO más cercano — la amenaza real
+  // más próxima, no un promedio del enjambre entero (que puede estar muy
+  // disperso). null si no hay drones activos o no hay snapshot de hpm.
+  function distanciaMinimaAlEnjambre(snap) {
+    if (!snap.hpm || !snap.drones || !snap.drones.length) return null;
+    let min = Infinity;
+    for (const d of snap.drones) {
+      if (d.estado === "neutralizado") continue;
+      const dist = Math.hypot(d.x - snap.hpm.origen_x, d.y - snap.hpm.origen_y);
+      if (dist < min) min = dist;
+    }
+    return Number.isFinite(min) ? min : null;
+  }
+
+  function actualizarValidezModelo(snap) {
+    if (!ui.metricValidez) return;
+    const rango = state.calibracionRangoM;
+    const dist = distanciaMinimaAlEnjambre(snap);
+    if (!rango || dist == null) {
+      ui.metricValidez.textContent = "—";
+      ui.metricValidez.className = "metric-value";
+      return;
+    }
+    ui.metricValidez.textContent = `${dist.toFixed(0)} m`;
+    // Dentro del rango calibrado: verificado contra datos publicados. Hasta
+    // 3x el borde superior: extrapolación moderada del modelo, todavía la
+    // misma familia de curva. Más allá: la probabilidad reportada a esa
+    // distancia no tiene ningún punto de datos real cerca — interpretar
+    // con mucha cautela. 3x es una convención de esta UI, no un umbral
+    // publicado en ningún lado.
+    if (dist >= rango.min && dist <= rango.max) {
+      ui.metricValidez.className = "metric-value metric-validez-ok";
+      ui.metricValidezCard.title = `Dentro del rango calibrado contra datos publicados (${rango.min}-${rango.max}m).`;
+    } else if (dist <= rango.max * 3) {
+      ui.metricValidez.className = "metric-value metric-validez-extrapolado";
+      ui.metricValidezCard.title = `Fuera del rango calibrado (${rango.min}-${rango.max}m) — la probabilidad reportada es una extrapolación del modelo.`;
+    } else {
+      ui.metricValidez.className = "metric-value metric-validez-lejos";
+      ui.metricValidezCard.title = `MUY por fuera del rango calibrado (${rango.min}-${rango.max}m) — sin ningún punto de datos real cerca de esta distancia, interpretar con mucha cautela.`;
     }
   }
 
@@ -883,6 +1020,8 @@
     ["pointerdown", "pointerup"].forEach((ev, i) => {
       ui.powerSlider.addEventListener(ev, () => { state.userAdjustingHpm = i === 0; });
       ui.directionSlider.addEventListener(ev, () => { state.userAdjustingHpm = i === 0; });
+      ui.powerSliderB.addEventListener(ev, () => { state.userAdjustingHpmB = i === 0; });
+      ui.directionSliderB.addEventListener(ev, () => { state.userAdjustingHpmB = i === 0; });
     });
 
     ui.powerSlider.addEventListener("input", () => {
@@ -893,6 +1032,8 @@
       ui.directionValue.textContent = ui.directionSlider.value;
       state.hpm.direccion = parseFloat(ui.directionSlider.value);
     });
+    ui.powerSliderB.addEventListener("input", () => { ui.powerValueB.textContent = ui.powerSliderB.value; });
+    ui.directionSliderB.addEventListener("input", () => { ui.directionValueB.textContent = ui.directionSliderB.value; });
     ui.missilePowerSlider.addEventListener("input", () => { ui.missilePowerValue.textContent = ui.missilePowerSlider.value; });
     ui.missileRadiusSlider.addEventListener("input", () => { ui.missileRadiusValue.textContent = ui.missileRadiusSlider.value; });
     ui.jamPowerSlider.addEventListener("input", () => { ui.jamPowerValue.textContent = ui.jamPowerSlider.value; });
@@ -953,6 +1094,20 @@
           state.lastFireWallTime = Date.now();
           window.Render3D?.triggerCannonPulse(state.hpm.origen_x, state.hpm.origen_y);
           addLog(`Cañón ${body.potencia}kW @ ${body.direccion}°`, "fire");
+        }
+        wsClient?.requestStatus();
+      } catch (e) { addLog(e.message, "error"); }
+    });
+
+    ui.btnFireB.addEventListener("click", async () => {
+      try {
+        const body = { potencia: +ui.powerSliderB.value, direccion: +ui.directionSliderB.value };
+        const r = await api("/api/fire_b", { method: "POST", body: JSON.stringify(body) });
+        if (r.message?.startsWith("Disparo rechazado")) {
+          addLog(r.message, "error");
+        } else {
+          if (state.hpmBOrigen) window.Render3D?.triggerCannonPulse(state.hpmBOrigen.x, state.hpmBOrigen.y);
+          addLog(`Cañón B ${body.potencia}kW @ ${body.direccion}°`, "fire");
         }
         wsClient?.requestStatus();
       } catch (e) { addLog(e.message, "error"); }
@@ -1046,9 +1201,24 @@
       let disparados = 0, rechazados = 0, fallidos = 0;
       for (const a of plan.asignacion) {
         const [cx, cy] = a.cluster_centroide;
+        // Rumbo desde el origen del nodo A por defecto (cañón A y misil,
+        // que siempre sale del nodo A — no hay misil de nodo B en esta
+        // fase) — el nodo B recalcula el suyo propio más abajo. Bug real
+        // encontrado al cablear esta feature: calcular el rumbo SIEMPRE
+        // desde el nodo A apuntaría el cañón B en la dirección incorrecta.
         const direccion = bearingHaciaCentroide(cx, cy);
         try {
-          if (a.tipo === "canion") {
+          if (a.tipo === "canion" && a.nodo === "b") {
+            const origenB = state.hpmBOrigen;
+            const direccionB = origenB ? bearingHaciaCentroide(cx, cy, origenB.x, origenB.y) : 0;
+            const r = await api("/api/fire_b", { method: "POST", body: JSON.stringify({ potencia: +ui.powerSliderB.value, direccion: direccionB }) });
+            if (r.message?.startsWith("Disparo rechazado")) {
+              rechazados += 1;
+            } else {
+              disparados += 1;
+              if (origenB) window.Render3D?.triggerCannonPulse(origenB.x, origenB.y);
+            }
+          } else if (a.tipo === "canion") {
             const r = await api("/api/fire", { method: "POST", body: JSON.stringify({ potencia: state.hpm.potencia, direccion }) });
             if (r.message?.startsWith("Disparo rechazado")) {
               rechazados += 1;
@@ -1234,6 +1404,7 @@
     });
     wsClient.connect();
     loadScenarios();
+    loadCalibracion();
     loadInitialState().then(runAutoDemo);
     setInterval(() => { if (state.lastFireWallTime) updateMetrics({ conteo_estados: state.conteoEstados, tiempo: state.simTime }); }, 1000);
   }

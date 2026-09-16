@@ -17,6 +17,8 @@ from numpy.random import Generator
 from src.config import (
     FIELD_HEIGHT,
     FIELD_WIDTH,
+    HPM_NODO_B_ORIGIN_X,
+    HPM_NODO_B_ORIGIN_Y,
     HPM_ORIGIN_X,
     HPM_ORIGIN_Y,
     HPM_ORIGIN_Z,
@@ -96,6 +98,18 @@ class SimulationEngine:
     # objetivo, con o sin estructuras).
     estructuras_activas: bool = False
     estructuras: list[Estructura] = field(default_factory=list, init=False)
+    # Segundo nodo defensivo (ver HPM_NODO_B_ORIGIN_X/Y en src/config.py):
+    # un segundo cañón HPM fijo, SIN misil ni jammer propios — el valor de
+    # esta feature es la cesión de blanco entre dos armas en el WTA
+    # (targeting.py), no duplicar cada subsistema. Mismo criterio opt-in
+    # que kamikaze_activo/estructuras_activas: apagado por defecto, para
+    # no invalidar en silencio la calibración de ningún experimento/
+    # coevolución existente (que asumen un único emplazamiento de arma).
+    # hpm_b se construye SIEMPRE (dataclass simple, sin costo real si no
+    # se usa) pero solo "cuenta" — se posiciona, se actualiza cada tick,
+    # aparece en el snapshot, entra al WTA — si nodo_b_activo es True.
+    nodo_b_activo: bool = False
+    hpm_b: HPMWeapon = field(default_factory=HPMWeapon, init=False)
     # Qué objetivo está activo ESTE tick — ("vehiculo", None) o
     # ("estructura", id). Lo fija _elegir_objetivo_enjambre, lo consume
     # _registrar_impactos_en_objetivo para saber a quién dañar cuando
@@ -124,6 +138,11 @@ class SimulationEngine:
         self.jammer.origen_x = HPM_ORIGIN_X
         self.jammer.origen_y = HPM_ORIGIN_Y
         self.jammer.origen_z = HPM_ORIGIN_Z
+
+        if self.nodo_b_activo:
+            self.hpm_b.origen_x = HPM_NODO_B_ORIGIN_X
+            self.hpm_b.origen_y = HPM_NODO_B_ORIGIN_Y
+            self.hpm_b.origen_z = HPM_ORIGIN_Z
 
         # Misión ofensiva: el objetivo por defecto es el propio origen del
         # arma — el motivo más simple de que el enjambre esté ahí es que
@@ -239,6 +258,11 @@ class SimulationEngine:
                     "fase_barrido": round(self.swarm.track_manager.fase_barrido(), 4),
                 },
                 "hpm": self.hpm.to_dict(),
+                # None si el nodo B no está activo en esta instancia — el
+                # frontend lo trata como "no existe", no como "existe pero
+                # vacío" (mismo criterio que otros campos opcionales de
+                # este snapshot).
+                "hpm_b": self.hpm_b.to_dict() if self.nodo_b_activo else None,
                 "missiles": self.missile_system.get_status(),
                 "jammer": self.jammer.to_dict(),
                 "analytics": self.analytics.to_snapshot(
@@ -324,6 +348,12 @@ class SimulationEngine:
             self.hpm.detener_movimiento()
             self.hpm.origen_x = HPM_ORIGIN_X
             self.hpm.origen_y = HPM_ORIGIN_Y
+            if self.nodo_b_activo:
+                # Nodo B nunca se mueve, no hay detener_movimiento()/origen
+                # que restaurar más allá de disparos/destruido — su
+                # posición es fija desde __post_init__.
+                self.hpm_b.disparos = 0
+                self.hpm_b.destruido = False
             self.missile_system.reset()
             self.jammer.detener()
             self.jammer.origen_x = HPM_ORIGIN_X
@@ -415,48 +445,52 @@ class SimulationEngine:
         self._log("plataforma_en_movimiento", {"destino_x": x, "destino_y": y})
         return {"success": True, "message": f"Reposicionando a ({x:.0f}, {y:.0f})", "hpm": self.hpm.to_dict()}
 
-    def fire(
+    def _disparar_nodo(
         self,
-        potencia: float | None = None,
-        direccion: float | None = None,
-        apertura_cono: float | None = None,
-        duty_cycle: float | None = None,
+        hpm: HPMWeapon,
+        nombre_evento: str,
+        nombre_log: str,
+        potencia: float | None,
+        direccion: float | None,
+        apertura_cono: float | None,
+        duty_cycle: float | None,
     ) -> dict[str, Any]:
+        """Lógica de disparo compartida entre el nodo A (``fire``) y el
+        nodo B (``fire_b``) — cada uno pasa SU PROPIO ``HPMWeapon`` (cada
+        uno con su propio presupuesto de energía/temperatura, ver
+        HPMWeapon.disparar) pero el resto (línea de vista, registro en
+        analíticas, memoria de amenaza, logs) es idéntico. Extraído para
+        no duplicar ~70 líneas al agregar el nodo B."""
         with self._lock:
-            self.hpm.configurar(potencia, direccion, apertura_cono, duty_cycle)
-            eventos = self.hpm.disparar(self.swarm.drones, obstaculos=self._obstaculos_activos())
-            rechazo = self.hpm.ultimo_rechazo
+            hpm.configurar(potencia, direccion, apertura_cono, duty_cycle)
+            eventos = hpm.disparar(self.swarm.drones, obstaculos=self._obstaculos_activos())
+            rechazo = hpm.ultimo_rechazo
 
             if rechazo is not None:
                 # Presupuesto energético/térmico (P2-F): el arma rechazó el
                 # disparo ANTES de tocar el enjambre. Camino limpio, sin
                 # excepción — no hay evento de disparo que registrar en
                 # analíticas/log porque el disparo no ocurrió.
-                self._log("hpm_disparo_rechazado", {"motivo": rechazo})
+                self._log(f"{nombre_evento}_rechazado", {"motivo": rechazo})
                 return {
                     "message": f"Disparo rechazado: {rechazo}",
                     "eventos": [],
-                    "hpm": self.hpm.to_dict(),
+                    "hpm": hpm.to_dict(),
                     "conteo_estados": self.swarm.contar_por_estado(),
                 }
 
             shot = self.analytics.record_cannon_shot(
-                self.hpm.potencia,
-                self.hpm.direccion,
-                eventos,
-                self.tiempo,
-                self.hpm.origen_x,
-                self.hpm.origen_y,
+                hpm.potencia, hpm.direccion, eventos, self.tiempo, hpm.origen_x, hpm.origen_y,
             )
 
-            self._sembrar_memoria_amenaza(eventos, self.hpm.origen_x, self.hpm.origen_y)
+            self._sembrar_memoria_amenaza(eventos, hpm.origen_x, hpm.origen_y)
             self._atribuir_riesgo_latente(eventos, shot["id"])
 
         self._log(
-            "hpm_disparo",
+            nombre_evento,
             {
-                "potencia": self.hpm.potencia,
-                "direccion": self.hpm.direccion,
+                "potencia": hpm.potencia,
+                "direccion": hpm.direccion,
                 "afectados": len(eventos),
                 "neutralizados": sum(1 for e in eventos if e["neutralizado"]),
                 "shot_id": shot["id"],
@@ -467,12 +501,12 @@ class SimulationEngine:
             },
         )
         log_shot(
-            "CAÑÓN HPM",
+            nombre_log,
             {
                 "tiempo": self.tiempo,
-                "potencia_kw": self.hpm.potencia,
-                "direccion": round(self.hpm.direccion, 1),
-                "apertura_cono": self.hpm.apertura_cono,
+                "potencia_kw": hpm.potencia,
+                "direccion": round(hpm.direccion, 1),
+                "apertura_cono": hpm.apertura_cono,
             },
             eventos,
         )
@@ -484,9 +518,43 @@ class SimulationEngine:
         return {
             "message": "HPM disparado",
             "eventos": eventos,
-            "hpm": self.hpm.to_dict(),
+            "hpm": hpm.to_dict(),
             "conteo_estados": self.swarm.contar_por_estado(),
         }
+
+    def fire(
+        self,
+        potencia: float | None = None,
+        direccion: float | None = None,
+        apertura_cono: float | None = None,
+        duty_cycle: float | None = None,
+    ) -> dict[str, Any]:
+        return self._disparar_nodo(
+            self.hpm, "hpm_disparo", "CAÑÓN HPM", potencia, direccion, apertura_cono, duty_cycle
+        )
+
+    def fire_b(
+        self,
+        potencia: float | None = None,
+        direccion: float | None = None,
+        apertura_cono: float | None = None,
+        duty_cycle: float | None = None,
+    ) -> dict[str, Any]:
+        """Dispara el cañón del NODO B (ver HPM_NODO_B_ORIGIN_X/Y) — mismo
+        contrato que ``fire()`` (rechazo con 200 + mensaje, no excepción).
+        Rechaza si esta instancia no tiene el nodo B activo, con el mismo
+        patrón de mensaje que un rechazo por presupuesto energético."""
+        if not self.nodo_b_activo:
+            return {
+                "message": "Disparo rechazado: nodo B no está activo en esta instancia",
+                "eventos": [],
+                "hpm": self.hpm_b.to_dict(),
+                "conteo_estados": self.swarm.contar_por_estado(),
+            }
+        return self._disparar_nodo(
+            self.hpm_b, "hpm_b_disparo", "CAÑÓN HPM (nodo B)",
+            potencia, direccion, apertura_cono, duty_cycle,
+        )
 
     def _ensure_thread_running(self) -> None:
         """Arranca el hilo de simulación si no está activo (p. ej. misil en vuelo)."""
@@ -887,6 +955,11 @@ class SimulationEngine:
         # este tick nunca se enfría ni recarga. Movimiento incluido (ver
         # HPMWeapon.actualizar) — mismo motivo.
         self.hpm.actualizar(dt)
+        if self.nodo_b_activo:
+            # Nodo B nunca se mueve (fijo, ver HPM_NODO_B_ORIGIN_X/Y) —
+            # actualizar() igual avanza su presupuesto de energía/
+            # temperatura propio, independiente del nodo A.
+            self.hpm_b.actualizar(dt)
 
         # El jammer comparte vehículo con el cañón (mismo emplazamiento,
         # ver __post_init__) — si el vehículo se reposicionó, el jammer

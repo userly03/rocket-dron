@@ -420,6 +420,14 @@ body {
 .metric-riesgo { color: var(--status-warn); }
 .metric-brecha { color: var(--status-bad); }
 
+/* Superficie de validez (ver actualizarValidezModelo en script.js):
+   mismo mapeo semántico que --status-warn ya usa para "no calibrado" en
+   el panel de Laboratorio — dentro del rango calibrado = bien, fuera =
+   aviso, MUY fuera (sin ningún punto de datos real cerca) = mal. */
+.metric-validez-ok { color: var(--status-good); }
+.metric-validez-extrapolado { color: var(--status-warn); }
+.metric-validez-lejos { color: var(--status-bad); }
+
 /* Main layout */
 .main-content {
   display: grid;

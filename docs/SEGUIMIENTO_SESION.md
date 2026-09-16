@@ -1141,3 +1141,99 @@ regresiones. Bonus no buscado: la suite completa tardó 6:14 contra los
 19:46 de la corrida anterior (3.2x más rápida) — la vectorización de
 `flocking.py` acelera también a los tests, que corren el motor real, no
 mockeado.
+
+### 9.13 Crítica de "científico militar" — 5 propuestas implementadas
+
+Tras cerrar las dos rondas de auditoría, el usuario pidió una crítica
+directa: "si fueses un científico militar, qué criticarías, qué
+propondrías" — no más bugs, capacidad real. Se identificaron 5 gaps
+(calibración con 2 puntos de datos, cero adversario adaptativo contra EW,
+un solo nodo/sensor, cero dimensión de costo, terreno decorativo) y se
+implementaron 5 propuestas concretas, en el orden pedido.
+
+**1. Capa de costo-intercambio (`src/config.py`, `targeting.py`,
+`experiments.py`)** — ✅ CERRADO. El WTA optimizaba/el Monte Carlo medía
+bajas esperadas, nunca costo — una asignación "óptima" en física puede
+ser pésima en doctrina (gastar un misil de $50k contra un dron de $1k).
+Tres constantes nuevas (`COSTO_DISPARO_CANION_USD=25`,
+`COSTO_MISIL_USD=50000`, `COSTO_DRON_HOSTIL_USD=1000`, cada una con su
+ancla real declarada — Epirus Leonidas/THOR para el cañón, Switchblade
+300 para el misil, precios públicos de FPV en Rusia-Ucrania para el
+dron). `planificar_asignacion()` y `ExperimentManager._summarize()`
+ahora reportan `costo_intercambio` (costo total, costo por baja
+esperada/neutralizado, razón contra el costo de un dron hostil) — SIN
+cambiar qué optimiza el WTA ni qué mide el Monte Carlo, solo agregando el
+reporte. Verificado con una corrida real: a la distancia por defecto de
+la demo (~600m), el plan óptimo cuesta **106x** el precio de un dron
+hostil — confirma la crítica original con un número. Wireado también en
+el frontend (Planificación y Laboratorio).
+
+**2. Superficie de validez en la UI** — ✅ CERRADO. El análisis de
+sensibilidad (`amenazas_a_la_validez`, qué parámetro domina la varianza
+y no está calibrado) YA EXISTÍA como panel en la pestaña Laboratorio,
+pero requería que el usuario lo pidiera a mano — invisible durante la
+operación en vivo. Se agregó una tarjeta "Validez del modelo" en el
+panel de Métricas de la pestaña Operación (`actualizarValidezModelo` en
+`script.js`): distancia del vehículo al dron activo más cercano,
+comparada contra el rango calibrado real (`/api/calibracion`,
+`CALIBRACION_DISTANCIA_M` = 20-40m) — verde si está dentro, ámbar si es
+extrapolación moderada (hasta 3x el borde), rojo si no hay ningún dato
+real cerca. Verificado en vivo: con la demo default (~600m del arma), la
+tarjeta muestra correctamente rojo — el modelo SIEMPRE está operando
+fuera de su rango calibrado en el uso normal de la app, y ahora eso se
+ve sin tener que ir a buscar el panel de sensibilidad.
+
+**3. Defensa multi-nodo, alcance acotado — 2 cañones fijos con cesión de
+blanco** — ✅ CERRADO. Alcance deliberadamente recortado (confirmado con
+el usuario antes de implementar, ver la pregunta de esta sesión): un
+SEGUNDO `HPMWeapon` fijo (`SimulationEngine.hpm_b`, posición
+`HPM_NODO_B_ORIGIN_X/Y=(1000,1000)`, esquina opuesta al nodo A y lejos
+del radio de bloqueo de las estructuras), SIN misil ni jammer propios —
+el valor real de la feature es la cesión de blanco en el WTA, no
+duplicar cada subsistema. Opt-in (`nodo_b_activo`, mismo criterio que
+`kamikaze_activo`/`estructuras_activas`: solo la app en vivo lo prende).
+
+- `OpcionDeDisparo` ganó un campo `nodo: "a"|"b"` (default "a",
+  retrocompatible) — el cálculo de bajas esperadas YA usaba origen_x/y/z
+  por opción, así que la cesión de blanco sale del MISMO optimizador sin
+  cambiarlo: agregar las opciones del nodo B a la misma lista alcanza.
+- `fire()` se refactorizó en un helper privado (`_disparar_nodo`)
+  reutilizado por `fire_b()` — evita duplicar ~70 líneas de lógica de
+  disparo (línea de vista, analíticas, memoria de amenaza, logs)
+  idéntica entre los dos nodos.
+- Nuevo endpoint `POST /api/fire_b`, mismo contrato que `/api/fire` (200
+  OK + mensaje si rechaza, nunca error HTTP).
+- Frontend: segundo vehículo (mismo `lanzador_hpm.glb`, clonado) +
+  segundo cono de disparo, ambos ocultos hasta que `snap.hpm_b` llega no
+  nulo; panel "Cañón B" en la UI, oculto por el mismo motivo.
+- **Bug real encontrado y corregido al cablear el frontend, antes de
+  llegar a producción**: `EJECUTAR PLAN` calculaba el rumbo de CUALQUIER
+  disparo del plan usando el origen del nodo A — para un disparo
+  asignado al nodo B (por la cesión de blanco recién agregada), eso
+  apuntaría el cañón B en la dirección incorrecta. `bearingHaciaCentroide`
+  ganó parámetros de origen opcionales; `btnWtaExecute` ahora calcula el
+  rumbo del nodo B desde SU propio origen y llama `/api/fire_b`.
+- Verificado end-to-end con un script standalone (ambos nodos disparan,
+  el plan WTA asigna a `{'a','b'}`, costo-intercambio funciona con 2
+  nodos, `fire_b()` rechaza si `nodo_b_activo=False`, `reset()` limpia
+  el nodo B) y en vivo en el navegador (panel visible, `/api/fire_b`
+  responde 200, sin errores de consola) — no se pudo confirmar
+  visualmente el segundo modelo 3D en pantalla por la misma limitación
+  de navegación de cámara del agente de automatización ya documentada
+  en sesiones anteriores de este archivo, pero el código de renderizado
+  es un espejo directo del patrón ya probado del nodo A.
+- **Hallazgo aparte, NO corregido (fuera de alcance de este ítem)**:
+  `SimulationEngine.reset()` nunca restauraba `energia_actual_kj`/
+  `temperatura_c` del cañón a plena carga/temperatura ambiente — ni para
+  el nodo A (bug preexistente) ni se agregó esa restauración para el
+  nodo B (se mantuvo fiel al comportamiento existente en vez de arreglar
+  un bug no pedido a mitad de esta feature). Queda señalado para una
+  próxima pasada.
+
+**4 y 5 (línea de vista con relieve real, sensor RF)**: ver más abajo si
+ya se implementaron para cuando se lea esto, o docs/SEGUIMIENTO_SESION.md
+más reciente.
+
+Verificado: 213/213 tests dirigidos (targeting, simulación, opfor,
+experimentos, coevolución) y 552/552 de la suite completa, sin
+regresiones tras las 3 features.

@@ -174,6 +174,17 @@ def fire_hpm(sim: SimulationDep, body: FireRequest | None = None) -> dict:
     return sim.fire(params.potencia, params.direccion, params.apertura_cono, params.duty_cycle)
 
 
+@router.post("/fire_b")
+def fire_hpm_b(sim: SimulationDep, body: FireRequest | None = None) -> dict:
+    """Dispara el cañón del NODO B — segundo emplazamiento fijo de la
+    defensa multi-nodo (ver HPM_NODO_B_ORIGIN_X/Y en src/config.py y
+    SimulationEngine.nodo_b_activo). Mismo contrato que /api/fire (200 OK
+    con mensaje si se rechaza, no error HTTP); rechaza también si esta
+    instancia no tiene el nodo B activo."""
+    params = body or FireRequest()
+    return sim.fire_b(params.potencia, params.direccion, params.apertura_cono, params.duty_cycle)
+
+
 @router.post("/hpm/mover")
 def mover_plataforma(sim: SimulationDep, body: MoverPlataformaRequest) -> dict:
     """Ordena al vehículo (cañón + misil + jammer, mismo emplazamiento)
@@ -620,6 +631,7 @@ def get_targeting_plan(
     return planificar_asignacion(
         sim.swarm, sim.hpm, sim.missile_system,
         radio_cluster_m=radio_cluster_m, n_muestras=n_muestras, seed=seed,
+        hpm_b=sim.hpm_b if sim.nodo_b_activo else None,
     )
 
 

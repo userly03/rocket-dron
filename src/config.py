@@ -35,6 +35,29 @@ FIELD_HEIGHT: float = float(os.getenv("FIELD_HEIGHT", "1000"))
 HPM_ORIGIN_X: float = float(os.getenv("HPM_ORIGIN_X", "0"))
 HPM_ORIGIN_Y: float = float(os.getenv("HPM_ORIGIN_Y", "0"))
 
+# --- Segundo nodo defensivo (defensa multi-nodo, alcance acotado) ---
+# La doctrina C-UAS real es multicapa: varios sensores/efectores con
+# cesión de blanco entre sí, no un único vehículo aislado (crítica del
+# analista militar de esta sesión). Alcance DELIBERADAMENTE acotado para
+# esta primera versión: un SEGUNDO cañón HPM, fijo (no se mueve — sigue
+# siendo shoot-and-scoot solo para el nodo A), SIN misil ni jammer
+# propios — el valor real que demuestra esta feature es la CESIÓN DE
+# BLANCO entre dos armas en el WTA (ver targeting.py::planificar_
+# asignacion), no duplicar cada subsistema. Apagado por defecto
+# (``SimulationEngine.nodo_b_activo``), mismo criterio que kamikaze_
+# activo/estructuras_activas: solo la app en vivo lo prende, para no
+# cambiar en silencio la calibración de ningún experimento/coevolución
+# existente (que siguen asumiendo un solo emplazamiento de arma).
+#
+# Posición: esquina OPUESTA al nodo A (que arranca en HPM_ORIGIN=(0,0)) y
+# lejos del radio de bloqueo de las estructuras del pueblito
+# (~780-835,795-830, ver SimulationEngine.__post_init__) para no
+# autobloquearse línea de vista — mismo bug que se corrigió para
+# mover_plataforma esta sesión, evitado acá por elección de posición en
+# vez de necesitar la misma validación (el nodo B nunca se mueve).
+HPM_NODO_B_ORIGIN_X: float = float(os.getenv("HPM_NODO_B_ORIGIN_X", "1000.0"))
+HPM_NODO_B_ORIGIN_Y: float = float(os.getenv("HPM_NODO_B_ORIGIN_Y", "1000.0"))
+
 # Velocidad de reposicionamiento del vehículo lanzador ("shoot and scoot":
 # se mueve, se detiene, recién ahí puede disparar — ver HPMWeapon.
 # iniciar_movimiento/en_movimiento). ~30 km/h es un crucero campo traviesa
@@ -918,6 +941,48 @@ DRONE_RIESGO_LATENTE_MAX_POR_S: float = float(
 DRONE_RIESGO_LATENTE_DECAY_TAU_S: float = float(
     os.getenv("DRONE_RIESGO_LATENTE_DECAY_TAU_S", "4.0")
 )
+
+# --- Costo-intercambio (cost-exchange) ---
+# El WTA (targeting.py) y el Monte Carlo (experiments.py) optimizan/miden
+# bajas esperadas, nunca costo. Un analista militar real hace la pregunta
+# siguiente de inmediato: ¿a qué PRECIO? Un misil HPM de guiado real cuesta
+# órdenes de magnitud más que el dron FPV de bajo costo que neutraliza —
+# una "asignación óptima" en física puede ser una pésima decisión de
+# doctrina si gasta el arma cara contra el blanco barato. Estas tres
+# constantes son estimaciones de ingeniería (órdenes de magnitud de
+# sistemas comparables, DECLARADO como tal — no hay un precio "medido" de
+# ningún arma de este proyecto, que no existe fuera de este simulador),
+# usadas para REPORTAR costo-intercambio junto a las métricas de bajas, no
+# para cambiar ninguna decisión de asignación existente (el WTA sigue
+# optimizando bajas esperadas — agregar costo como objetivo sería un
+# cambio de comportamiento aparte, no pedido).
+#
+# Costo marginal de UN disparo del cañón HPM: mayormente electricidad +
+# desgaste del amplificador, no munición consumible (ver el presupuesto
+# energético/térmico arriba, HPM_DISPARO_DURACION_S) — del orden de
+# decenas de dólares, consistente con el argumento de venta característico
+# de armas de energía dirigida reales (Epirus Leonidas, THOR de la USAF:
+# "costo por disparo" de centavos a unas pocas decenas de dólares, frente
+# a miles de dólares de un misil interceptor convencional).
+COSTO_DISPARO_CANION_USD: float = float(os.getenv("COSTO_DISPARO_CANION_USD", "25.0"))
+
+# Costo de UN misil HPM guiado (propulsión + guiado + cabeza HPM) — del
+# orden de una munición merodeadora/guiada real (Switchblade 300 ronda los
+# $6.000-$10.000; una munición guiada más grande con cabeza de energía
+# dirigida, sin un análogo comercial directo, se estima más cerca de la
+# gama alta de esa familia). Valor de ingeniería declarado, no un precio
+# publicado de ningún sistema HPM real (no existe un misil HPM operacional
+# público con precio unitario conocido).
+COSTO_MISIL_USD: float = float(os.getenv("COSTO_MISIL_USD", "50000.0"))
+
+# Costo de UN dron hostil tipo FPV/quad — ancla real y bien documentada:
+# los drones FPV usados en el conflicto Rusia-Ucrania (la referencia
+# visual/doctrinal ya usada para el escenario de árboles/edificios/
+# trinchera de este proyecto) cuestan públicamente en el orden de
+# $400-$2.000 por unidad según reportes abiertos de esa guerra. Se toma un
+# punto medio redondo de esa banda, no un promedio calculado de ninguna
+# fuente específica.
+COSTO_DRON_HOSTIL_USD: float = float(os.getenv("COSTO_DRON_HOSTIL_USD", "1000.0"))
 
 # --- Logging de validación en terminal ---
 SIM_LOG_LEVEL: str = os.getenv("SIM_LOG_LEVEL", "INFO")

@@ -244,6 +244,16 @@ const Render3D = (() => {
   let vehiculoGroup = null;
   let torretaHpmNode = null;
   const lastHpmOrigin = { x: 0, y: 0, z: 0 };
+  // Nodo B (defensa multi-nodo, alcance acotado — ver SimulationEngine.
+  // nodo_b_activo/HPM_NODO_B_ORIGIN_X/Y): un segundo vehículo, mismo
+  // modelo .glb, SIN radar/tracks/movimiento propios (solo cañón fijo,
+  // igual que el backend) — por eso no tiene su propio radarRingMesh/
+  // radarPingMesh/trackLinesMesh, solo el cono y el vehículo. null si
+  // snap.hpm_b nunca llega (nodo B no activo en esta instancia): no se
+  // construye nada de más, ver updateSnapshot.
+  let vehiculoGroupB = null;
+  let torretaHpmNodeB = null;
+  let hpmConeMeshB = null;
   // Kamikaze (ver SimulationEngine.kamikaze_activo): plataformaDestruida
   // es el estado deseado (puede llegar ANTES de que termine de cargar
   // el .glb, por eso es una variable aparte, no algo que se aplica al
@@ -358,6 +368,7 @@ const Render3D = (() => {
     buildGround();
     buildHeatmapPlane();
     buildHpmCone();
+    buildHpmConeB();
     buildDroneTemplate();
     buildEdificioTemplate();
     buildArbolesTemplate();
@@ -775,6 +786,81 @@ const Render3D = (() => {
     trackGhostMesh = new THREE.Points(ghostGeo, ghostMat);
     trackGhostMesh.visible = false;
     scene.add(trackGhostMesh);
+  }
+
+  // Vehículo + cono del NODO B — versión recortada de buildHpmCone(): sin
+  // radar/ping/tracks propios (ver el comentario en la declaración de
+  // vehiculoGroupB más arriba). Se llama siempre desde init(), pero el
+  // resultado solo se ve si updateHpmConeB() recibe snap.hpm_b !== null.
+  function buildHpmConeB() {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(3 * 22), 3));
+    const mat = new THREE.MeshBasicMaterial({
+      color: COLOR.hpmCone,
+      transparent: true,
+      opacity: 0.22,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    hpmConeMeshB = new THREE.Mesh(geo, mat);
+    hpmConeMeshB.position.y = 0.8;
+    hpmConeMeshB.visible = false; // hasta el primer snapshot con hpm_b real
+    scene.add(hpmConeMeshB);
+
+    vehiculoGroupB = new THREE.Group();
+    vehiculoGroupB.visible = false;
+    scene.add(vehiculoGroupB);
+    const ESCALA_VEHICULO = 3; // mismo criterio que el nodo A
+    new GLTFLoader().load(
+      "models/lanzador_hpm.glb",
+      (gltf) => {
+        const modelo = gltf.scene;
+        modelo.scale.setScalar(ESCALA_VEHICULO);
+        vehiculoGroupB.add(modelo);
+        torretaHpmNodeB = modelo.getObjectByName("Torreta_HPM");
+      },
+      undefined,
+      (err) => {
+        console.error("No se pudo cargar frontend/models/lanzador_hpm.glb (nodo B):", err);
+      },
+    );
+  }
+
+  function updateHpmConeB(hpmB) {
+    if (!hpmB) {
+      // nodo B no activo en esta instancia — nunca se vio, no hay nada
+      // que ocultar más allá del estado inicial ya invisible.
+      return;
+    }
+    if (vehiculoGroupB) vehiculoGroupB.visible = true;
+    if (hpmConeMeshB) hpmConeMeshB.visible = true;
+
+    const origenX = hpmB.origen_x ?? 0;
+    const origenY = hpmB.origen_y ?? 0;
+    // Nodo B nunca se mueve (ver HPM_NODO_B_ORIGIN_X/Y) — no hace falta
+    // suavizado de posición como el nodo A, solo apoyarlo en el relieve.
+    const suelo = alturaTerreno(origenX, origenY);
+    const origin = worldToThree(field, origenX, origenY, suelo + 0.8);
+    if (vehiculoGroupB) vehiculoGroupB.position.set(origin.x, suelo, origin.z);
+
+    const dirDeg = hpmB.direccion ?? 0;
+    if (torretaHpmNodeB) torretaHpmNodeB.rotation.y = headingToRotationY(dirDeg);
+    const aperture = hpmB.apertura_cono ?? 30;
+    const half = THREE.MathUtils.degToRad(aperture / 2);
+    const dirRad = THREE.MathUtils.degToRad(dirDeg);
+    const radius = Math.max(field.width, field.height) * 0.6;
+    const segments = 20;
+
+    const positions = [0, 0, 0];
+    for (let i = 0; i <= segments; i++) {
+      const a = -half + (2 * half * i) / segments;
+      const worldAngle = dirRad + a;
+      positions.push(radius * Math.cos(worldAngle), 0, radius * Math.sin(worldAngle));
+    }
+    const flat = new Float32Array(positions);
+    hpmConeMeshB.geometry.setAttribute("position", new THREE.BufferAttribute(flat, 3));
+    hpmConeMeshB.geometry.computeVertexNormals();
+    hpmConeMeshB.position.set(origin.x, origin.y, origin.z);
   }
 
   function updateHpmCone(hpm) {
@@ -1595,6 +1681,7 @@ const Render3D = (() => {
     if (snap.drones) updateTracks(snap.drones);
     if (snap.missiles) updateMissiles(snap.missiles.misiles);
     if (snap.hpm) updateHpmCone(snap.hpm);
+    updateHpmConeB(snap.hpm_b); // null si el nodo B no está activo — ver la función
     if (snap.radar) updateRadarPing(snap.radar);
     if (snap.estructuras) actualizarEstructuras(snap.estructuras);
     dispersarArboles(snap);

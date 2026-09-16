@@ -105,6 +105,7 @@
           <div class="metric-card" title="Misiles HPM disponibles / capacidad total"><span class="metric-label">Munición HPM</span><span class="metric-value" id="metric-munition">—</span></div>
           <div class="metric-card" title="Energía electromagnética total disparada en la sesión"><span class="metric-label">Energía acumulada</span><span class="metric-value metric-energy" id="metric-energy">0 MJ</span></div>
           <div class="metric-card" title="Pico de potencia instantánea alcanzado por un pulso HPM"><span class="metric-label">Pico de potencia</span><span class="metric-value metric-peak" id="metric-peak">0 GW</span></div>
+          <div class="metric-card" id="metric-validez-card" title="Distancia al dron activo más cercano, contra el rango calibrado del modelo de daño (dos puntos de datos publicados — ver /api/calibracion). Fuera de ese rango, la probabilidad reportada es una extrapolación del modelo, no algo verificado."><span class="metric-label">Validez del modelo</span><span class="metric-value" id="metric-validez">—</span></div>
         </div>
       </section>
 
@@ -168,6 +169,19 @@
             <button type="button" id="btn-fire" class="btn btn-fire" title="Dispara el cañón HPM en la dirección y potencia configuradas — rechaza si el vehículo está en movimiento"><svg class="icon" aria-hidden="true"><use href="#i-flame"></use></svg> DISPARAR CAÑÓN</button>
             <button type="button" id="btn-mover-plataforma" class="btn" title="Reposiciona el vehículo (cañón + misil + jammer) — 'shoot and scoot': mientras viaja no puede disparar. Click en el mapa táctico para elegir destino."><svg class="icon" aria-hidden="true"><use href="#i-map"></use></svg> MOVER PLATAFORMA</button>
             <div id="plataforma-movimiento-status" class="wta-hint hidden"></div>
+          </div>
+          <div class="control-section" id="hpm-b-section" hidden>
+            <h2 class="panel-title"><svg class="icon" aria-hidden="true"><use href="#i-gear"></use></svg> Cañón B <span class="panel-tag">NODO 2</span></h2>
+            <p class="wta-hint">Segundo emplazamiento fijo — defensa multi-nodo (no se mueve). El plan óptimo (pestaña Planificación) reparte blancos entre este cañón y el nodo A.</p>
+            <div class="control-group">
+              <label for="power-slider-b">Potencia cañón B <span class="control-value"><span id="power-value-b">45</span> kW</span></label>
+              <input type="range" id="power-slider-b" min="10" max="100" value="45" step="1">
+            </div>
+            <div class="control-group">
+              <label for="direction-slider-b">Dirección cañón B <span class="control-value"><span id="direction-value-b">45</span>°</span></label>
+              <input type="range" id="direction-slider-b" min="0" max="359" value="45" step="1">
+            </div>
+            <button type="button" id="btn-fire-b" class="btn btn-fire" title="Dispara el cañón del nodo B en la dirección y potencia configuradas"><svg class="icon" aria-hidden="true"><use href="#i-flame"></use></svg> DISPARAR CAÑÓN B</button>
           </div>
           <div class="control-section control-section-missile">
             <h2 class="panel-title"><svg class="icon" aria-hidden="true"><use href="#i-rocket"></use></svg> Misil HPM <span class="panel-tag">CHAMP</span></h2>
@@ -270,6 +284,7 @@
           </div>
           <div id="wta-summary" class="wta-summary hidden">
             <span>Bajas esperadas totales: <strong id="wta-total">—</strong></span>
+            <span title="Costo total del plan sobre bajas esperadas, comparado contra el costo de un dron hostil — ver COSTO_* en src/config.py. Mayor a 1x significa que el plan gasta más por baja que lo que cuesta el propio dron.">Costo-intercambio: <strong id="wta-costo">—</strong></span>
           </div>
           <ul id="wta-list" class="shot-history-list wta-list"></ul>
           <div class="button-group">

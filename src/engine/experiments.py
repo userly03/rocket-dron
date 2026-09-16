@@ -372,11 +372,24 @@ def run_replica(
     total = len(sim.swarm.drones)
     neutralizados = conteo["neutralizado"]
     alcanzaron = sim.swarm.contar_objetivo_alcanzado()
+    # Costo del ÚNICO disparo/lanzamiento de esta réplica (0.0 si
+    # ``arma.tipo=="ninguna"`` — el grupo control no gasta nada). Ver
+    # src/config.py, sección "Costo-intercambio", para el porqué de estos
+    # valores. Viaja en CADA resultado de réplica (no solo en el resumen)
+    # para que ExperimentManager._summarize pueda agregarlo sin necesitar
+    # ``cfg`` — mismo patrón que el resto de los campos de este dict.
+    if cfg.arma.tipo == "canion":
+        costo_disparo_usd = config_mod.COSTO_DISPARO_CANION_USD
+    elif cfg.arma.tipo == "misil":
+        costo_disparo_usd = config_mod.COSTO_MISIL_USD
+    else:
+        costo_disparo_usd = 0.0
     return {
         "replica": replica_idx,
         "semilla": cfg.semilla + replica_idx,
         "neutralizados": neutralizados,
         "total": total,
+        "costo_disparo_usd": costo_disparo_usd,
         # MÉTRICA PRIMARIA de la réplica (P1-A): su fracción neutralizada. Es
         # la observación que entra a los intervalos del resumen.
         "fraccion": (neutralizados / total) if total > 0 else 0.0,
@@ -395,6 +408,44 @@ def run_replica(
         "alcanzaron_objetivo": alcanzaron,
         "fraccion_alcanzo_objetivo": (alcanzaron / total) if total > 0 else 0.0,
         "brecha": alcanzaron > 0,
+    }
+
+
+def _resumen_costo_intercambio(resultados: list[dict[str, Any]]) -> dict[str, Any]:
+    """Costo-intercambio agregado sobre TODAS las réplicas — ver el
+    comentario en ``ExperimentManager._summarize`` sobre por qué se agrega
+    sobre totales y no como promedio de una razón por réplica."""
+    # .get(..., 0.0), no r["costo_disparo_usd"]: resultados construidos a
+    # mano (fixtures de test, o resultados de una versión anterior) pueden
+    # no traer este campo — degrada a "sin costo conocido" en vez de
+    # romper, mismo criterio que el resto de esta función usa para
+    # fraccion_alcanzo_objetivo/brecha (campos de la misión ofensiva).
+    costo_total = float(sum(r.get("costo_disparo_usd", 0.0) for r in resultados))
+    neutralizados_total = int(sum(r["neutralizados"] for r in resultados))
+    disparos = int(sum(1 for r in resultados if r.get("costo_disparo_usd", 0.0) > 0))
+
+    costo_por_neutralizado = (
+        costo_total / neutralizados_total if neutralizados_total > 0 else None
+    )
+    # >1 = se gastó más por cada baja que lo que cuesta el propio dron
+    # hostil — un intercambio perdedor en términos económicos, aunque la
+    # defensa haya sido efectiva en términos de bajas. Ver
+    # COSTO_DRON_HOSTIL_USD en src/config.py.
+    razon_vs_dron_hostil = (
+        costo_por_neutralizado / config_mod.COSTO_DRON_HOSTIL_USD
+        if costo_por_neutralizado is not None
+        else None
+    )
+    return {
+        "costo_total_usd": round(costo_total, 2),
+        "disparos_realizados": disparos,
+        "neutralizados_total": neutralizados_total,
+        "costo_por_neutralizado_usd": (
+            round(costo_por_neutralizado, 2) if costo_por_neutralizado is not None else None
+        ),
+        "razon_costo_vs_dron_hostil": (
+            round(razon_vs_dron_hostil, 3) if razon_vs_dron_hostil is not None else None
+        ),
     }
 
 
@@ -622,6 +673,17 @@ class ExperimentManager:
                 "proporcion": round(brechas / n, 4),
                 "ic95_wilson": [round(brecha_lo, 4), round(brecha_hi, 4)],
             },
+            # ── COSTO-INTERCAMBIO (no cambia la decisión del experimento,
+            # solo la reporta — ver src/config.py, sección "Costo-
+            # intercambio", para el porqué de los tres valores). Se agrega
+            # sobre TOTALES (costo total / neutralizados totales), no como
+            # promedio de la razón por réplica: promediar la razón sería
+            # indefinido/infinito en cualquier réplica con 0 neutralizados,
+            # y con "ninguna" como arma (grupo control) o pocas réplicas
+            # letales eso pasa seguido — agregar sobre totales es la forma
+            # estadísticamente correcta de reportar un cost-exchange ratio
+            # sobre varios ensayos.
+            "costo_intercambio": _resumen_costo_intercambio(resultados),
         }
 
     def get(self, exp_id: str) -> dict[str, Any] | None:

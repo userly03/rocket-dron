@@ -84,6 +84,9 @@ from typing import Any
 import numpy as np
 
 from src.config import (
+    COSTO_DISPARO_CANION_USD,
+    COSTO_DRON_HOSTIL_USD,
+    COSTO_MISIL_USD,
     DRONE_CABLE_LENGTH_MAX_M,
     DRONE_CABLE_LENGTH_MIN_M,
     DRONE_POLARIZATION_ANGLE_MAX_RAD,
@@ -203,6 +206,13 @@ class OpcionDeDisparo:
     apertura_cono: float = 15.0  # solo relevante para "canion"
     radio_efecto: float = 100.0  # solo relevante para "misil"
     duty_cycle: float = 1.0
+    # Qué nodo defensivo físico aporta esta opción — "a" (default, el
+    # único nodo hasta la defensa multi-nodo) o "b" (segundo cañón fijo,
+    # ver HPM_NODO_B_ORIGIN_X/Y en src/config.py). Puramente informativo
+    # para el reporte del plan — el cálculo de bajas esperadas ya usaba
+    # origen_x/y/z por opción, así que la cesión de blanco entre nodos
+    # sale gratis del mismo optimizador, sin cambiar su lógica.
+    nodo: str = "a"
 
 
 def _muestra_de_acoplamiento(gen: np.random.Generator) -> tuple[float, float]:
@@ -525,11 +535,21 @@ def planificar_asignacion(
     radio_cluster_m: float = 100.0,
     n_muestras: int = 200,
     seed: int = 2026,
+    hpm_b: Any | None = None,
 ) -> dict[str, Any]:
     """
     Arma el problema de WTA desde el estado REAL del simulador —tracks
     detectados (P2-G), presupuesto de energía del cañón (P2-F) y munición
     de misiles— y devuelve el plan óptimo (greedy + búsqueda local).
+
+    ``hpm_b`` (opcional, defensa multi-nodo): un segundo ``HPMWeapon``
+    fijo — ver ``SimulationEngine.hpm_b``/``HPM_NODO_B_ORIGIN_X/Y``. Con
+    ``None`` (default), el comportamiento es idéntico a antes de esta
+    feature: un solo nodo. Con un segundo cañón, sus opciones de disparo
+    entran al MISMO problema de asignación (misma matriz de bajas
+    esperadas, mismo optimizador) — la cesión de blanco entre los dos
+    nodos es una consecuencia natural de que cada opción ya lleva su
+    propio origen, no un mecanismo nuevo.
     """
     tracks = swarm.track_manager.tracks_activos()
     blancos = [BlancoEnCluster(t.drone_id, t.x, t.y, t.z) for t in tracks]
@@ -544,9 +564,21 @@ def planificar_asignacion(
                 id=idx, tipo="canion", potencia_kw=hpm.potencia,
                 origen_x=hpm.origen_x, origen_y=hpm.origen_y, origen_z=hpm.origen_z,
                 apertura_cono=hpm.apertura_cono, duty_cycle=hpm.duty_cycle,
+                nodo="a",
             )
         )
         idx += 1
+    if hpm_b is not None:
+        for _ in range(hpm_b.disparos_disponibles()):
+            opciones.append(
+                OpcionDeDisparo(
+                    id=idx, tipo="canion", potencia_kw=hpm_b.potencia,
+                    origen_x=hpm_b.origen_x, origen_y=hpm_b.origen_y, origen_z=hpm_b.origen_z,
+                    apertura_cono=hpm_b.apertura_cono, duty_cycle=hpm_b.duty_cycle,
+                    nodo="b",
+                )
+            )
+            idx += 1
     for _ in range(missile_system.municion_restante):
         opciones.append(
             OpcionDeDisparo(
@@ -564,10 +596,21 @@ def planificar_asignacion(
             "opciones_disponibles": len(opciones),
             "asignacion": [],
             "bajas_esperadas_total": 0.0,
+            "costo_intercambio": {
+                "costo_total_usd": 0.0,
+                "costo_por_baja_esperada_usd": None,
+                "razon_costo_vs_dron_hostil": None,
+            },
         }
 
     matriz = matriz_de_bajas_esperadas(opciones, clusters, n_muestras=n_muestras, seed=seed)
     asignacion, valor = resolver_wta(matriz, tamanos)
+
+    # Costo del PLAN — reporta costo-intercambio, no cambia la asignación en
+    # sí (resolver_wta sigue optimizando bajas esperadas; agregar costo como
+    # objetivo de optimización sería un cambio de comportamiento aparte, no
+    # pedido). Ver src/config.py, sección "Costo-intercambio".
+    costo_por_tipo = {"canion": COSTO_DISPARO_CANION_USD, "misil": COSTO_MISIL_USD}
 
     plan = []
     for i, j in asignacion.items():
@@ -575,12 +618,20 @@ def planificar_asignacion(
             {
                 "opcion_id": opciones[i].id,
                 "tipo": opciones[i].tipo,
+                "nodo": opciones[i].nodo,
                 "cluster_id": clusters[j].id,
                 "cluster_centroide": clusters[j].centroide,
                 "cluster_tamano": clusters[j].tamano,
                 "bajas_esperadas_aisladas": round(float(matriz[i, j]), 4),
+                "costo_usd": costo_por_tipo.get(opciones[i].tipo, 0.0),
             }
         )
+
+    costo_total_usd = float(sum(p["costo_usd"] for p in plan))
+    costo_por_baja = costo_total_usd / valor if valor > 1e-9 else None
+    razon_vs_dron_hostil = (
+        costo_por_baja / COSTO_DRON_HOSTIL_USD if costo_por_baja is not None else None
+    )
 
     return {
         "clusters": [
@@ -589,4 +640,16 @@ def planificar_asignacion(
         "opciones_disponibles": len(opciones),
         "asignacion": plan,
         "bajas_esperadas_total": round(valor, 4),
+        "costo_intercambio": {
+            "costo_total_usd": round(costo_total_usd, 2),
+            "costo_por_baja_esperada_usd": (
+                round(costo_por_baja, 2) if costo_por_baja is not None else None
+            ),
+            # >1 = el plan gasta más por baja esperada que lo que cuesta el
+            # propio dron hostil — un intercambio perdedor en términos
+            # económicos, aunque el plan sea óptimo en bajas esperadas.
+            "razon_costo_vs_dron_hostil": (
+                round(razon_vs_dron_hostil, 3) if razon_vs_dron_hostil is not None else None
+            ),
+        },
     }
