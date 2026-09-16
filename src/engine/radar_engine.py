@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from src.config import (
+    DRONE_TX_GAIN_DBI,
+    DRONE_TX_POWER_W,
     RADAR_FILTRO_ALPHA,
     RADAR_FILTRO_BETA,
     RADAR_FILTRO_GAMMA,
@@ -23,6 +25,8 @@ from src.config import (
     RADAR_REVISITA_S,
     RADAR_SIGMOID_STEEPNESS,
     RADAR_SNR_THRESHOLD_DB,
+    RF_SENSOR_FREQUENCY_GHZ,
+    RF_SENSOR_GAIN_DBI,
 )
 
 SPEED_OF_LIGHT_M_S = 299_792_458.0
@@ -155,6 +159,13 @@ class Track:
     # medición real (no solo el "nacimiento" del track) — diagnóstico de
     # calidad, no gobierna ninguna decisión todavía.
     revisitas_confirmadas: int = 0
+    # P5 — transparencia de qué sensor sostiene este track: "radar" (por
+    # defecto, y siempre que el radar por sí solo ya detecta) o "rf" solo
+    # cuando el radar NO detectó pero el sensor RF pasivo sí (ver
+    # ``TrackManager.actualizar``, ``considerar_sensor_rf``). Puramente
+    # informativo — no gobierna ninguna decisión, igual que
+    # ``revisitas_confirmadas``.
+    fuente_deteccion: str = "radar"
 
     def posicion_estimada(self) -> tuple[float, float, float]:
         return (self.x, self.y, self.z)
@@ -235,6 +246,8 @@ class TrackManager:
         rcs_m2: float,
         noise_floor_w: float,
         obstaculos: list[tuple[float, float, float]] | None = None,
+        considerar_relieve: bool = False,
+        considerar_sensor_rf: bool = False,
     ) -> None:
         """
         Avanza el radar un paso ``dt``: propaga todos los tracks vivos, y —
@@ -253,8 +266,21 @@ class TrackManager:
         de un edificio. Se pierde el track igual que "fuera de rango/SNR"
         (mismo camino, no un caso especial nuevo). ``None`` (default) es
         CERO obstáculos, idéntico al comportamiento de antes de esto.
+
+        ``considerar_sensor_rf`` (P5, ver ``src/engine/rf_sensor.py``):
+        ``False`` (default) es el comportamiento de siempre, solo radar.
+        Con ``True``, un dron que el radar NO detecta (fuera de su rango
+        r⁴, mucho más corto — ver el docstring de ``rf_sensor.py``) se
+        evalúa TAMBIÉN contra el sensor RF pasivo (enlace unidireccional
+        del dron, r²) — el track se adquiere si CUALQUIERA de los dos
+        detecta (un "OR" geométrico, no un tercer sensor independiente con
+        su propio track). La MISMA línea de vista (obstáculos + relieve)
+        sigue gobernando a ambos: un dron oculto detrás de una colina o un
+        edificio es invisible a los dos sensores por igual, ninguno ve a
+        través de un obstáculo sólido.
         """
         from src.engine.hpm_engine import linea_de_vista_bloqueada
+        from src.engine.rf_sensor import evaluar_deteccion_rf
         from src.utils.helpers import distance3d
 
         self._propagar(dt)
@@ -272,8 +298,16 @@ class TrackManager:
             detectado, _probabilidad = evaluar_deteccion(
                 dist, pt_w, gain_dbi, frequency_ghz, rcs_m2, noise_floor_w
             )
+            fuente = "radar"
+            if not detectado and considerar_sensor_rf:
+                detectado, _probabilidad = evaluar_deteccion_rf(
+                    dist, DRONE_TX_POWER_W, DRONE_TX_GAIN_DBI, RF_SENSOR_GAIN_DBI,
+                    RF_SENSOR_FREQUENCY_GHZ, noise_floor_w,
+                )
+                fuente = "rf"
             if detectado and linea_de_vista_bloqueada(
-                origen_x, origen_y, drone.x, drone.y, obstaculos
+                origen_x, origen_y, drone.x, drone.y, obstaculos,
+                origen_z=origen_z, destino_z=drone.z, considerar_relieve=considerar_relieve,
             ):
                 detectado = False
             track = self.tracks.get(drone.id)
@@ -291,10 +325,13 @@ class TrackManager:
                 # medición, sin velocidad estimada todavía (la primera
                 # revisita no tiene con qué compararse).
                 self.tracks[drone.id] = Track(
-                    drone_id=drone.id, x=drone.x, y=drone.y, z=drone.z
+                    drone_id=drone.id, x=drone.x, y=drone.y, z=drone.z,
+                    fuente_deteccion=fuente,
                 )
                 drone.detectado = True
                 continue
+
+            track.fuente_deteccion = fuente
 
             residual_x = drone.x - track.x
             residual_y = drone.y - track.y

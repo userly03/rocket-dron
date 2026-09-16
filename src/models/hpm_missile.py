@@ -344,6 +344,7 @@ class HPMissile:
         self,
         drones: list[Drone],
         obstaculos: list[tuple[float, float, float]] | None = None,
+        considerar_relieve: bool = False,
     ) -> list[dict]:
         """
         Detona el pulso HPM en área. Soft-kill: paraliza drones sin explosión física.
@@ -373,7 +374,10 @@ class HPMissile:
             if dist > self.radio_efecto:
                 continue
 
-            if linea_de_vista_bloqueada(self.x, self.y, drone.x, drone.y, obstaculos):
+            if linea_de_vista_bloqueada(
+                self.x, self.y, drone.x, drone.y, obstaculos,
+                origen_z=self.z, destino_z=drone.z, considerar_relieve=considerar_relieve,
+            ):
                 eventos.append(
                     {
                         "drone_id": drone.id,

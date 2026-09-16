@@ -175,6 +175,7 @@ class HPMWeapon:
         self,
         drones: list[Drone],
         obstaculos: list[tuple[float, float, float]] | None = None,
+        considerar_relieve: bool = False,
     ) -> list[dict]:
         """
         Aplica daño HPM a todos los drones dentro del cono de efecto.
@@ -256,7 +257,8 @@ class HPMWeapon:
                 continue
 
             if linea_de_vista_bloqueada(
-                self.origen_x, self.origen_y, drone.x, drone.y, obstaculos
+                self.origen_x, self.origen_y, drone.x, drone.y, obstaculos,
+                origen_z=self.origen_z, destino_z=drone.z, considerar_relieve=considerar_relieve,
             ):
                 eventos.append(
                     {

@@ -52,6 +52,7 @@ from src.config import (
 )
 from src import config as config_mod
 from src.engine.radar_engine import SPEED_OF_LIGHT_M_S
+from src.engine.terreno import altura_terreno
 from src.utils.helpers import angle_difference, distance, distance3d
 
 VACUUM_IMPEDANCE_OHM = 377.0
@@ -948,6 +949,9 @@ def linea_de_vista_bloqueada(
     destino_x: float,
     destino_y: float,
     obstaculos: list[tuple[float, float, float]] | None,
+    origen_z: float | None = None,
+    destino_z: float | None = None,
+    considerar_relieve: bool = False,
 ) -> bool:
     """
     True si el segmento origen→destino pasa por CUALQUIER obstáculo
@@ -961,11 +965,55 @@ def linea_de_vista_bloqueada(
     real a 2.45GHz no deja pasar una fracción "razonable" de la señal,
     la bloquea casi por completo — un coeficiente de atenuación parcial
     sería un número inventado sin dato que lo respalde.
+
+    ``origen_z``/``destino_z``/``considerar_relieve`` (opt-in, P4 de la
+    crítica "científico militar" de esta sesión — ver
+    ``src/engine/terreno.py``): a diferencia del chequeo de obstáculos de
+    arriba, ESTE sí tiene en cuenta la altura real (del rayo Y del
+    relieve), porque el propio relieve tiene una forma 3D real (a
+    diferencia de los edificios, para los que no hay un dato de altura
+    medido — ver el comentario del módulo). Con ``considerar_relieve=
+    False`` (default) o cualquiera de las dos alturas en ``None``, esta
+    parte del chequeo simplemente no corre — comportamiento idéntico al
+    de antes de que existiera. HALLAZGO IMPORTANTE, verificado antes de
+    conectar esto a ningún llamador real (ver el docstring de
+    ``terreno.py``): con la altitud de vuelo real de los drones (40-
+    160m) y la amplitud de colinas elegida para el frontend, esto
+    prácticamente NUNCA bloquea contra un dron en vuelo normal — el
+    efecto real está concentrado en objetivos cerca del suelo (un dron
+    aterrizando por falla de enlace/jamming, el propio vehículo). No es
+    un bug ni una feature decorativa: es lo que da el modelo real,
+    dejado así a propósito en vez de inventar colinas más altas para
+    forzar más bloqueos.
     """
-    if not obstaculos:
-        return False
-    for cx, cy, radio in obstaculos:
-        if _segmento_intersecta_circulo(origen_x, origen_y, destino_x, destino_y, cx, cy, radio):
+    if obstaculos:
+        for cx, cy, radio in obstaculos:
+            if _segmento_intersecta_circulo(origen_x, origen_y, destino_x, destino_y, cx, cy, radio):
+                return True
+    if considerar_relieve and origen_z is not None and destino_z is not None:
+        if _relieve_bloquea_rayo(origen_x, origen_y, origen_z, destino_x, destino_y, destino_z):
+            return True
+    return False
+
+
+def _relieve_bloquea_rayo(
+    ox: float, oy: float, oz: float, dx: float, dy: float, dz: float
+) -> bool:
+    """True si el segmento 3D origen→destino pasa por DEBAJO del perfil
+    de elevación real del terreno en algún punto de su recorrido (rayo
+    recto, sin refracción — a esta escala y con esta amplitud de
+    relieve, la diferencia con un rayo real es despreciable). Muestrea
+    cada ~15m — más fino que la mitad de la longitud de onda más corta
+    del ruido de relieve (~19.6m, ver terreno.py), así que no se puede
+    "saltar" un pico entero entre dos muestras consecutivas."""
+    distancia = math.hypot(dx - ox, dy - oy)
+    n = max(8, int(distancia / 15.0))
+    for i in range(n + 1):
+        s = i / n
+        x = ox + s * (dx - ox)
+        y = oy + s * (dy - oy)
+        altura_rayo = oz + s * (dz - oz)
+        if altura_terreno(x, y) > altura_rayo:
             return True
     return False
 

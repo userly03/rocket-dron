@@ -1230,10 +1230,107 @@ duplicar cada subsistema. Opt-in (`nodo_b_activo`, mismo criterio que
   un bug no pedido a mitad de esta feature). Queda señalado para una
   próxima pasada.
 
-**4 y 5 (línea de vista con relieve real, sensor RF)**: ver más abajo si
-ya se implementaron para cuando se lea esto, o docs/SEGUIMIENTO_SESION.md
-más reciente.
+**4 y 5 (línea de vista con relieve real, sensor RF)**: ver §9.14 más
+abajo.
 
 Verificado: 213/213 tests dirigidos (targeting, simulación, opfor,
 experimentos, coevolución) y 552/552 de la suite completa, sin
 regresiones tras las 3 features.
+
+### 9.14 Crítica de "científico militar" — features 4 y 5 (relieve real + sensor RF) — ✅ CERRADO
+
+Continuación de §9.13: las últimas dos de las 5 propuestas, en el mismo
+orden que pidió el usuario.
+
+**4. Línea de vista con relieve real del terreno** — ✅ CERRADO. Hasta
+acá, `linea_de_vista_bloqueada` solo conocía obstáculos artificiales
+(círculos de estructuras) — las colinas que el frontend YA dibuja
+(`render3d.js`, ruido de valor con semillas fijas) no afectaban a la
+física en absoluto: un cañón podía "disparar a través" de una colina que
+el jugador veía en pantalla.
+
+- Nuevo módulo `src/engine/terreno.py`: puerto EXACTO (no aproximado) del
+  generador de ruido del frontend a Python — PRNG mulberry32 con
+  aritmética de 32 bits replicada a mano (`Math.imul`, `|0`, `>>>`), 2
+  octavas de ruido de valor con interpolación smoothstep, tiling
+  periódico en la octava de ondulación. Verificado corriendo el JS
+  original con `node` y comparando 552 puntos contra el puerto Python:
+  diff=0.0 exacto — no "parecido", IGUAL bit a bit. `ALTURA_COLINAS_M`/
+  `ALTURA_ONDULACION_M` son copias literales de las constantes del
+  frontend, deliberadamente NO configurables por entorno (evitar que
+  backend y frontend diverjan con un `.env` mal puesto).
+- `linea_de_vista_bloqueada` ganó `origen_z`/`destino_z`/
+  `considerar_relieve` (opt-in, default el comportamiento de siempre) —
+  ray-marching cada ~15m a lo largo del segmento 3D, comparando contra
+  `altura_terreno(x,y)` en cada muestra. Enchufado, con el mismo flag
+  opt-in (`relieve_bloquea_vision`), en TODOS los puntos donde ya se
+  chequeaba línea de vista: `HPMWeapon.disparar`, `HPMissile.detonar`,
+  `TrackManager.actualizar` (radar) — un mismo relieve para armas y
+  sensor, no una física paralela para cada uno.
+- **Hallazgo numérico verificado ANTES de integrar nada** (búsqueda de
+  3000 muestras sobre geometrías de encuentro realistas, ver el docstring
+  de `terreno.py`): con la amplitud de colinas ya elegida en el frontend
+  por motivos de legibilidad visual (~13.5m máximo), el relieve
+  prácticamente NUNCA bloquea contra un dron en vuelo normal (40-160m de
+  altitud: 0/3000 casos bloqueados) pero SÍ es significativo contra un
+  blanco cerca del suelo (0-20m, ej. un dron aterrizado por falla de
+  enlace inducida por el jammer: 1928/3000 = 64.3% bloqueado). Se
+  documenta así, tal cual, en vez de subir la altura de las colinas para
+  forzar un resultado "más interesante" — es una característica física
+  correcta (colinas suaves protegen objetivos bajos, no aeronaves en
+  vuelo), no un bug.
+
+**5. Sensor RF pasivo (ESM)** — ✅ CERRADO. El radar (`radar_engine.py`)
+es monoestático — transmite y recibe su propia reflexión, ida y vuelta,
+de ahí que su alcance caiga con `r⁴` y tenga un techo real DENTRO del
+mapa (1000×1000m). Un sensor pasivo que solo ESCUCHA la emisión propia
+del dron (enlace de control/telemetría) es un enlace unidireccional
+(ecuación de Friis, `r²`) — mucho más alcance a igual potencia. Es
+doctrina real de guerra electrónica (ESM/RWR superando en alcance al
+radar que ilumina), no una particularidad inventada de este modelo.
+
+- Nuevo módulo `src/engine/rf_sensor.py`: `rf_received_power_w` (Friis,
+  `Gt·Gr` en vez de `G²` porque son dos antenas distintas, sin término
+  de RCS) y `evaluar_deteccion_rf`, mismo patrón estructural que
+  `radar_engine.evaluar_deteccion` (sigmoide sobre SNR, decisión
+  determinística ≥50%, mismo `detection_probability` reutilizado).
+- Constantes nuevas en `config.py`: `DRONE_TX_POWER_W` (25mW, ancla en
+  control/telemetría tipo ELRS/Crossfire — NO el enlace de video, que
+  suele ir más fuerte), `DRONE_TX_GAIN_DBI` (2 dBi, antena del dron
+  casi omnidireccional), `RF_SENSOR_GAIN_DBI` (6 dBi, deliberadamente
+  MENOS que los 25 dBi del plato del radar — un receptor de alerta
+  pasiva prioriza cobertura angular, no un lóbulo angosto de
+  seguimiento), `RF_SENSOR_FREQUENCY_GHZ` (2.4), `RF_SENSOR_SNR_
+  THRESHOLD_DB`/`RF_SENSOR_SIGMOID_STEEPNESS` (mismo valor que el radar
+  por ahora, pero como constante propia — no el mismo parámetro
+  reutilizado — para poder diferenciar la electrónica de ambos
+  receptores más adelante sin tocar firmas).
+- **Verificado numéricamente ANTES de integrar** (mismo criterio de
+  rigor que la feature 4): con los valores por defecto, el alcance de
+  detección sale en **~3948m** — casi 3x la diagonal del mapa (~1414m).
+  Dentro del mapa, con línea de vista libre, este sensor prácticamente
+  SIEMPRE detecta — no hay "punto ciego por distancia" como sí lo hay
+  con el radar. Deliberadamente NO se bajó la potencia del dron para
+  forzar un alcance "más chico y creíble" — el hallazgo real es ese: la
+  única defensa real contra este sensor es bloquear la línea de vista
+  (terreno, estructuras — feature 4 de esta misma sesión), no la
+  distancia.
+- `TrackManager.actualizar` ganó `considerar_sensor_rf` (opt-in, default
+  False): si el radar NO detecta a un dron, y el flag está activo, se
+  evalúa TAMBIÉN contra el sensor RF — un "OR" geométrico sobre la MISMA
+  línea de vista (obstáculos + relieve), no un tercer sensor
+  independiente con su propio track. `Track` ganó `fuente_deteccion`
+  ("radar"/"rf", puramente informativo) para transparencia — expuesto en
+  el snapshot vía `drone_to_dict` como `fuente_deteccion`. Enchufado en
+  `Swarm.actualizar` → `SimulationEngine.sensor_rf_activo` (mismo
+  criterio opt-in que las 4 features anteriores) → activado en
+  `main.py` para la app en vivo.
+- A diferencia de la feature 4, el sensor RF SOLO afecta detección
+  (`TrackManager`) — no se enchufó en `HPMWeapon.disparar`/
+  `HPMissile.detonar` (esos ya tienen su propio chequeo de línea de
+  vista para el DAÑO, sin relación con cómo se detectó al blanco).
+
+Verificado: 9/9 tests dirigidos nuevos (`tests/test_sensor_rf.py`) +
+31/31 de `tests/test_terreno.py` y `TestLineaDeVistaConRelieve` (§9.13
+en curso, escritos junto con la feature 4) + 552/552 de la suite
+completa, sin regresiones tras las 5 features.

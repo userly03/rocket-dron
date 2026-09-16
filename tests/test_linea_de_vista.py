@@ -196,3 +196,66 @@ class TestIntegracionSimulationEngine:
             sim._tick(0.1, mover_enjambre=False)
         assert drone.detectado is True
         sim.shutdown()
+
+class TestLineaDeVistaConRelieve:
+    """P4 de la critica "cientifico militar" de esta sesion: linea de
+    vista considerando el relieve REAL del terreno (colinas, ver
+    src/engine/terreno.py), no solo los circulos 2D de estructuras de
+    arriba. Casos concretos, encontrados por busqueda numerica (no
+    inventados a mano) - ver el hallazgo documentado en terreno.py sobre
+    cuando esto efectivamente bloquea algo."""
+
+    def test_default_no_considera_relieve_ni_con_alturas_dadas(self):
+        """Sin considerar_relieve=True explicito, el comportamiento es
+        IDENTICO al de antes de este item - aunque se pasen origen_z/
+        destino_z, el chequeo de relieve simplemente no corre."""
+        assert linea_de_vista_bloqueada(
+            0.0, 0.0, 403.98, 200.08, None, origen_z=8.0, destino_z=2.68,
+        ) is False
+
+    def test_bloquea_un_blanco_bajo_detras_de_una_colina(self):
+        """Caso real encontrado por busqueda numerica: un blanco BAJO
+        (2.68m - un dron aterrizando por falla de enlace, ver
+        PerfilLostLink.ATERRIZAR en src/models/drone.py) a ~450m del
+        canon en HPM_ORIGIN queda detras de una colina real."""
+        assert linea_de_vista_bloqueada(
+            0.0, 0.0, 403.98, 200.08, None,
+            origen_z=8.0, destino_z=2.68, considerar_relieve=True,
+        ) is True
+
+    def test_no_bloquea_un_dron_en_vuelo_normal(self):
+        """HALLAZGO documentado en terreno.py: con la altitud de vuelo
+        real de los drones (40-160m) y la amplitud de colinas del
+        frontend, el relieve practicamente NUNCA bloquea contra un dron
+        en vuelo normal - el rayo sube del origen hacia el dron mucho
+        mas rapido de lo que cualquier colina de esta amplitud puede
+        seguirle el ritmo. Este test fija ESE comportamiento como
+        esperado, no como un bug."""
+        assert linea_de_vista_bloqueada(
+            0.0, 0.0, 500.0, 500.0, None,
+            origen_z=8.0, destino_z=100.0, considerar_relieve=True,
+        ) is False
+
+    def test_sin_alguna_de_las_dos_alturas_no_corre_el_chequeo(self):
+        """considerar_relieve=True pero falta origen_z o destino_z: no
+        hay con que calcular el rayo, asi que no revienta ni asume nada
+        - simplemente no aplica el chequeo de relieve (sigue aplicando
+        el de obstaculos si corresponde)."""
+        assert linea_de_vista_bloqueada(
+            0.0, 0.0, 403.98, 200.08, None,
+            origen_z=8.0, destino_z=None, considerar_relieve=True,
+        ) is False
+
+    def test_integracion_disparo_con_relieve_activo_no_rompe(self):
+        """SimulationEngine con relieve_bloquea_vision=True corriendo de
+        punta a punta (varios ticks + un disparo real) sin excepciones -
+        no verifica un bloqueo especifico (dependeria de donde cayeron
+        los drones esta corrida), solo que el flag conectado end-to-end
+        no rompe nada."""
+        sim = SimulationEngine(swarm_size=15, mision_activa=False, relieve_bloquea_vision=True)
+        sim.start()
+        for _ in range(40):
+            sim._tick(0.1)
+        resultado = sim.fire(potencia=90, direccion=45, apertura_cono=30)
+        assert resultado["message"] == "HPM disparado" or resultado["message"].startswith("Disparo rechazado")
+        sim.shutdown()

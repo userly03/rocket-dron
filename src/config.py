@@ -608,6 +608,48 @@ RADAR_NOISE_FLOOR_W: float = float(os.getenv("RADAR_NOISE_FLOOR_W", "1e-13"))
 RADAR_SNR_THRESHOLD_DB: float = float(os.getenv("RADAR_SNR_THRESHOLD_DB", "10"))
 RADAR_SIGMOID_STEEPNESS: float = float(os.getenv("RADAR_SIGMOID_STEEPNESS", "0.35"))
 
+# --- Sensor RF pasivo (ESM) — P5 de la crítica "científico militar" ---
+# Detecta al DRON por su propia emisión (enlace de control/telemetría),
+# no por reflexión de una señal propia como el radar — ver
+# src/engine/rf_sensor.py para el porqué (enlace unidireccional, r² en
+# vez del r⁴ del radar monoestático) y el hallazgo sobre el alcance
+# resultante. Cierra un punto ciego real de tener un único sensor: un
+# radar tiene un techo de alcance duro (r⁴); un receptor pasivo que
+# escucha la emisión del blanco no.
+#
+# Potencia de transmisión del enlace de control/telemetría de un dron
+# FPV/quad chico — NO el enlace de video (que suele ser bastante más
+# potente, 200-600mW en variantes "long range"). Control/telemetría en
+# banda ISM sin licencia suele ir bastante más bajo — 25mW es del orden
+# de un Bluetooth Class 1 (~100mW) o menos, conservador a propósito.
+DRONE_TX_POWER_W: float = float(os.getenv("DRONE_TX_POWER_W", "0.025"))
+# Ganancia de la antena del dron — casi omnidireccional (un dipolo/parche
+# chico montado en un airframe pequeño no tiene espacio para un arreglo
+# de alta ganancia), apenas por encima de un dipolo isotrópico ideal.
+DRONE_TX_GAIN_DBI: float = float(os.getenv("DRONE_TX_GAIN_DBI", "2.0"))
+# Frecuencia del enlace de control — banda ISM de 2.4GHz, la misma que
+# usan la mayoría de los sistemas de radiocontrol de largo alcance tipo
+# ELRS/Crossfire (no necesariamente la misma que HPM_FREQUENCY_GHZ ni
+# RADAR_FREQUENCY_GHZ — son tres sistemas distintos, mismo criterio de
+# separación que ya se aplicó entre radar y arma, ver el comentario de
+# RADAR_FREQUENCY_GHZ).
+RF_SENSOR_FREQUENCY_GHZ: float = float(os.getenv("RF_SENSOR_FREQUENCY_GHZ", "2.4"))
+# Ganancia de la antena receptora de ESTE sensor — deliberadamente MÁS
+# BAJA que RADAR_ANTENNA_GAIN_DBI (25 dBi, un plato de seguimiento de
+# alta ganancia): un receptor de alerta/búsqueda pasiva típicamente
+# sacrifica ganancia por cobertura angular amplia (necesita "escuchar"
+# en muchas direcciones a la vez, no apuntar como un radar de
+# seguimiento). No es la MISMA antena que el radar con otro nombre.
+RF_SENSOR_GAIN_DBI: float = float(os.getenv("RF_SENSOR_GAIN_DBI", "6.0"))
+# Umbral de SNR y pendiente de la sigmoide — mismo criterio y mismos
+# valores que RADAR_SNR_THRESHOLD_DB/RADAR_SIGMOID_STEEPNESS (no hay
+# razón para que la electrónica del receptor de ESTE sensor sea
+# cualitativamente distinta de la del radar; el ruido de piso también
+# se reutiliza, RADAR_NOISE_FLOOR_W — dos receptores separados no
+# justifican inventar un segundo umbral sin dato que lo distinga).
+RF_SENSOR_SNR_THRESHOLD_DB: float = float(os.getenv("RF_SENSOR_SNR_THRESHOLD_DB", "10"))
+RF_SENSOR_SIGMOID_STEEPNESS: float = float(os.getenv("RF_SENSOR_SIGMOID_STEEPNESS", "0.35"))
+
 # --- Radar dinámico: barrido + filtro α-β-γ (P2-G) ---
 # El radar de arriba decide instantáneamente, cada tick, si un blanco "se
 # conoce" — omnisciente por construcción: la decisión usa la posición VERDADERA

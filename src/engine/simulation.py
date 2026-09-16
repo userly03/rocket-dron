@@ -110,6 +110,28 @@ class SimulationEngine:
     # aparece en el snapshot, entra al WTA — si nodo_b_activo es True.
     nodo_b_activo: bool = False
     hpm_b: HPMWeapon = field(default_factory=HPMWeapon, init=False)
+    # Línea de vista considerando el relieve real del terreno (P4 de la
+    # crítica "científico militar" — ver src/engine/terreno.py y el
+    # hallazgo documentado ahí: con la amplitud de colinas del frontend y
+    # la altitud de vuelo real de los drones, esto prácticamente nunca
+    # bloquea contra un dron en vuelo normal; el efecto real está
+    # concentrado en objetivos cerca del suelo, como un dron aterrizando
+    # por falla de enlace). Opt-in, mismo criterio que kamikaze_activo/
+    # estructuras_activas/nodo_b_activo: apagado por defecto, para no
+    # cambiar en silencio la calibración de ningún experimento/
+    # coevolución existente.
+    relieve_bloquea_vision: bool = False
+    # Sensor RF pasivo (P5 de la crítica "científico militar" — ver
+    # src/engine/rf_sensor.py y el hallazgo documentado ahí: a diferencia
+    # del radar, que tiene techo de alcance real DENTRO del mapa por el
+    # r⁴, este sensor detecta prácticamente en todo el mapa con línea de
+    # vista libre — la única defensa real contra él es el terreno/
+    # obstáculos, no la distancia). Se OR-ea con la detección de radar en
+    # TrackManager.actualizar, no reemplaza al radar. Opt-in, mismo
+    # criterio que kamikaze_activo/estructuras_activas/nodo_b_activo/
+    # relieve_bloquea_vision: apagado por defecto, para no cambiar en
+    # silencio la calibración de ningún experimento/coevolución existente.
+    sensor_rf_activo: bool = False
     # Qué objetivo está activo ESTE tick — ("vehiculo", None) o
     # ("estructura", id). Lo fija _elegir_objetivo_enjambre, lo consume
     # _registrar_impactos_en_objetivo para saber a quién dañar cuando
@@ -463,7 +485,10 @@ class SimulationEngine:
         no duplicar ~70 líneas al agregar el nodo B."""
         with self._lock:
             hpm.configurar(potencia, direccion, apertura_cono, duty_cycle)
-            eventos = hpm.disparar(self.swarm.drones, obstaculos=self._obstaculos_activos())
+            eventos = hpm.disparar(
+                self.swarm.drones, obstaculos=self._obstaculos_activos(),
+                considerar_relieve=self.relieve_bloquea_vision,
+            )
             rechazo = hpm.ultimo_rechazo
 
             if rechazo is not None:
@@ -1009,7 +1034,9 @@ class SimulationEngine:
         eventos_jamming: list[dict] = []
         if mover_enjambre:
             impactos_objetivo = self.swarm.actualizar(
-                dt, self.hpm.origen_x, self.hpm.origen_y, obstaculos=obstaculos
+                dt, self.hpm.origen_x, self.hpm.origen_y, obstaculos=obstaculos,
+                considerar_relieve=self.relieve_bloquea_vision,
+                considerar_sensor_rf=self.sensor_rf_activo,
             )
             if impactos_objetivo:
                 self._registrar_impactos_en_objetivo(impactos_objetivo)
@@ -1024,6 +1051,7 @@ class SimulationEngine:
         eventos_misil = self.missile_system.actualizar_misiles(
             self.swarm.drones, dt, track_manager=self.swarm.track_manager,
             obstaculos=self._obstaculos_activos(),
+            considerar_relieve=self.relieve_bloquea_vision,
         )
         self.tiempo += dt
         self.tick += 1

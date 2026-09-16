@@ -152,13 +152,14 @@ class HPMissileSystem:
         dt: float,
         track_manager=None,
         obstaculos: list[tuple[float, float, float]] | None = None,
+        considerar_relieve: bool = False,
     ) -> list[dict]:
         """
         Actualiza posición de misiles activos y procesa detonaciones.
 
-        ``obstaculos`` se reenvía tal cual a ``HPMissile.detonar`` — ver
-        su docstring (línea de vista). ``None`` (default) es CERO
-        obstáculos.
+        ``obstaculos``/``considerar_relieve`` se reenvían tal cual a
+        ``HPMissile.detonar`` — ver su docstring (línea de vista).
+        ``None``/``False`` (default) son el comportamiento de antes.
 
         Returns:
             Lista de eventos (detonaciones, destrucciones).
@@ -192,7 +193,9 @@ class HPMissileSystem:
                 continue
 
             if misil.debe_detonar(drones):
-                impactos = misil.detonar(drones, obstaculos=obstaculos)
+                impactos = misil.detonar(
+                    drones, obstaculos=obstaculos, considerar_relieve=considerar_relieve
+                )
                 eventos.append(
                     {
                         "tipo": "misil_detonado",

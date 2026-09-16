@@ -312,6 +312,8 @@ class Swarm:
         origen_radar_x: float | None = None,
         origen_radar_y: float | None = None,
         obstaculos: list[tuple[float, float, float]] | None = None,
+        considerar_relieve: bool = False,
+        considerar_sensor_rf: bool = False,
     ) -> list[Drone]:
         """Mueve todos los drones activos, resuelve colisiones con bordes,
         y avanza la misión si hay un objetivo configurado.
@@ -328,6 +330,10 @@ class Swarm:
         ``hpm_engine.linea_de_vista_bloqueada``) — un dron detrás de un
         obstáculo no se detecta, sin importar SNR. ``None`` es CERO
         obstáculos, idéntico al comportamiento de antes.
+
+        ``considerar_sensor_rf`` (P5): se reenvía tal cual a
+        ``TrackManager.actualizar`` — ver su docstring. ``False`` (default)
+        es el comportamiento de siempre, solo radar.
 
         Devuelve la lista de drones que llegaron al objetivo EN ESTE tick
         (vacía si no hay objetivo o nadie llegó) — ``SimulationEngine._tick``
@@ -403,7 +409,8 @@ class Swarm:
             HPM_ORIGIN_Z,
             RADAR_TX_POWER_W, RADAR_ANTENNA_GAIN_DBI, RADAR_FREQUENCY_GHZ,
             RADAR_RCS_M2, RADAR_NOISE_FLOOR_W,
-            obstaculos=obstaculos,
+            obstaculos=obstaculos, considerar_relieve=considerar_relieve,
+            considerar_sensor_rf=considerar_sensor_rf,
         )
 
         return self._detectar_impactos_en_objetivo()

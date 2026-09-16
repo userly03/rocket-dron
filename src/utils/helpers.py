@@ -84,6 +84,9 @@ def drone_to_dict(drone: Drone, track_manager=None) -> dict:
         "track_x": round(track.x, 2) if track is not None else None,
         "track_y": round(track.y, 2) if track is not None else None,
         "track_z": round(track.z, 2) if track is not None else None,
+        # P5 — qué sensor sostiene este track ahora mismo ("radar"/"rf"),
+        # None si no hay track vivo. Ver Track.fuente_deteccion.
+        "fuente_deteccion": track.fuente_deteccion if track is not None else None,
         # Misión ofensiva: True si este dron llegó al objetivo — una
         # BRECHA de la defensa, no una baja. Falso siempre si no hay
         # objetivo configurado (Swarm.objetivo_x is None).

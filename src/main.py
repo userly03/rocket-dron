@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI):
     # qué Monte Carlo/coevolución NO la activan por defecto.
     simulation = SimulationEngine(
         swarm_size=SWARM_SIZE, mision_activa=True, kamikaze_activo=True, estructuras_activas=True,
-        nodo_b_activo=True,
+        nodo_b_activo=True, relieve_bloquea_vision=True, sensor_rf_activo=True,
     )
     loop = asyncio.get_running_loop()
     attach_simulation_listener(simulation, loop)
