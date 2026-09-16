@@ -41,6 +41,7 @@
     btnCameraTop: document.getElementById("btn-camera-top"),
     btnCameraPlataforma: document.getElementById("btn-camera-plataforma"),
     toggleTracks: document.getElementById("toggle-tracks"),
+    toggleRelieve: document.getElementById("toggle-relieve"),
     powerSlider: document.getElementById("power-slider"),
     powerValue: document.getElementById("power-value"),
     directionSlider: document.getElementById("direction-slider"),
@@ -866,6 +867,7 @@
     ui.btnCameraTop.addEventListener("click", () => window.Render3D?.resetCamera());
     ui.btnCameraPlataforma.addEventListener("click", () => window.Render3D?.verPlataforma());
     ui.toggleTracks.addEventListener("change", () => window.Render3D?.setShowTracks(ui.toggleTracks.checked));
+    ui.toggleRelieve.addEventListener("change", () => window.Render3D?.setRelieveVisible(ui.toggleRelieve.checked));
 
     ui.speedButtons.forEach((btn) => {
       btn.addEventListener("click", async () => {

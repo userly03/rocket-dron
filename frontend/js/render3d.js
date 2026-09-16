@@ -95,6 +95,45 @@ function mulberry32(seed) {
   };
 }
 
+// Ruido "valor" 2D suave: grilla de valores pseudoaleatorios (mulberry32)
+// interpolados con smoothstep — no es Perlin/simplex de verdad, pero para
+// colinas suaves alcanza y evita sumar una librería externa solo para
+// esto. Devuelve una función (u, v) -> [0,1] con u, v en [0,1).
+// `periodico`: si es true, el borde derecho/inferior de la grilla se
+// fuerza a repetir el izquierdo/superior (topología de toro) para que la
+// función dé el MISMO valor en u=0 y u=1 — sin esto, alturaTerreno() no
+// puede tilear esta función con "% 1" sin que quede una costura: los
+// valores a ambos lados de un límite de tile vienen de celdas de grilla
+// no relacionadas, y el salto ahí resulta ~10x más empinado que la
+// pendiente típica del ruido (bug real, encontrado con una auditoría
+// numérica antes de comitear, no a ojo — ver docs/SEGUIMIENTO_SESION.md
+// §9.10).
+function crearRuidoValor(seed, gridSize, periodico = false) {
+  const rng = mulberry32(seed);
+  const grid = [];
+  for (let i = 0; i <= gridSize; i++) {
+    const fila = [];
+    for (let j = 0; j <= gridSize; j++) fila.push(rng());
+    grid.push(fila);
+  }
+  if (periodico) {
+    for (let j = 0; j <= gridSize; j++) grid[gridSize][j] = grid[0][j];
+    for (let i = 0; i <= gridSize; i++) grid[i][gridSize] = grid[i][0];
+  }
+  const suavizar = (t) => t * t * (3 - 2 * t);
+  return function (u, v) {
+    const gx = Math.min(Math.max(u, 0), 0.999999) * gridSize;
+    const gy = Math.min(Math.max(v, 0), 0.999999) * gridSize;
+    const x0 = Math.floor(gx);
+    const y0 = Math.floor(gy);
+    const tx = suavizar(gx - x0);
+    const ty = suavizar(gy - y0);
+    const a = lerp(grid[x0][y0], grid[x0 + 1][y0], tx);
+    const b = lerp(grid[x0][y0 + 1], grid[x0 + 1][y0 + 1], tx);
+    return lerp(a, b, ty);
+  };
+}
+
 function makeMissileGeometry() {
   const geo = new THREE.ConeGeometry(3, 16, 8);
   geo.rotateZ(-Math.PI / 2);
@@ -152,6 +191,35 @@ class TrailRibbon {
 const Render3D = (() => {
   let renderer, scene, camera, controls, canvas;
   let field = { width: 1000, height: 1000 };
+
+  // Relieve del terreno (colinas suaves): dos octavas de ruido — una de
+  // longitud de onda grande (colinas) y otra más fina encima (ondulación)
+  // — generadas UNA vez con semillas fijas (reproducible entre recargas,
+  // como el disperso de árboles). PURAMENTE VISUAL: la física del juego
+  // (línea de vista, movimiento, radar) sigue siendo 2D sobre el plano
+  // x/y — mismo criterio que la simplificación ya documentada en
+  // hpm_engine.linea_de_vista_bloqueada (no modelar altura de obstáculo
+  // porque no hay un dato medido para eso). Agregar relieve real a la
+  // física del enjambre/vehículo no fue pedido y sería un cambio de
+  // alcance mucho mayor (habría que decidir qué significa "línea de
+  // vista bloqueada por una colina", pendiente ladeante, etc.).
+  const ruidoColinas = crearRuidoValor(11, 6); // no se tilea, no hace falta periódico
+  const ruidoOndulacion = crearRuidoValor(23, 17, /* periodico */ true); // sí se tilea ×3 (ver alturaTerreno)
+  const ALTURA_COLINAS_M = 11;
+  const ALTURA_ONDULACION_M = 2.5;
+
+  // Altura del terreno (metros) en una coordenada del mundo (x, y del
+  // backend, no coordenadas Three). Se usa tanto para deformar el plano
+  // del piso como para "apoyar" sobre esa altura al vehículo, los
+  // edificios, los árboles y la trinchera — sin esto quedarían flotando
+  // o hundidos en las colinas.
+  function alturaTerreno(wx, wy) {
+    const u = wx / field.width;
+    const v = wy / field.height;
+    const uOnd = (u * 3) % 1;
+    const vOnd = (v * 3) % 1;
+    return ruidoColinas(u, v) * ALTURA_COLINAS_M + ruidoOndulacion(uOnd, vOnd) * ALTURA_ONDULACION_M;
+  }
   // Dron real (tools/blender/generar_dron.py → frontend/models/dron.glb):
   // reemplaza el cono genérico. A diferencia del vehículo (un solo
   // modelo), acá hay hasta ~50 a la vez — droneTemplate es la escena
@@ -175,7 +243,7 @@ const Render3D = (() => {
   // hpm.direccion en cuanto está disponible.
   let vehiculoGroup = null;
   let torretaHpmNode = null;
-  const lastHpmOrigin = { x: 0, z: 0 };
+  const lastHpmOrigin = { x: 0, y: 0, z: 0 };
   // Kamikaze (ver SimulationEngine.kamikaze_activo): plataformaDestruida
   // es el estado deseado (puede llegar ANTES de que termine de cargar
   // el .glb, por eso es una variable aparte, no algo que se aplica al
@@ -276,6 +344,16 @@ const Render3D = (() => {
     const sun = new THREE.DirectionalLight(0xdce8f2, 0.6);
     sun.position.set(field.width * 0.3, maxDim * 0.6, field.height * 0.2);
     scene.add(sun);
+    // El hillshading del piso (ver aplicarRelieveTerreno) usa una luz
+    // "de mentira" aparte porque el piso no reacciona a la luz real de
+    // la escena (MeshBasicMaterial) — pero no hay razón para que las dos
+    // luces apunten a lugares distintos: sincronizarla con el sol real
+    // le da coherencia al conjunto (la sombra del relieve cae "del mismo
+    // lado" que, en teoría, cualquier otra cosa que sí reaccionara a la
+    // luz). sun.position está en coordenadas Three (X, Y=altura, Z); el
+    // sombreado trabaja en (wx, wy, altura) — mismo cambio de eje que
+    // worldToThree, por eso Y y Z se intercambian acá.
+    _luzRelieve = normalizar3({ x: sun.position.x, y: sun.position.z, z: sun.position.y });
 
     buildGround();
     buildHeatmapPlane();
@@ -351,13 +429,215 @@ const Render3D = (() => {
     );
   }
 
+  // Tamaño de un tile de la textura de tierra, en metros — determina
+  // cuántas veces se repite crearTexturaTerreno() a lo largo del campo.
+  const TERRENO_TILE_M = 45;
+
+  // Textura de tierra procedural: mismo criterio que buildHeatmapPlane
+  // (un canvas 2D como fuente, sin depender de ninguna imagen externa
+  // descargada) — reemplaza el plano de color sólido de antes por un
+  // piso con textura real: grano de tierra suelta, parches de pasto seco
+  // y un par de rodadas de vehículo (detalle barato que lee como
+  // "terreno usado", no un mapa recién pintado). Paleta emparentada con
+  // la tierra de generar_trinchera.py/generar_edificio.py (rural,
+  // terrosa) pero oscurecida para no romper el registro "sala de
+  // operaciones" del resto de la escena (ver el comentario de COLOR
+  // arriba).
+  function crearTexturaTerreno() {
+    // Base de baja frecuencia: un canvas CHICO con una mota de color por
+    // celda (paleta de tierra/pasto seco/surco), escalado hacia arriba
+    // con suavizado de imagen activado — el propio navegador interpola
+    // linealmente entre celdas, dando manchas difusas orgánicas "gratis"
+    // en vez de tener que dibujar a mano cientos de blobs superpuestos.
+    // El intento anterior (blobs grandes con opacidad alta, o grano fino
+    // per-píxel de alta frecuencia) o tapaba la base entera (se veía como
+    // una alfombra caqui uniforme) o se leía como estática de TV — acá la
+    // frecuencia baja de la base es lo que la hace leer como "tierra
+    // vista de lejos", no ruido.
+    const baseSize = 20;
+    const base = document.createElement("canvas");
+    base.width = base.height = baseSize;
+    const bctx = base.getContext("2d");
+    const rng = mulberry32(7);
+    // Selección PESADA, no uniforme: el suavizado bilineal promedia
+    // colores vecinos, así que si la base oscura y los parches claros
+    // aparecen con la misma frecuencia, el promedio termina siendo un
+    // caqui parejo (justo el problema del intento anterior) — acá la
+    // base oscura domina (~78%) y los parches son la excepción, no la mitad.
+    function colorCelda() {
+      const t = rng();
+      if (t < 0.78) return [14, 13, 11]; // tierra de base, oscura
+      if (t < 0.9) return [34, 29, 18]; // parche de tierra removida
+      if (t < 0.97) return [30, 33, 17]; // parche de pasto seco
+      return [7, 6, 5]; // surco/sombra
+    }
+    for (let y = 0; y < baseSize; y++) {
+      for (let x = 0; x < baseSize; x++) {
+        const [r, g, b] = colorCelda();
+        const j = (rng() - 0.5) * 6;
+        bctx.fillStyle = `rgb(${r + j},${g + j},${b + j})`;
+        bctx.fillRect(x, y, 1, 1);
+      }
+    }
+
+    const size = 512;
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(base, 0, 0, size, size);
+
+    // Grano fino MUY sutil encima de las manchas — refuerza la sensación
+    // de tierra suelta sin volver a leerse como estática (pocas motas,
+    // alfa bajo, a diferencia del intento anterior con 3000-5000).
+    for (let i = 0; i < 900; i++) {
+      const v = rng();
+      ctx.fillStyle = `rgba(${20 + v * 30},${17 + v * 26},${12 + v * 18},${0.12 + v * 0.15})`;
+      ctx.fillRect(rng() * size, rng() * size, 2, 2);
+    }
+
+    // Rodadas de vehículo: un par de franjas oscuras curvas cruzando el tile.
+    ctx.strokeStyle = "rgba(5,4,3,0.35)";
+    ctx.lineWidth = 8;
+    for (let i = 0; i < 2; i++) {
+      const y0 = rng() * size;
+      ctx.beginPath();
+      ctx.moveTo(0, y0);
+      ctx.bezierCurveTo(
+        size * 0.3, y0 + (rng() - 0.5) * 80,
+        size * 0.7, y0 + (rng() - 0.5) * 80,
+        size, y0 + (rng() - 0.5) * 60,
+      );
+      ctx.stroke();
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.colorSpace = THREE.SRGBColorSpace;
+    return texture;
+  }
+
+  function normalizar3(v) {
+    const len = Math.hypot(v.x, v.y, v.z) || 1;
+    return { x: v.x / len, y: v.y / len, z: v.z / len };
+  }
+
+  // Dirección de luz para el hillshading del piso (ver aplicarRelieveTerreno
+  // más abajo) — se sincroniza con la posición real del sol de la escena
+  // recién en init() (ver ahí el porqué del intercambio de ejes); este
+  // valor default solo cubre el caso raro de llamar a algo que la use
+  // antes de que init() corra.
+  let _luzRelieve = normalizar3({ x: 0.3, y: 0.2, z: 1 });
+
+  // Para el toggle de UI "Relieve" (setRelieveVisible): terrenoMesh es el
+  // piso ya creado, terrenoColoresRelieve el sombreado calculado una sola
+  // vez en aplicarRelieveTerreno — togglear solo cambia qué colores están
+  // activos en el BufferAttribute, no recalcula ni toca la geometría (las
+  // colinas en sí siguen ahí, solo se apaga el sombreado que las hace
+  // notarse).
+  let terrenoMesh = null;
+  let terrenoColoresRelieve = null;
+
+  // Aplica el relieve (ver alturaTerreno más arriba) a los vértices de un
+  // PlaneGeometry ya creado. La geometría vive en su plano local ANTES de
+  // rotarla -90° en X para acostarla; esa rotación manda el eje local Z a
+  // world Y (la altura) y el local Y a -world Z — por eso la conversión
+  // de vértice local a coordenada de mundo (wx, wy) de acá abajo no es la
+  // misma que worldToThree (esa ya asume la malla acostada).
+  function aplicarRelieveTerreno(planeGeo) {
+    const pos = planeGeo.attributes.position;
+    const colores = new Float32Array(pos.count * 3);
+    const eps = 4; // metros, ventana para estimar la pendiente local
+
+    for (let i = 0; i < pos.count; i++) {
+      const wx = pos.getX(i) + field.width / 2;
+      const wy = field.height / 2 - pos.getY(i);
+      pos.setZ(i, alturaTerreno(wx, wy));
+
+      // Hillshading analítico por diferencias finitas: el piso usa
+      // MeshBasicMaterial (ver por qué en buildGround), que NO se
+      // oscurece con la luz de la escena — sin este color de vértice, el
+      // relieve sería geométricamente real pero invisible a simple vista
+      // desde arriba (la vista táctica por defecto), un material sin luz
+      // no sombrea laderas solo. Técnica estándar de mapas de relieve
+      // (hillshade), calculada a mano acá en vez de depender de
+      // iluminación real de la escena para tener control total del
+      // contraste.
+      const hL = alturaTerreno(wx - eps, wy);
+      const hR = alturaTerreno(wx + eps, wy);
+      const hD = alturaTerreno(wx, wy - eps);
+      const hU = alturaTerreno(wx, wy + eps);
+      // Exageración SOLO para el sombreado (la geometría real usa la
+      // altura sin exagerar, arriba) — colinas de 11m sobre celdas de
+      // ~166m tienen una pendiente real de apenas ~6%, que da un dot
+      // product casi constante (~0.97 vs ~0.74) y un brillo invisible a
+      // ojo. Multiplicar la pendiente ×8 antes de armar la normal exagera
+      // el CONTRASTE del sombreado sin tocar la altura real de la malla —
+      // mismo truco que usan los generadores de hillshade de verdad
+      // cuando el relieve de entrada es demasiado suave para leerse.
+      const EXAGERACION_SOMBREADO = 10;
+      const dx = ((hR - hL) / (2 * eps)) * EXAGERACION_SOMBREADO;
+      const dy = ((hU - hD) / (2 * eps)) * EXAGERACION_SOMBREADO;
+      const nLen = Math.hypot(dx, dy, 1);
+      const nx = -dx / nLen;
+      const ny = -dy / nLen;
+      const nz = 1 / nLen;
+      const dot = Math.max(-1, Math.min(1, nx * _luzRelieve.x + ny * _luzRelieve.y + nz * _luzRelieve.z));
+      // Rango de brillo bien ancho (0.2x a 1.6x) a propósito: sobre una
+      // textura tan oscura (valores ~10-40 de 255), un contraste sutil
+      // tipo 0.55-1.1x se traduce en 2-3 unidades de diferencia — invisible
+      // en la práctica (probado, no una sospecha). Este rango da hasta
+      // ~20 unidades de diferencia entre ladera iluminada y sombra, que sí
+      // se lee a simple vista sin dejar de ser oscuro en conjunto (las
+      // sombras se ponen MÁS oscuras, no las laderas más claras que el
+      // registro "sala de operaciones" del resto de la escena).
+      const brillo = Math.max(0.2, Math.min(1.6, 0.35 + 1.25 * dot));
+      colores[i * 3] = brillo;
+      colores[i * 3 + 1] = brillo;
+      colores[i * 3 + 2] = brillo;
+    }
+    // Se guarda aparte (no solo en el BufferAttribute) para que
+    // setRelieveVisible() pueda restaurar el sombreado calculado sin
+    // tener que recalcularlo — togglear el checkbox de "Relieve" no
+    // vuelve a correr el hillshading, solo cambia qué array está activo.
+    terrenoColoresRelieve = colores;
+    planeGeo.setAttribute("color", new THREE.BufferAttribute(colores.slice(), 3));
+    pos.needsUpdate = true;
+    planeGeo.computeVertexNormals();
+  }
+
   function buildGround() {
-    const planeGeo = new THREE.PlaneGeometry(field.width, field.height);
-    const planeMat = new THREE.MeshBasicMaterial({ color: COLOR.ground });
+    // Suficientes segmentos para que las colinas se vean curvas y no
+    // facetadas, sin pasarse de polígonos — a 20m por quad, un campo de
+    // 1000m queda en ~2500 quads, nada para una GPU moderna.
+    const segmentos = Math.max(24, Math.round(Math.max(field.width, field.height) / 20));
+    const planeGeo = new THREE.PlaneGeometry(field.width, field.height, segmentos, segmentos);
+    aplicarRelieveTerreno(planeGeo);
+
+    const terrenoTexture = crearTexturaTerreno();
+    const repeticiones = Math.max(4, Math.round(Math.max(field.width, field.height) / TERRENO_TILE_M));
+    terrenoTexture.repeat.set(repeticiones, repeticiones);
+    // Basic (sin luz): con la iluminación tan tenue de esta escena
+    // (ambient+sol apagados a propósito para no lavar los colores de
+    // estado de los drones), un material que sí reacciona a la luz
+    // (Standard/Lambert) multiplicaba la textura por tan poca luz que el
+    // patrón quedaba invisible, más oscuro que el plano de color
+    // original. Con Basic, lo que se dibuja en crearTexturaTerreno() es
+    // EXACTAMENTE lo que se ve en pantalla.
+    const planeMat = new THREE.MeshBasicMaterial({ map: terrenoTexture, vertexColors: true });
     const plane = new THREE.Mesh(planeGeo, planeMat);
     plane.rotation.x = -Math.PI / 2;
     scene.add(plane);
+    terrenoMesh = plane;
 
+    // La grilla/el borde tácticos se quedan PLANOS a propósito (referencia
+    // de coordenadas tipo HUD, no terreno físico) — quedan "enterrados"
+    // bajo una colina donde el relieve sube por encima de y=0, lo cual es
+    // el comportamiento esperado (mismo criterio que un mapa de arena con
+    // líneas pintadas en el piso, no flotando sobre el relieve).
     const divisions = Math.max(4, Math.round(field.width / 50));
     const grid = new THREE.GridHelper(field.width, divisions, COLOR.gridCenter, COLOR.grid);
     grid.material.transparent = true;
@@ -499,12 +779,18 @@ const Render3D = (() => {
 
   function updateHpmCone(hpm) {
     if (!hpm) return;
-    const origin = worldToThree(field, hpm.origen_x ?? 0, hpm.origen_y ?? 0, 0.8);
+    const origenX = hpm.origen_x ?? 0;
+    const origenY = hpm.origen_y ?? 0;
+    // Apoya el vehículo sobre el relieve real de su posición actual — sin
+    // esto quedaría flotando sobre una colina o hundido en un valle.
+    const suelo = alturaTerreno(origenX, origenY);
+    const origin = worldToThree(field, origenX, origenY, suelo + 0.8);
     // Guardado para verPlataforma(): la vista por defecto siempre mira
     // al centro del mapa (donde nace el enjambre), pero el vehículo
     // suele estar lejos de ahí — sin esto no hay forma de acercar la
     // cámara al vehículo en sí.
     lastHpmOrigin.x = origin.x;
+    lastHpmOrigin.y = suelo;
     lastHpmOrigin.z = origin.z;
     // Suavizado (mismo criterio que droneRecords._smoothX/Y): el
     // vehículo ahora puede moverse ("shoot and scoot"), sin esto cada
@@ -516,8 +802,8 @@ const Render3D = (() => {
       _smoothVehiculo.x = lerp(_smoothVehiculo.x, origin.x, 0.25);
       _smoothVehiculo.z = lerp(_smoothVehiculo.z, origin.z, 0.25);
     }
-    if (vehiculoGroup) vehiculoGroup.position.set(_smoothVehiculo.x, 0, _smoothVehiculo.z);
-    if (radarRingMesh) radarRingMesh.position.set(_smoothVehiculo.x, 0.5, _smoothVehiculo.z);
+    if (vehiculoGroup) vehiculoGroup.position.set(_smoothVehiculo.x, suelo, _smoothVehiculo.z);
+    if (radarRingMesh) radarRingMesh.position.set(_smoothVehiculo.x, suelo + 0.5, _smoothVehiculo.z);
 
     const dirDeg = hpm.direccion ?? 0;
     // Torreta_HPM mira +X en reposo, misma convención que este cono
@@ -541,13 +827,15 @@ const Render3D = (() => {
     const flat = new Float32Array(positions);
     hpmConeMesh.geometry.setAttribute("position", new THREE.BufferAttribute(flat, 3));
     hpmConeMesh.geometry.computeVertexNormals();
-    hpmConeMesh.position.set(origin.x, 0.8, origin.z);
+    hpmConeMesh.position.set(origin.x, origin.y, origin.z);
   }
 
   function updateRadarPing(radar) {
     if (!radar || !radarPingMesh) return;
-    const origin = worldToThree(field, radar.origen_x ?? 0, radar.origen_y ?? 0, 0.55);
-    radarPingMesh.position.set(origin.x, 0.55, origin.z);
+    const origenX = radar.origen_x ?? 0;
+    const origenY = radar.origen_y ?? 0;
+    const origin = worldToThree(field, origenX, origenY, alturaTerreno(origenX, origenY) + 0.55);
+    radarPingMesh.position.set(origin.x, origin.y, origin.z);
     const fase = Math.max(0, Math.min(1, radar.fase_barrido ?? 0));
     const outer = Math.max(2, RADAR_RANGE_M * fase);
     const inner = Math.max(0.5, outer - 4);
@@ -645,6 +933,24 @@ const Render3D = (() => {
     }
   }
 
+  // Toggle de UI ("Relieve"): apaga/prende el SOMBREADO de las colinas
+  // sin tocar la geometría — las colinas reales siguen estando ahí
+  // (física y colisión visual del vehículo/edificios/árboles no dependen
+  // de esto), solo deja de notarse a simple vista. Pensado para
+  // escenarios con mucha densidad de drones donde el contraste del
+  // hillshading (ver aplicarRelieveTerreno) pueda competir con la
+  // lectura de los estados de color.
+  function setRelieveVisible(visible) {
+    if (!terrenoMesh || !terrenoColoresRelieve) return;
+    const colorAttr = terrenoMesh.geometry.attributes.color;
+    if (visible) {
+      colorAttr.array.set(terrenoColoresRelieve);
+    } else {
+      colorAttr.array.fill(1);
+    }
+    colorAttr.needsUpdate = true;
+  }
+
   // Tinte de daño de los edificios: mismo color "quemado" que usa el
   // vehículo destruido (COLOR_QUEMADO más abajo), pero declarado acá
   // aparte porque los edificios lo aplican GRADUALMENTE (proporcional a
@@ -678,8 +984,8 @@ const Render3D = (() => {
       [...materiales.entries()].map(([nombre, mat]) => [nombre, mat.color.clone()])
     );
 
-    const pos = worldToThree(field, estructura.x, estructura.y, 0);
-    model.position.set(pos.x, 0, pos.z);
+    const pos = worldToThree(field, estructura.x, estructura.y, alturaTerreno(estructura.x, estructura.y));
+    model.position.set(pos.x, pos.y, pos.z);
     estructurasGroup.add(model);
     rec.model = model;
     return rec;
@@ -740,6 +1046,14 @@ const Render3D = (() => {
     for (const e of snap.estructuras ?? []) {
       exclusiones.push({ x: e.x, y: e.y, r: ARBOL_RADIO_EXCLUSION_ESTRUCTURA_M });
     }
+    const posicionTrinchera = calcularPosicionTrinchera(snap);
+    if (posicionTrinchera) {
+      exclusiones.push({
+        x: posicionTrinchera.wx,
+        y: posicionTrinchera.wy,
+        r: ARBOL_RADIO_EXCLUSION_TRINCHERA_M,
+      });
+    }
 
     const rng = mulberry32(2026);
     let colocados = 0;
@@ -752,8 +1066,8 @@ const Render3D = (() => {
 
       const variante = arbolesTemplates[Math.floor(rng() * arbolesTemplates.length)];
       const arbol = variante.clone(true);
-      const pos = worldToThree(field, wx, wy, 0);
-      arbol.position.set(pos.x, 0, pos.z);
+      const pos = worldToThree(field, wx, wy, alturaTerreno(wx, wy));
+      arbol.position.set(pos.x, pos.y, pos.z);
       arbol.rotation.y = rng() * Math.PI * 2;
       arbol.scale.setScalar(ARBOL_ESCALA * (0.85 + rng() * 0.3));
       arbolesGroup.add(arbol);
@@ -762,16 +1076,15 @@ const Render3D = (() => {
   }
 
   const TRINCHERA_DISTANCIA_M = 25; // metros por delante del vehículo, hacia el centro del campo
+  const ARBOL_RADIO_EXCLUSION_TRINCHERA_M = 25;
 
-  // Se coloca UNA vez, delante de la posición INICIAL del vehículo (una
-  // trinchera es un emplazamiento cavado de antemano, no algo que se
-  // reubica solo si el vehículo se mueve después — ver "shoot and scoot"
-  // en 9.6). "Delante" = hacia el centro del campo, de donde viene el
-  // enjambre en el layout por defecto.
-  function colocarTrinchera(snap) {
-    if (trincheraColocada || !trincheraTemplate || !snap.hpm) return;
-    trincheraColocada = true;
-
+  // Extraído de colocarTrinchera para que dispersarArboles pueda calcular
+  // la MISMA posición sin duplicar la fórmula (antes los árboles no
+  // excluían la trinchera — un árbol podía brotar atravesando los sacos,
+  // ver docs/SEGUIMIENTO_SESION.md). Devuelve null si todavía no hay
+  // snapshot de hpm.
+  function calcularPosicionTrinchera(snap) {
+    if (!snap.hpm) return null;
     const origenX = snap.hpm.origen_x ?? 0;
     const origenY = snap.hpm.origen_y ?? 0;
     const centroX = field.width / 2;
@@ -781,12 +1094,29 @@ const Render3D = (() => {
     const dist = Math.hypot(dx, dy) || 1;
     const dirX = dx / dist;
     const dirY = dy / dist;
+    return {
+      wx: origenX + dirX * TRINCHERA_DISTANCIA_M,
+      wy: origenY + dirY * TRINCHERA_DISTANCIA_M,
+      dirX,
+      dirY,
+    };
+  }
 
-    const wx = origenX + dirX * TRINCHERA_DISTANCIA_M;
-    const wy = origenY + dirY * TRINCHERA_DISTANCIA_M;
-    const pos = worldToThree(field, wx, wy, 0);
+  // Se coloca UNA vez, delante de la posición INICIAL del vehículo (una
+  // trinchera es un emplazamiento cavado de antemano, no algo que se
+  // reubica solo si el vehículo se mueve después — ver "shoot and scoot"
+  // en 9.6). "Delante" = hacia el centro del campo, de donde viene el
+  // enjambre en el layout por defecto.
+  function colocarTrinchera(snap) {
+    if (trincheraColocada || !trincheraTemplate) return;
+    const posicion = calcularPosicionTrinchera(snap);
+    if (!posicion) return;
+    trincheraColocada = true;
+
+    const { wx, wy, dirX, dirY } = posicion;
+    const pos = worldToThree(field, wx, wy, alturaTerreno(wx, wy));
     const model = trincheraTemplate.clone(true);
-    model.position.set(pos.x, 0, pos.z);
+    model.position.set(pos.x, pos.y, pos.z);
     // Mismo helper/convención que usan drones y misiles para pasar de un
     // ángulo "mundo" (atan2 estándar) a rotation.y de Three.
     model.rotation.y = headingToRotationY(THREE.MathUtils.radToDeg(Math.atan2(dirY, dirX)));
@@ -1380,10 +1710,11 @@ const Render3D = (() => {
     // fijos al centro nunca dejan verlo de cerca cuando el arma está
     // lejos del centro (caso por defecto: arma en la esquina del campo).
     const dist = 45; // suficiente para ver el vehículo completo, no solo una pieza
-    camera.position.set(lastHpmOrigin.x + dist * 0.7, dist * 0.6, lastHpmOrigin.z + dist * 0.7);
-    camera.lookAt(lastHpmOrigin.x, 6, lastHpmOrigin.z);
+    const objetivoY = lastHpmOrigin.y + 6; // +6 relativo al PISO del vehículo, no un y absoluto — con colinas, el vehículo puede estar varios metros por encima de y=0
+    camera.position.set(lastHpmOrigin.x + dist * 0.7, lastHpmOrigin.y + dist * 0.6, lastHpmOrigin.z + dist * 0.7);
+    camera.lookAt(lastHpmOrigin.x, objetivoY, lastHpmOrigin.z);
     if (controls) {
-      controls.target.set(lastHpmOrigin.x, 6, lastHpmOrigin.z);
+      controls.target.set(lastHpmOrigin.x, objetivoY, lastHpmOrigin.z);
       controls.update();
     }
   }
@@ -1413,7 +1744,7 @@ const Render3D = (() => {
   return {
     init, updateSnapshot, setViewMode, resetCamera, verPlataforma, resize,
     triggerCannonPulse, flashHits, setShowTracks, setWtaPlan, setPlataformaDestruida,
-    activarModoMover, desactivarModoMover,
+    activarModoMover, desactivarModoMover, setRelieveVisible,
   };
 })();
 

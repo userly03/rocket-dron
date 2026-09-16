@@ -134,6 +134,9 @@
               <label class="checkbox-label checkbox-track-toggle" title="Dibuja una línea entre la posición REAL de cada dron detectado y la posición ESTIMADA por el radar (con la que apunta el misil) — solo se muestra cuando la diferencia es apreciable">
                 <input type="checkbox" id="toggle-tracks"> <svg class="icon" aria-hidden="true"><use href="#i-radar"></use></svg> Mostrar tracks
               </label>
+              <label class="checkbox-label checkbox-track-toggle" title="Sombreado de las colinas del terreno — apagalo si compite con la lectura de los drones en escenarios con mucha densidad">
+                <input type="checkbox" id="toggle-relieve" checked> <svg class="icon" aria-hidden="true"><use href="#i-map"></use></svg> Relieve
+              </label>
             </div>
             <div class="canvas-wrapper">
               <canvas id="tactical-map-3d" width="800" height="600" aria-label="Mapa 3D de drones"></canvas>

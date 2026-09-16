@@ -808,6 +808,131 @@ también debe bloquear línea de vista (hoy no lo hace — ver la
 justificación en el propio script), y/o un toggle de UI para
 mostrar/ocultar árboles si el mapa se siente sobrecargado.
 
-**Falta**: correr los tres scripts en Blender (el usuario), verificar
-los `.glb` resultantes, y la integración visual del frontend completa
-(ver nota al final de 9.7) — ninguna de las dos cosas empezó todavía.
+### 9.10 Relieve del terreno (colinas) y textura de tierra — ✅ CERRADO
+
+El usuario reportó que la textura de tierra de 9.9 se veía mal (se leía
+como estática de TV, no tierra) y preguntó, como decisión de diseño, si
+convenía modelar colinas en Blender en vez de solo "pintar" el piso.
+
+**Decisión: relieve real en Three.js, NO en Blender.** El piso se genera
+por código (`buildGround()` en `render3d.js`) porque tiene que ajustarse
+al tamaño de campo que reporte el backend (`FIELD_WIDTH/HEIGHT`,
+configurable) — un mesh de colinas modelado a mano en Blender con una
+forma fija se vería estirado/deformado si el campo cambia de tamaño. La
+alternativa correcta es desplazar en altura los vértices del mismo plano
+que ya existía.
+
+- `alturaTerreno(wx, wy)`: dos octavas de ruido "valor" (grilla de
+  `mulberry32` interpolada con smoothstep — no es Perlin/simplex de
+  verdad, pero alcanza para colinas suaves sin sumar una librería
+  externa) — una de longitud de onda grande (colinas, ~11m de amplitud)
+  y otra más fina encima (ondulación, ~2.5m). Semillas fijas,
+  reproducible entre recargas.
+- `PlaneGeometry` del piso ahora tiene segmentos reales (no un solo
+  quad) y `aplicarRelieveTerreno()` desplaza cada vértice según
+  `alturaTerreno()`.
+- **Puramente visual, no física**: línea de vista, movimiento y radar
+  siguen siendo 2D sobre el plano x/y — mismo criterio que la
+  simplificación ya documentada en `hpm_engine.linea_de_vista_bloqueada`
+  (no modelar algo sin un dato medido detrás). El raycasting de "click
+  para mover" (`configurarClickParaMover`) también se queda
+  deliberadamente sobre un plano flat en y=0, no sobre la malla con
+  relieve — el modelo de movimiento es 2D, intersectar la malla real no
+  cambiaría nada salvo agregar complejidad.
+- Vehículo, edificios, árboles y trinchera ahora se "apoyan" en
+  `alturaTerreno()` en vez de asumir y=0 — sin esto quedarían flotando o
+  hundidos en las colinas. La grilla/el borde tácticos se quedan PLANOS
+  a propósito (referencia de coordenadas tipo HUD, no terreno físico).
+
+**Textura**: el intento original (grano per-píxel de alta frecuencia, o
+blobs grandes con opacidad alta) o se leía como estática de TV o tapaba
+la base entera (una "alfombra caqui" uniforme). La solución fue generar
+un canvas CHICO (20×20) con una mota de color pesada hacia la base
+oscura (~78% de probabilidad) por celda, escalado hacia un canvas grande
+con suavizado de imagen activado — el navegador interpola linealmente
+entre celdas, dando manchas difusas orgánicas sin dibujar a mano
+cientos de blobs. Selección de color a propósito PESADA (no uniforme)
+porque el suavizado promedia colores vecinos: si la base oscura y los
+parches claros aparecen con la misma frecuencia, el promedio termina
+siendo un tono parejo, no "tierra oscura con parches ocasionales".
+
+**Hillshading analítico**: el piso usa `MeshBasicMaterial` (sin luz —
+con la iluminación tan tenue de esta escena, un material que sí
+reacciona a la luz volvía el patrón invisible, más oscuro que el plano
+de color original que reemplazaba). Pero eso significa que el relieve,
+aunque geométricamente real, es invisible a simple vista desde arriba —
+un material sin luz no sombrea laderas solo. Se calculó un sombreado a
+mano (color de vértice) por diferencias finitas de altura + producto
+punto contra una luz falsa fija — técnica estándar de mapas de relieve
+(hillshade). Dos ajustes necesarios, verificados numéricamente antes de
+tocar el navegador (no a ojo): (1) colinas de 11m sobre celdas de ~166m
+tienen una pendiente real de ~6%, que da un contraste de sombreado
+prácticamente invisible — hubo que EXAGERAR la pendiente ×10 solo para
+el cálculo de la normal de sombreado (la altura real de la malla no se
+toca); (2) sobre una textura tan oscura (valores ~10-40 de 255), un
+rango de brillo sutil (0.55x-1.1x) se traduce en 2-3 unidades de
+diferencia — invisible en la práctica — así que el rango final es mucho
+más ancho (0.2x-1.6x), con las sombras poniéndose bien oscuras en vez de
+las laderas poniéndose más claras que el registro oscuro del resto de
+la escena.
+
+Verificado en vivo (Chrome, backend real corriendo): sin errores de
+consola, el vehículo se apoya correctamente sobre el relieve en la vista
+cercana ("Ver plataforma"), y el sombreado de colinas se nota en la
+vista táctica de arriba sin tapar la lectura de los drones.
+
+**Bug real encontrado con auditoría numérica antes de comitear (no a
+ojo)**: `alturaTerreno()` tilea la octava de ondulación fina ×3 con
+`(u*3) % 1` para que se repita más seguido que las colinas grandes —
+pero `crearRuidoValor()` generaba una grilla de valores independientes
+sin que el borde derecho/inferior coincidiera con el izquierdo/superior,
+así que en los límites de cada tile (`field.width/3`, `2×field.width/3`,
+mismo en Y) el ruido saltaba entre dos celdas de grilla NO
+relacionadas. Medido: la pendiente ahí era ~10x más empinada que la
+pendiente típica — con el hillshading tan exagerado de este mismo ítem
+(ver arriba), eso se iba a leer como una línea de sombra recta cruzando
+el mapa en esos tres puntos fijos, un defecto claramente artificial (no
+orgánico) fácil de notar en la vista táctica. `crearRuidoValor()` ganó
+un parámetro `periodico` (fuerza los bordes de la grilla a repetir el
+lado opuesto — topología de toro, técnica estándar para ruido tileable)
+y `ruidoOndulacion` lo usa; `ruidoColinas` no lo necesita porque no se
+tilea. Verificado numéricamente (script standalone, no en el navegador)
+que el salto en la costura bajó de ~10x a ~0.06x el gradiente típico
+antes de volver a probar en Chrome.
+
+**Otros hallazgos de la auditoría, documentados pero NO corregidos
+(trade-offs conscientes, no bugs)**:
+- La textura de tierra (`crearTexturaTerreno`) tiene el mismo problema
+  de fondo en teoría — el canvas base de 20×20 tampoco es tileable de
+  verdad — pero al ser grano fino y mayormente aleatorio (no una
+  pendiente con dirección), el defecto se disuelve en el ruido en vez de
+  leerse como una línea recta. Se podría aplicar la misma técnica de
+  toro si en algún momento se nota, no fue necesario acá.
+- `snap.field` puede en teoría cambiar en runtime (`updateSnapshot`
+  reasigna `field` si difiere) pero HOY ningún escenario cambia
+  `FIELD_WIDTH/HEIGHT` — es código muerto, no alcanzable. Si algún día
+  se agrega un escenario con otro tamaño de campo, la malla del piso
+  (construida una sola vez en `buildGround()`) quedaría con el tamaño
+  viejo mientras `alturaTerreno()` (recalculada cada tick para el
+  vehículo) usaría el tamaño nuevo — vehículo y piso visualmente
+  desincronizados. No se corrigió porque hoy es inalcanzable; dejar
+  documentado para no repetir la investigación si se agrega esa
+  feature.
+
+**Mejoras propuestas y aplicadas** (pedidas explícitamente por el
+usuario tras la auditoría):
+1. **Luz del hillshading sincronizada con el sol real de la escena**:
+   `_luzRelieve` ya no es una dirección inventada aparte — se deriva de
+   `sun.position` en `init()` (con el mismo intercambio de ejes que usa
+   `worldToThree`, documentado ahí). Coherencia visual, sin costo.
+2. **Toggle de UI "Relieve"** (`frontend/index.html`, checkbox
+   `toggle-relieve`, junto a "Mostrar tracks"): `Render3D.setRelieveVisible(bool)`
+   apaga/prende SOLO el color de sombreado (`colorAttr.array`), no la
+   geometría — las colinas reales siguen ahí, solo deja de notarse a
+   simple vista. Pensado para si el contraste del hillshading termina
+   compitiendo con la lectura de drones en escenarios densos.
+3. **Los árboles ahora excluyen la trinchera**: antes solo evitaban
+   pisar edificios/vehículo — se extrajo `calcularPosicionTrinchera()`
+   de `colocarTrinchera()` para que `dispersarArboles()` pueda calcular
+   la MISMA posición (sin duplicar la fórmula) y agregarla a la lista de
+   exclusión (radio 25m).
