@@ -378,7 +378,14 @@ def asignar_greedy(matriz: np.ndarray, tamanos: list[int]) -> Asignacion:
     while libres:
         mejor_ganancia = 1e-12
         mejor_par: tuple[int, int] | None = None
-        for i in libres:
+        # sorted(), no `for i in libres` crudo: un desempate exacto (dos
+        # pares con la misma ganancia marginal) depende de CUÁL se visita
+        # primero, y el orden de iteración de un set de enteros no está
+        # garantizado por el lenguaje — hoy coincide con orden ascendente
+        # en CPython para enteros chicos, pero es un detalle de
+        # implementación, no una garantía, y este proyecto se exige "misma
+        # semilla, mismo resultado byte a byte" (auditoría de backend).
+        for i in sorted(libres):
             for j in range(n_clusters):
                 ganancia = tamanos[j] * supervivencia[j] * fracciones[i, j]
                 if ganancia > mejor_ganancia:

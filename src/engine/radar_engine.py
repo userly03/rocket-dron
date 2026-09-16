@@ -321,5 +321,18 @@ class TrackManager:
             track.vy += (self.beta / self.revisita_s) * residual_y
             track.ax += (2.0 * self.gamma / self.revisita_s**2) * residual_x
             track.ay += (2.0 * self.gamma / self.revisita_s**2) * residual_y
+            # z se refresca DIRECTO a la altitud real en cada revisita, no
+            # filtrado con α-β-γ como x/y: no hay vz/az en Track, así que no
+            # hay nada que corregir gradualmente en esa dimensión — sin esto
+            # quedaba congelado en la altitud que tenía el dron al momento
+            # de la adquisición del track para siempre (bug encontrado en
+            # auditoría de backend: inerte hoy porque `posicion_para()` es
+            # el único consumidor y sus dos llamadores descartan el
+            # tercer valor explícitamente, pero una trampa real para quien
+            # extienda la guía del misil a 3D asumiendo que está vivo). Si
+            # se necesita z realmente ESTIMADO (no solo "no stale") más
+            # adelante, extender el filtro con vz/az en serio en vez de
+            # esto.
+            track.z = drone.z
             track.revisitas_confirmadas += 1
             drone.detectado = True

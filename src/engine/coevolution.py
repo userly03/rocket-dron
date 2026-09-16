@@ -150,8 +150,16 @@ def _rumbo_al_centro_del_campo() -> float:
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-@dataclass
+@dataclass(frozen=True)
 class GenomaArma:
+    # frozen: el elitismo (_evolucionar_poblacion) lleva el genoma campeón
+    # a la siguiente generación POR REFERENCIA, y ese mismo objeto queda
+    # guardado en resultado.mejor_arma_por_generacion — hoy es seguro
+    # porque cruce/mutación siempre construyen una instancia nueva, nunca
+    # mutan su argumento, pero nada lo garantizaba salvo disciplina de
+    # código (auditoría de backend). Con frozen, mutar por accidente el
+    # historial de generaciones pasadas es un TypeError, no una corrupción
+    # silenciosa.
     potencia_kw: float
     apertura_cono: float
     duty_cycle: float
@@ -194,7 +202,7 @@ class GenomaArma:
         )
 
 
-@dataclass
+@dataclass(frozen=True)
 class GenomaDefensa:
     formacion_idx: int  # índice en FORMACIONES
     cantidad: float  # continuo internamente, se redondea al evaluar
@@ -356,7 +364,13 @@ def _cruzar_arma(a: GenomaArma, b: GenomaArma, gen: np.random.Generator) -> Geno
 
 
 def _mutar_arma(g: GenomaArma, gen: np.random.Generator, tasa: float = 0.3) -> GenomaArma:
-    nuevo = GenomaArma(g.potencia_kw, g.apertura_cono, g.duty_cycle)
+    # Valores en un dict local, no en una instancia mutada in-place: con
+    # GenomaArma frozen (auditoría de backend — el genoma campeón se
+    # guarda por referencia en el historial de generaciones pasadas, así
+    # que mutar una instancia compartida lo corrompería en silencio si
+    # algún día ESTA función tocara el genoma de origen en vez de una copia
+    # fresca) ya no se puede reasignar un atributo después de construir.
+    valores = {"potencia_kw": g.potencia_kw, "apertura_cono": g.apertura_cono, "duty_cycle": g.duty_cycle}
     for campo, (lo, hi) in GenomaArma.LIMITES.items():
         if gen.random() < tasa:
             if campo == "duty_cycle":
@@ -369,13 +383,12 @@ def _mutar_arma(g: GenomaArma, gen: np.random.Generator, tasa: float = 0.3) -> G
                 # este ítem: sin esto, el GA queda con el 99% del rango de
                 # duty_cycle inalcanzable en una corrida corta).
                 sigma_log = 0.5
-                log_valor = math.log10(nuevo.duty_cycle) + float(gen.normal(0.0, sigma_log))
-                nuevo.duty_cycle = 10 ** log_valor
+                log_valor = math.log10(valores["duty_cycle"]) + float(gen.normal(0.0, sigma_log))
+                valores["duty_cycle"] = 10 ** log_valor
             else:
                 sigma = (hi - lo) * 0.15
-                valor = getattr(nuevo, campo) + float(gen.normal(0.0, sigma))
-                setattr(nuevo, campo, valor)
-    return nuevo.clonar_acotado()
+                valores[campo] = valores[campo] + float(gen.normal(0.0, sigma))
+    return GenomaArma(**valores).clonar_acotado()
 
 
 def _cruzar_defensa(a: GenomaDefensa, b: GenomaDefensa, gen: np.random.Generator) -> GenomaDefensa:

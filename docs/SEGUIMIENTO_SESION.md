@@ -936,3 +936,90 @@ usuario tras la auditoría):
    de `colocarTrinchera()` para que `dispersarArboles()` pueda calcular
    la MISMA posición (sin duplicar la fórmula) y agregarla a la lista de
    exclusión (radio 25m).
+
+### 9.11 Auditoría de backend — ✅ CERRADO
+
+Pedido explícito del usuario tras cerrar el relieve del terreno: auditar
+el backend (~12.000 líneas) con el mismo rigor que el frontend —
+verificar con ejecución/cálculo real, no a ojo. Se repartió en 3 forks en
+paralelo por subsistema (física central: `hpm_engine.py`/`physics.py`/
+`propagation.py`/`radar_engine.py`; orquestación y modelos: `simulation.py`
++ todos los `src/models/*.py`; capa de análisis: `targeting.py`/
+`coevolution.py`/`experiments.py`/`sensitivity.py`/`analytics.py`/
+`parametros.py`/`validation.py`/`reproducibilidad.py`), más una revisión
+directa propia de `config.py` (930 líneas) y la capa de API
+(`routes.py`/`websocket.py`/`coevolucion_jobs.py`), que ningún fork cubría.
+
+**Conclusión general**: este backend ya venía con un nivel de auditoría
+y documentación inusualmente alto — el trail de comentarios referencia
+ítems de auditoría previos (P0-B, P1-A a P1-F, P2-A a P2-G, P3-A/B) y
+cada constante no trivial cita su fuente (paper, derivación propia, o
+valor de ingeniería declarado como tal). Ningún fork encontró una
+constante sin justificación. Los tres bugs reales encontrados son
+estructurales (estado no sincronizado/no reseteado), no errores de la
+física en sí.
+
+**Bugs reales, verificados y corregidos**:
+1. **`simulation.py::_build_snapshot()` — el snapshot del radar
+   reportaba un origen FIJO** (`HPM_ORIGIN_X/Y`) en vez de la posición
+   real del vehículo (`self.hpm.origen_x/y`) — la física de detección ya
+   seguía al vehículo movido (fix de esta sesión, §9.8), pero el campo
+   de DISPLAY que lee `render3d.js` para dibujar el anillo/ping de
+   barrido se había quedado con las constantes viejas: el mismo patrón
+   corregido en un lugar y no buscado en los demás. Verificado antes del
+   fix moviendo el vehículo a (400,0) y comparando `hpm.origen_x` real
+   (82.99 tras 10s) contra `snapshot.radar.origen_x` (0.0).
+2. **`simulation.py::reset()` no reiniciaba `swarm.objetivo_x/y`** — se
+   reinicia `_objetivo_actual` pero el objetivo real del enjambre solo
+   se recalcula dentro de un tick corriendo (`_elegir_objetivo_enjambre`),
+   que no corre mientras la simulación está detenida. Entre un `reset()`
+   y el próximo `start()`, `/api/status` podía mostrar un objetivo de
+   misión de la corrida anterior. Se autocuraba en el primer tick si
+   `mision_activa`, pero mentía mientras tanto.
+3. **`radar_engine.py::TrackManager` nunca corregía `track.z`**, solo
+   x/y/vx/vy/ax/ay — quedaba congelado en la altitud que tenía el dron
+   al momento de adquirir el track, para siempre (el dron sí varía en Z:
+   `DRONE_BOB_AMPLITUDE_M=4` de oscilación constante,
+   `DRONE_LOST_LINK_DESCENT_RATE_M_S=2.0` si pierde enlace). Inerte hoy
+   (los dos consumidores de `posicion_para()` descartan el tercer valor
+   explícitamente), pero una trampa real para quien extienda la guía
+   del misil a 3D asumiendo que está vivo. Fix mínimo: `track.z` se
+   refresca DIRECTO a la altitud real en cada revisita (no filtrado con
+   α-β-γ como x/y — no hay `vz`/`az` en `Track`, así que no hay nada que
+   corregir gradualmente en esa dimensión; si se necesita z realmente
+   ESTIMADO más adelante, extender el filtro en serio, no parte de este
+   fix).
+
+**Fragilidades de reproducibilidad corregidas** (no bugs hoy — el
+proyecto se exige "misma semilla, mismo resultado byte a byte" y ambas
+dependían de una garantía que el lenguaje no da):
+4. **`targeting.py::asignar_greedy`** — el desempate entre pares con
+   ganancia marginal igual iteraba `for i in libres` sobre un `set` de
+   enteros; funciona hoy por un detalle de implementación de CPython
+   (orden ascendente para enteros chicos), no por garantía del
+   lenguaje. Cambiado a `for i in sorted(libres)`.
+5. **`coevolution.py::GenomaArma`/`GenomaDefensa`** — el elitismo lleva
+   el genoma campeón a la siguiente generación POR REFERENCIA, y ese
+   mismo objeto queda guardado en el historial de generaciones pasadas
+   ya reportado. Era seguro porque cruce/mutación siempre construían una
+   instancia nueva (nunca mutaban su argumento) — salvo `_mutar_arma`,
+   que SÍ mutaba `nuevo` in-place (`nuevo.duty_cycle = ...`,
+   `setattr(nuevo, campo, valor)`), aunque `nuevo` era una instancia
+   recién creada y no el genoma pasado, así que tampoco corrompía nada
+   hoy. Se congelaron ambos dataclasses (`frozen=True`) y se refactorizó
+   `_mutar_arma` para construir valores en un dict local en vez de mutar
+   una instancia — con esto, un descuido futuro que mute el historial
+   por accidente es un `TypeError` inmediato, no una corrupción
+   silenciosa. Verificado con un smoke test directo (mutación, cruce,
+   intento de asignación directa → `FrozenInstanceError` como se espera).
+
+**Propuestas no aplicadas** (bajo impacto, quedan para más adelante si
+hace falta): guardar/documentar el supuesto de que `matriz_de_bajas_
+esperadas` (siembra `seed + i*1000 + j`) nunca ve más de 1000 clusters
+(hoy imposible dado el tamaño de campo); test explícito para
+`_build_snapshot()` llamado inmediatamente después de `reset()` sin
+ticks intermedios (donde vivía el bug 2).
+
+Verificado: 141/141 tests dirigidos (coevolución, línea de vista, radar
+dinámico, simulación, targeting) y 552/552 de la suite completa, sin
+regresiones.

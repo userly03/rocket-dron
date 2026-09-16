@@ -220,8 +220,20 @@ class SimulationEngine:
                 },
                 "estructuras": [e.to_dict() for e in self.estructuras],
                 "radar": {
-                    "origen_x": HPM_ORIGIN_X,
-                    "origen_y": HPM_ORIGIN_Y,
+                    # Posición ACTUAL del vehículo, no el origen fijo — el
+                    # radar comparte emplazamiento con el cañón y ya sigue
+                    # su posición real tras "shoot and scoot" (ver
+                    # Swarm.actualizar/origen_radar_x/y en _tick). Antes
+                    # este campo del snapshot se había quedado con las
+                    # constantes fijas HPM_ORIGIN_X/Y mientras la física de
+                    # detección ya usaba la posición viva — el anillo de
+                    # barrido del frontend se dibujaba en el punto viejo
+                    # aunque la detección real siguiera al vehículo movido
+                    # (bug encontrado en auditoría de backend, no de física:
+                    # el mismo patrón "seguir al vehículo" se corrigió en
+                    # un lugar y no se buscó en los demás).
+                    "origen_x": self.hpm.origen_x,
+                    "origen_y": self.hpm.origen_y,
                     "revisita_s": self.swarm.track_manager.revisita_s,
                     "fase_barrido": round(self.swarm.track_manager.fase_barrido(), 4),
                 },
@@ -318,6 +330,16 @@ class SimulationEngine:
             for estructura in self.estructuras:
                 estructura.reset()
             self._objetivo_actual = ("vehiculo", None)
+            # Sin esto, swarm.objetivo_x/y quedan con el valor de la
+            # corrida anterior (solo se recalculan dentro de _tick, que no
+            # corre mientras está detenida) — cualquiera que consulte
+            # /api/status entre este reset() y el próximo start() vería un
+            # objetivo de misión viejo, inconsistente con _objetivo_actual
+            # de la línea de arriba (bug encontrado en auditoría de
+            # backend). Se autocuraba en el primer tick si mision_activa,
+            # pero el snapshot podía mentir mientras tanto.
+            self.swarm.objetivo_x = None
+            self.swarm.objetivo_y = None
             self.analytics.reset()
             self.estado = SimulationState.DETENIDA
 
